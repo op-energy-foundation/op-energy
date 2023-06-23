@@ -5,7 +5,6 @@ let
   op-energy-account-service-overlay = import ./oe-account-service/op-energy-account-service/overlay.nix {
     GIT_COMMIT_HASH = GIT_COMMIT_HASH;
   };
-  op-energy-slowfastguess-api-overlay = import ./oe-slowfastguess-service/op-energy-slowfastguess-api/overlay.nix;
   op-energy-backend-overlay = import ./ope-blockspan-service/op-energy-backend/overlay.nix {
     GIT_COMMIT_HASH = GIT_COMMIT_HASH;
   };
@@ -17,7 +16,6 @@ let
       op-energy-backend-overlay
       op-energy-account-api-overlay
       op-energy-account-service-overlay
-      op-energy-slowfastguess-api-overlay
     ];
   };
   op-energy = {
@@ -25,7 +23,6 @@ let
     op-energy-backend = pkgs.op-energy-backend;
     op-energy-account-api = pkgs.op-energy-account-api;
     op-energy-account-service = pkgs.op-energy-account-service;
-    op-energy-slowfastguess-api = pkgs.op-energy-slowfastguess-api;
   };
 in
 op-energy // {
