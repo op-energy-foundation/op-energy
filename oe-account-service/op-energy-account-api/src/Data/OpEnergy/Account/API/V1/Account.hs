@@ -186,7 +186,7 @@ share [mkPersist sqlSettings, mkMigrate "migrateAccount"] [persistLowerCase|
 Person
   -- data
   uuid (UUID Person) -- will be used by other services as primary key. local relations should use PersonId instead
-  tokenHashed (Hashed ( Hashed AccountSecret))
+  hashedHashedSecret (Hashed ( Hashed AccountSecret))
   lastSeenTime POSIXTime Maybe
   lastUpdated POSIXTime -- either CreationTime or last time of the lastest update
   email EMailString Maybe -- can be empty (initially)
@@ -194,7 +194,7 @@ Person
   -- metadata
   creationTime POSIXTime
   -- constraints
-  UniquePersonTokenHashed tokenHashed
+  UniquePersonHashedHashedSecret hashedHashedSecret
   UniqueUUID uuid
   deriving Eq Show Generic
 
