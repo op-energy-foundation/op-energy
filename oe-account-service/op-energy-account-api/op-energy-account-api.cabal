@@ -1,0 +1,69 @@
+cabal-version:      2.4
+name:               op-energy-account-api
+version:            0.1.0.0
+
+-- A short (one-line) description of the package.
+-- synopsis:
+
+-- A longer description of the package.
+-- description:
+
+-- A URL where users can report bugs.
+-- bug-reports:
+
+-- The license under which the package is released.
+-- license:
+
+-- The package author(s).
+-- author:
+
+-- An email address to which users can send suggestions, bug reports, and patches.
+-- maintainer:
+
+-- A copyright notice.
+-- copyright:
+-- category:
+
+executable op-energy-account-api
+    main-is:          Main.hs
+
+    -- Modules included in this executable, other than Main.
+    -- other-modules:
+
+    -- LANGUAGE extensions used by modules in this package.
+    -- other-extensions:
+    build-depends:    base ^>=4.15.1.0
+                    , servant, servant-swagger
+                    , swagger2
+                    , op-energy-account-api
+                    , aeson
+                    , bytestring
+    hs-source-dirs:   app
+    default-language: Haskell2010
+
+library
+    hs-source-dirs: src
+    exposed-modules: Data.OpEnergy.Account.API
+                   , Data.OpEnergy.Account.API.V1
+                   , Data.OpEnergy.Account.API.V1.Account
+                   , Data.OpEnergy.Account.API.V1.Hash
+                   , Data.OpEnergy.Account.API.V1.UUID
+    build-depends:    base ^>=4.15.1.0
+                    , aeson
+                    , text
+                    , bytestring
+                    , servant, servant-swagger
+                    , servant-websockets
+                    , swagger2
+                    , time
+                    , lens
+                    , scientific
+                    , random
+                    , cryptohash-sha256
+                    , base16-bytestring
+                    , persistent
+                    , persistent-template
+                    , cereal
+                    , op-energy-api
+
+    ghc-options:    -O2 -Wall -Werror -Wno-unticked-promoted-constructors -fno-warn-name-shadowing -Wno-orphans

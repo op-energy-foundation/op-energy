@@ -1,0 +1,14 @@
+{
+  "DB_PORT": 5432,
+  "DB_HOST": "127.0.0.1",
+  "DB_USER": "sopenergy",
+  "DB_NAME": "sopenergy",
+  "DB_PASSWORD": "54a4bfc9474b0441d79172fe602d6804ecb79b5d01dc53f7b91aca8ad5c0796e",
+  "SECRET_SALT": "c0c9a2805dc980519f3ae436c3fb00c44e3b954ae8cd34973d4474de6956745f",
+  "API_HTTP_PORT": 8995,
+  "BTC_URL": "http://127.0.0.1:38332",
+  "BTC_USER": "sop-energy",
+  "BTC_PASSWORD": "b3605d1f5cddbe81577aee2f59af0be515b5855b0373ab84db2b14b863c18084",
+  "BTC_POLL_RATE_SECS": 10,
+  "SCHEDULER_POLL_RATE_SECS": 10
+}
