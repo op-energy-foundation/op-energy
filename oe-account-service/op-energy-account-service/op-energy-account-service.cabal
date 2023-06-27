@@ -37,6 +37,7 @@ executable op-energy-account-service
                     , monad-logger
                     , prometheus-client
                     , wai-middleware-prometheus
+                    , network
     hs-source-dirs:   app
     default-language: Haskell2010
     extensions:       OverloadedStrings
@@ -54,8 +55,11 @@ library
                    , OpEnergy.Account.Server.V1.WebSocketService
                    , OpEnergy.Account.Server.V1.WebSocketService.Message
                    , OpEnergy.Account.Server.V1.AccountService
---                   , OpEnergy.Account.Server.V1.AccountCache
---                   , OpEnergy.Account.Server.V1.AccountCache.Class
+                   , OpEnergy.BlockTimeStrike.Server
+                   , OpEnergy.BlockTimeStrike.Server.V1
+                   , OpEnergy.BlockTimeStrike.Server.V1.Class
+                   , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
+                   , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
                    , Data.Text.Show
     build-depends:    base ^>=4.15.1.0
                     , aeson

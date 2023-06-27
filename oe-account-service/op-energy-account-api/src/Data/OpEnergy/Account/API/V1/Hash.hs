@@ -95,4 +95,4 @@ hashSBS salt toSBS v =
 hashText :: Text-> (a -> Text) -> a -> Hashed a
 hashText salt _ _ | T.length salt < 1 = error "hashText: salt is empty"
 hashText salt toText v = hashSBS salt (BS.toShort . T.encodeUtf8 . toText) v
-  
+

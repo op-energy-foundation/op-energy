@@ -29,23 +29,19 @@ import           Data.Aeson
 import           Data.Text                  (Text)
 import qualified Data.Text.Encoding as      TE
 import qualified Data.Text as               T
-import           Data.Char(isAlphaNum)
+import           Data.Char(isAlphaNum, isSpace)
 import           Data.Word
 import           Data.Time.Clock.POSIX(POSIXTime)
 import           Data.ByteString.Short (ShortByteString)
 import qualified Data.ByteString.Short as BS (toShort, fromShort)
 import qualified Data.ByteString as BS (pack)
 
-import           Servant.API(ToHttpApiData(..), FromHttpApiData(..))
 import           Database.Persist.TH
 import           Database.Persist
 import           Database.Persist.Sql
 
-import           Data.OpEnergy.API.V1.Block(BlockHeight, defaultBlockHeight)
 import           Data.OpEnergy.Account.API.V1.UUID
 import           Data.OpEnergy.Account.API.V1.Hash
-import           Data.OpEnergy.API.V1.Block(BlockHash)
-import qualified Data.OpEnergy.API.V1.Hash as BlockHash (defaultHash)
 
 newtype AccountSecret = AccountSecret
   { unAccountSecret :: ShortByteString
@@ -67,6 +63,7 @@ instance ToParamSchema AccountSecret where
 defaultAccountSecret :: AccountSecret
 defaultAccountSecret = AccountSecret "a86c139a32e7dac42afe4265a955a0fd9d8c2885e26c7e92d4270b3813faa356"
 
+-- | you can think of this value as a JWT token, but we explicitely require it as part of API calls in order to be able to explicitely describe it with swagger spec
 newtype AccountToken = AccountToken
   { unAccountToken:: Text -- base64 encoded encrypted data
   }
@@ -83,6 +80,7 @@ instance ToSchema AccountToken where
 defaultAccountToken :: AccountToken
 defaultAccountToken = verifyAccountToken "h+3b0A7XIfbmjg=="
 
+-- | the goal of this function is to only filter out invalid input. It does not decode/decrypt/analyze payload, just filters out obviously incorrect base64 encoded string
 everifyAccountToken :: Text-> Either Text AccountToken
 everifyAccountToken raw =
   case () of
@@ -92,12 +90,14 @@ everifyAccountToken raw =
     limitedSize = T.copy $ T.take 2048 raw -- do not allow too big input
     isBase64Char c = isAlphaNum c || c == '=' || c == '+' || c == '/' || c == '_' || c == '-' || c == '*'
 
+-- | the goal of this function is to only filter out invalid input. It does not decode/decrypt/analyze payload, just filters out obviously incorrect base64 encoded string
 mverifyAccountToken :: Text-> Maybe AccountToken
 mverifyAccountToken v =
   case everifyAccountToken v of
     Left _ -> Nothing
     Prelude.Right r -> Just r
 
+-- | the goal of this function is to only filter out invalid input. It does not decode/decrypt/analyze payload, just filters out obviously incorrect base64 encoded string
 verifyAccountToken :: Text-> AccountToken
 verifyAccountToken v =
   case everifyAccountToken v of
@@ -149,20 +149,26 @@ instance PersistField DisplayName where
   fromPersistValue _ = Left $ "InputVerification.hs fromPersistValue DisplayName , expected Text"
 instance PersistFieldSql DisplayName where
   sqlType _ = SqlString
+instance ToJSON DisplayName where
+  toJSON (DisplayName s) = toJSON s
+instance FromJSON DisplayName where
+  parseJSON = withText "DisplayName" $ return . verifyDisplayName
+instance ToSchema DisplayName where
+  declareNamedSchema _ = return $ NamedSchema (Just "DisplayName") $ mempty
+    & type_ ?~ SwaggerString
+    & example ?~ toJSON defaultDisplayName
+
+defaultDisplayName :: DisplayName
+defaultDisplayName = DisplayName "user1234"
 
 everifyDisplayName:: Text-> Either Text DisplayName
 everifyDisplayName raw =
   case () of
-    _ | not (T.all isDomainChars domain) -> Left "DisplayName: domain contains wrong characters"
-    _ | T.length (T.filter ( =='.') domain) < 1 -> Left "DisplayName: there is no dots in domain"
-    _ | not (T.all isNameChars name) -> Left "DisplayName: name contains wrong characters"
+    _ | not (T.all isDisplayName limitedSize) -> Left "DisplayName: display name contains wrong characters"
     _ -> Prelude.Right (DisplayName limitedSize)
   where
     limitedSize = T.copy $! T.take 255 raw
-    name = T.takeWhile (/= '@') limitedSize
-    domain = T.drop (T.length name + 1) limitedSize
-    isDomainChars ch = isAlphaNum ch || ch == '.' || ch == '-'
-    isNameChars ch = isAlphaNum ch || ch == '.' || ch == '-'
+    isDisplayName ch = isAlphaNum ch || ch == '.' || ch == '-' || isSpace ch
 
 mverifyDisplayName:: Text-> Maybe DisplayName
 mverifyDisplayName raw =
@@ -185,145 +191,24 @@ data GuessResult
 share [mkPersist sqlSettings, mkMigrate "migrateAccount"] [persistLowerCase|
 Person
   -- data
-  uuid (UUID Person) -- will be used by other services as primary key. local relations should use PersonId instead
-  hashedHashedSecret (Hashed ( Hashed AccountSecret))
-  lastSeenTime POSIXTime Maybe
-  lastUpdated POSIXTime -- either CreationTime or last time of the lastest update
+  uuid (UUID Person) -- will be used by other services as foreign key. local relations should use PersonId instead. If you in doubt why not use only Key, then think if you will be able to ensure that Key won't be changed in case of archieving persons, that haven't been seen for a long time.
+  hashedSecret (Hashed AccountSecret) -- hash of the secret in order to not to store plain secrets
+  loginsCount Word64 -- this field contains an integer value of how many times person had performed login. Default is 0
   email EMailString Maybe -- can be empty (initially)
   displayName DisplayName
   -- metadata
   creationTime POSIXTime
+  lastSeenTime POSIXTime -- timestamp of the last seen time. By default the same as creationTime
+  lastUpdated POSIXTime -- either CreationTime or last time of the lastest update
   -- constraints
-  UniquePersonHashedHashedSecret hashedHashedSecret
+  UniquePersonHashedSecret hashedSecret
   UniqueUUID uuid
-  deriving Eq Show Generic
-
-BlockTimeStrikeFuture
-  -- data
-  block BlockHeight
-  nlocktime POSIXTime 
-  -- metadata
-  creationTime POSIXTime
-  -- constraints
-  UniqueBlockTimeStrikeFutureBlockNLockTime block nlocktime
-  deriving Eq Show Generic
-
-BlockTimeStrikeFutureGuess
-  -- data
-  guess SlowFast
-  -- metadata
-  creationTime POSIXTime
-  -- reflinks
-  person PersonId
-  strike BlockTimeStrikeFutureId
-  -- constraints
-  UniquePersonStrikeGuess person strike -- only 1 guess per strike is allowed for person
-  deriving Eq Show Generic
-
-BlockTimeStrikePast
-  -- data
-  block BlockHeight
-  nlocktime POSIXTime
-  observedResult SlowFast
-  observedBlockMediantime POSIXTime
-  observedBlockHash BlockHash
-  -- metadata
-  creationTime POSIXTime
-  futureStrikeCreationTime  POSIXTime
-  -- constraints
-  UniqueBlockTimeStrikePastBlockNLockTime block nlocktime -- for now it is forbidden to have multiple strikes of the same (block,nlocktime) values
-  deriving Eq Show Generic
-
-BlockTimeStrikePastGuess
-  -- data
-  guess SlowFast
-  observedResult SlowFast
-  -- metadata
-  creationTime POSIXTime
-  futureGuessCreationTime POSIXTime
-  -- reflinks
-  strike BlockTimeStrikePastId
-  person PersonId
-  -- constraints
-  UniquePersonStrikeGuessResult person strike -- only 1 guess per strike is allowed for person
+  UniqueDisplayName displayName -- it will be confusing if we will allow persons with identical names
   deriving Eq Show Generic
 |]
 
 defaultPOSIXTime :: POSIXTime
 defaultPOSIXTime = fromIntegral (0::Int)
-
-defaultBlockTimeStrikeFuture :: BlockTimeStrikeFuture
-defaultBlockTimeStrikeFuture = BlockTimeStrikeFuture
-  { blockTimeStrikeFutureBlock = defaultBlockHeight
-  , blockTimeStrikeFutureNlocktime = defaultPOSIXTime
-  , blockTimeStrikeFutureCreationTime = defaultPOSIXTime
-  }
-instance ToJSON BlockTimeStrikeFuture
-instance ToSchema BlockTimeStrikeFuture where
-  declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikeFuture") $ mempty
-    & type_ ?~ SwaggerObject
-    & example ?~ toJSON defaultBlockTimeStrikeFuture
-
-instance ToJSON BlockTimeStrikePast
-instance ToSchema BlockTimeStrikePast where
-  declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikePast") $ mempty
-    & type_ ?~ SwaggerObject
-    & example ?~ toJSON defaultBlockTimeStrikePast
-defaultBlockTimeStrikePast :: BlockTimeStrikePast
-defaultBlockTimeStrikePast = BlockTimeStrikePast
-  { blockTimeStrikePastBlock = defaultBlockHeight
-  , blockTimeStrikePastNlocktime = defaultPOSIXTime
-  , blockTimeStrikePastCreationTime = defaultPOSIXTime
-  , blockTimeStrikePastFutureStrikeCreationTime = defaultPOSIXTime
-  , blockTimeStrikePastObservedResult = defaultSlowFast
-  , blockTimeStrikePastObservedBlockMediantime = defaultPOSIXTime
-  , blockTimeStrikePastObservedBlockHash = BlockHash.defaultHash
-  }
-
-data BlockTimeStrikeGuessPublic = BlockTimeStrikeGuessPublic
-  { person :: UUID Person
-  , strike ::  BlockTimeStrikeFuture
-  , creationTime :: POSIXTime
-  , guess :: SlowFast
-  }
-  deriving (Eq, Show, Generic)
-instance ToJSON BlockTimeStrikeGuessPublic
-instance ToSchema BlockTimeStrikeGuessPublic where
-  declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikeGuessPublic") $ mempty
-    & type_ ?~ SwaggerObject
-    & example ?~ toJSON defaultBlockTimeStrikeGuessPublic
-
-defaultBlockTimeStrikeGuessPublic :: BlockTimeStrikeGuessPublic
-defaultBlockTimeStrikeGuessPublic = BlockTimeStrikeGuessPublic
-  { person = defaultUUID
-  , strike = defaultBlockTimeStrikeFuture
-  , creationTime = defaultPOSIXTime
-  , guess = defaultSlowFast
-  }
-
-data BlockTimeStrikeGuessResultPublic = BlockTimeStrikeGuessResultPublic
-  { person :: UUID Person
-  , strike :: BlockTimeStrikePast
-  , creationTime :: POSIXTime
-  , archiveTime :: POSIXTime
-  , guess :: SlowFast
-  , observedResult :: SlowFast
-  }
-  deriving (Eq, Show, Generic)
-instance ToJSON BlockTimeStrikeGuessResultPublic
-instance ToSchema BlockTimeStrikeGuessResultPublic where
-  declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikeGuessResultPublic") $ mempty
-    & type_ ?~ SwaggerObject
-    & example ?~ toJSON defaultBlockTimeStrikeGuessResultPublic
-defaultBlockTimeStrikeGuessResultPublic :: BlockTimeStrikeGuessResultPublic
-defaultBlockTimeStrikeGuessResultPublic = BlockTimeStrikeGuessResultPublic
-  { person = defaultUUID
-  , strike = defaultBlockTimeStrikePast
-  , creationTime = defaultPOSIXTime
-  , archiveTime = defaultPOSIXTime
-  , guess = defaultSlowFast
-  , observedResult = defaultSlowFast
-  }
 
 instance PersistField POSIXTime where
   toPersistValue posix = toPersistValue word
@@ -369,42 +254,3 @@ verifyAccountSecret raw =
   case everifyAccountSecret raw of
     Prelude.Right ret -> ret
     Left some -> error (show some)
-
-data SlowFast
-  = Slow
-  | Fast
-  deriving (Eq, Enum, Show)
-
-instance ToJSON SlowFast where
-  toJSON Slow = toJSON ("slow" :: Text)
-  toJSON Fast = toJSON ("fast" :: Text)
-instance FromJSON SlowFast where
-  parseJSON = withText "SlowFast" $! pure . verifySlowFast
-instance PersistField SlowFast where
-  toPersistValue Slow = toPersistValue ("slow"::Text)
-  toPersistValue Fast = toPersistValue ("fast"::Text)
-  fromPersistValue (PersistText "slow") = Prelude.Right $! Slow
-  fromPersistValue (PersistText "fast") = Prelude.Right $! Fast
-  fromPersistValue _ = Left $ "fromPersistValue SlowFastGuess, expected Text"
-instance PersistFieldSql SlowFast where
-  sqlType _ = SqlString
-
-instance ToParamSchema SlowFast where
-  toParamSchema _ = mempty
-    & type_ ?~ SwaggerString
-    & enum_ ?~ (map toJSON $ enumFrom Slow)
-instance ToHttpApiData SlowFast where
-  toUrlPiece Slow = "slow"
-  toUrlPiece Fast = "fast"
-instance FromHttpApiData SlowFast where
-  parseUrlPiece "slow" = Prelude.Right Slow
-  parseUrlPiece "fast" = Prelude.Right Slow
-  parseUrlPiece _ = Left "wrong SlowFast value"
-  
-defaultSlowFast :: SlowFast
-defaultSlowFast = Slow
-
-verifySlowFast :: Text-> SlowFast
-verifySlowFast "slow" = Slow
-verifySlowFast "fast" = Fast
-verifySlowFast _ = error "verifySlowFast: wrong value"
