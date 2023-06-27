@@ -14,9 +14,14 @@ import           Servant (Handler)
 import           Data.Pool(Pool)
 import           Database.Persist.Postgresql (SqlBackend)
 
+import           Prometheus(MonadMonitor(..))
+
 import           Data.OpEnergy.Account.API.V1.Account
 import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.Account.Server.V1.Metrics
+
+instance MonadMonitor Handler where
+  doIO = liftIO
 
 type LogFunc = Loc -> LogSource -> LogLevel -> LogStr -> IO ()
 

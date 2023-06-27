@@ -78,7 +78,7 @@ instance FromJSON Key where
   parseJSON = withText "Key" $ \v-> case Base64.decode $! Text.encodeUtf8 v of
     Right some -> case ClientSession.initKey some of
       Right key -> return key
-      Left err -> error ("ERROR: FromJSON Key/ClientSession.initKey: " ++ err)
+      Left err -> error ("ERROR: FromJSON Key/ClientSession.initKey: " ++ err ++ ". Please generate it with \"dd if=/dev/urandom bs=1 count=96 2>/dev/null | base64 -w 0\" command")
     Left err -> error ("ERROR: FromJSON Key: " ++ err)
 
 defaultConfig:: Config
@@ -96,7 +96,7 @@ defaultConfig = Config
   , configLogLevelMin = LevelWarn
   , configPrometheusPort = 7899
   , configCacheChunkSize = 50000
-  , configAccountTokenEncryptionPrivateKey = error "defaultConfig: you are missing ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY from config. Please generate it with \"dd if=/dev/urandom bs=1 count=96 2>/dev/null | base64\" command"
+  , configAccountTokenEncryptionPrivateKey = error "defaultConfig: you are missing ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY from config. Please generate it with \"dd if=/dev/urandom bs=1 count=96 2>/dev/null | base64 -w 0\" command"
   }
 
 getConfigFromEnvironment :: IO Config

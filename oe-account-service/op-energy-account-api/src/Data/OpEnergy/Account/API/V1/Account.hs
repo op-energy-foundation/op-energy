@@ -29,7 +29,7 @@ import           Data.Aeson
 import           Data.Text                  (Text)
 import qualified Data.Text.Encoding as      TE
 import qualified Data.Text as               T
-import           Data.Char(isAlphaNum)
+import           Data.Char(isAlphaNum, isSpace)
 import           Data.Word
 import           Data.Time.Clock.POSIX(POSIXTime)
 import           Data.ByteString.Short (ShortByteString)
@@ -149,20 +149,26 @@ instance PersistField DisplayName where
   fromPersistValue _ = Left $ "InputVerification.hs fromPersistValue DisplayName , expected Text"
 instance PersistFieldSql DisplayName where
   sqlType _ = SqlString
+instance ToJSON DisplayName where
+  toJSON (DisplayName s) = toJSON s
+instance FromJSON DisplayName where
+  parseJSON = withText "DisplayName" $ return . verifyDisplayName
+instance ToSchema DisplayName where
+  declareNamedSchema _ = return $ NamedSchema (Just "DisplayName") $ mempty
+    & type_ ?~ SwaggerString
+    & example ?~ toJSON defaultDisplayName
+
+defaultDisplayName :: DisplayName
+defaultDisplayName = DisplayName "user1234"
 
 everifyDisplayName:: Text-> Either Text DisplayName
 everifyDisplayName raw =
   case () of
-    _ | not (T.all isDomainChars domain) -> Left "DisplayName: domain contains wrong characters"
-    _ | T.length (T.filter ( =='.') domain) < 1 -> Left "DisplayName: there is no dots in domain"
-    _ | not (T.all isNameChars name) -> Left "DisplayName: name contains wrong characters"
+    _ | not (T.all isDisplayName limitedSize) -> Left "DisplayName: display name contains wrong characters"
     _ -> Prelude.Right (DisplayName limitedSize)
   where
     limitedSize = T.copy $! T.take 255 raw
-    name = T.takeWhile (/= '@') limitedSize
-    domain = T.drop (T.length name + 1) limitedSize
-    isDomainChars ch = isAlphaNum ch || ch == '.' || ch == '-'
-    isNameChars ch = isAlphaNum ch || ch == '.' || ch == '-'
+    isDisplayName ch = isAlphaNum ch || ch == '.' || ch == '-' || isSpace ch
 
 mverifyDisplayName:: Text-> Maybe DisplayName
 mverifyDisplayName raw =
@@ -189,6 +195,7 @@ Person
   hashedHashedSecret (Hashed ( Hashed AccountSecret))
   lastSeenTime POSIXTime Maybe
   lastUpdated POSIXTime -- either CreationTime or last time of the lastest update
+  lastTokenCookie Word32 Maybe -- this field may contain the lastest token cookie, that randomly generated at each login
   email EMailString Maybe -- can be empty (initially)
   displayName DisplayName
   -- metadata

@@ -10,9 +10,6 @@ import qualified Data.ByteString.Short as BS (fromShort, toShort)
 import           GHC.Generics
 import           Data.Typeable              (Typeable)
 import           Data.Aeson
--- import           Data.Swagger
--- import           Control.Lens
--- import           Servant.API
 import           Data.Char (isAlphaNum)
 import           Crypto.Hash.SHA256
 import qualified Data.ByteString.Base16 as Base16
@@ -22,7 +19,6 @@ import qualified Data.Text.Encoding as TE
 import           Data.Word
 import           Control.Monad (replicateM)
 import           System.Random(getStdRandom, randomR)
--- import           Database.Persist.TH
 import           Database.Persist
 import           Database.Persist.Sql
 
@@ -40,7 +36,7 @@ generateRandomUUID = do
   return $! UUID $! BS.toShort $! base16
 
 instance PersistField (UUID a) where
-  toPersistValue (UUID s) = toPersistValue $! BS.fromShort s
+  toPersistValue (UUID s) = toPersistValue $! TE.decodeUtf8 $! BS.fromShort s
   fromPersistValue (PersistText s) = Prelude.Right $! verifyUUID s
   fromPersistValue _ = Left $ "InputVerification.hs fromPersistValue Natural, expected Text"
 instance PersistFieldSql (UUID a) where

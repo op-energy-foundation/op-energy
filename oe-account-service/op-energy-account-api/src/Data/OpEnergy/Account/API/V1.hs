@@ -18,7 +18,6 @@ import           Data.Aeson
 
 import           Servant.API
 import           Servant.API.WebSocket (WebSocket)
-import           Data.Text                  (Text)
 
 import           Data.OpEnergy.API.V1(GitHashResponse)
 import           Data.OpEnergy.API.V1.Block
@@ -27,11 +26,7 @@ import           Data.OpEnergy.Account.API.V1.Account
 
 -- | API specifications of a backend service for Swagger
 type AccountV1API
-  = "ws"
-    :> Description "websockets handler"
-    :> WebSocket
-
-  :<|> "register"
+  = "register"
     :> Description "Registers new user and returns randomly generated account secret and account token.\n Account secret should be used for /login API encpoint.\n Account token should be used in the rest API calls as an authentication cookie"
     :> Post '[JSON] RegisterResult
 
@@ -119,13 +114,13 @@ instance ToSchema RegisterResult where
 
 data PostUserDisplayNameRequest = PostUserDisplayNameRequest
   { account_token :: AccountToken
-  , display_name :: Text
+  , display_name :: DisplayName
   }
   deriving (Show, Generic, Typeable)
 defaultPostUserDisplayNameRequest :: PostUserDisplayNameRequest
 defaultPostUserDisplayNameRequest = PostUserDisplayNameRequest
   { account_token = defaultAccountToken
-  , display_name = "newUserName"
+  , display_name = verifyDisplayName "newUserName"
   }
 instance ToJSON PostUserDisplayNameRequest
 instance FromJSON PostUserDisplayNameRequest

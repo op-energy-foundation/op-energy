@@ -17,7 +17,7 @@ import           Control.Monad.IO.Class( liftIO)
 import           Control.Monad.Logger (runStdoutLoggingT, logInfo, askLoggerIO, LoggingT)
 import           Prometheus(MonadMonitor(..))
 
-import           Data.OpEnergy.API
+import           Data.OpEnergy.Account.API
 import           OpEnergy.Account.Server
 import           OpEnergy.Account.Server.V1
 import           OpEnergy.Account.Server.V1.Config
@@ -28,14 +28,14 @@ import           OpEnergy.Account.Server.V1.Class (State(..), defaultState, runA
 -- | entry point
 main :: IO ()
 main = runStdoutLoggingT $ do
-  config <- liftIO $ OpEnergy.Server.V1.Config.getConfigFromEnvironment
-  (state, prometheusA) <- OpEnergy.Server.initState config
+  config <- liftIO $ OpEnergy.Account.Server.V1.Config.getConfigFromEnvironment
+  (state, prometheusA) <- OpEnergy.Account.Server.initState config
   runAppT state $ runLogging $ $(logInfo) "bootstrap tasks"
-  OpEnergy.Server.bootstrapTasks state
+  OpEnergy.Account.Server.bootstrapTasks state
   -- now spawn worker threads
   schedulerA <- liftIO $ asyncBound $ runAppT state $ do -- this is scheduler thread, which goal is to perform periodical tasks
     runLogging $ $(logInfo) "scheduler thread"
-    OpEnergy.Server.schedulerMainLoop
+    OpEnergy.Account.Server.schedulerMainLoop
   serverA <- liftIO $ asyncBound $ runAppT state $ do -- this thread is for serving HTTP/websockets requests
     runLogging $ $(logInfo) "serving API"
     runServer
