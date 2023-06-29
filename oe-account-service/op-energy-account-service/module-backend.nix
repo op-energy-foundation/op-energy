@@ -1,7 +1,7 @@
 { GIT_COMMIT_HASH}:
 args@{config, pkgs, options, lib, ...}:
 let
-  op-energy-overlay = (import ./overlay.nix) { GIT_COMMIT_HASH = GIT_COMMIT_HASH; };
+  op-energy-overlay = (import ../overlay.nix) { GIT_COMMIT_HASH = GIT_COMMIT_HASH; };
   initial_script = cfg:
     pkgs.writeText "initial_script.sql" ''
     do
