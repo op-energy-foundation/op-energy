@@ -29,6 +29,7 @@ type AccountAPI
 type BlockTimeAPI
   = "api" :> "v1" :> "blocktime" :> BlockTimeV1API {- V1 API -}
 
+-- | Composition of Account and Blocktime APIs
 type AccountBlockTimeAPI
   = AccountAPI :<|> BlockTimeAPI
 
@@ -38,7 +39,7 @@ type AccountSwaggerAPI
 type BlockTimeSwaggerAPI
   = "api" :> "v1" :> "blocktime" :> "swagger.json" :> Get '[JSON] Swagger
 
--- | Combined API of a Todo service with Swagger documentation.
+-- | Combined API of a Account, BlockTime services with Swagger documentation.
 type API
   = AccountSwaggerAPI
   :<|> AccountAPI

@@ -13,7 +13,6 @@
 module OpEnergy.Account.Server.V1
   ( schedulerIteration
   , accountServer
-  , blockTimeServer
   )where
 
 import           Servant
@@ -27,15 +26,14 @@ import           OpEnergy.Account.Server.V1.AccountService
 
 import           Prometheus(MonadMonitor)
 
+-- | this is the implementation of OpEnergy.Account.API.V1.AccountV1API. Check this type for the reference and API
+-- documentation
 accountServer :: ServerT AccountV1API (AppT Handler)
 accountServer
   = OpEnergy.Account.Server.V1.AccountService.register
   :<|> OpEnergy.Account.Server.V1.AccountService.login
   :<|> OpEnergy.Account.Server.V1.AccountService.postDisplayName
   :<|> oeGitHashGet
-
-blockTimeServer :: ServerT BlockTimeV1API (AppT Handler)
-blockTimeServer = undefined
 
 -- | one iteration that called from scheduler thread
 schedulerIteration :: (MonadIO m, MonadMonitor m) => AppT m ()
