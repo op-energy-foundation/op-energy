@@ -234,7 +234,7 @@ in
         ];
         script = ''
           set -ex
-          OPENERGY_BACKEND_CONFIG_FILE="${openergy_config}" op-energy-account-service +RTS -c -N -s
+          OPENERGY_ACCOUNT_BACKEND_CONFIG_FILE="${openergy_config}" op-energy-account-service +RTS -c -N -s
         '';
       };
     };
