@@ -163,7 +163,7 @@ in
 
           location /api/v1/account {
                   limit_req zone=api burst=10 nodelay;
-                  proxy_pass http://127.0.0.1:${cfg.api_port}/api/v1/account;
+                  proxy_pass http://127.0.0.1:${toString cfg.api_port}/api/v1/account;
           }
         '';
       };
