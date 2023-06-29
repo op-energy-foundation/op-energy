@@ -172,7 +172,7 @@ in
     nixpkgs.overlays = [
       op-energy-overlay # add op-energy-backend into context
     ];
-    environment.systemPackages = [ pkgs.op-energy-account-service ];
+    environment.systemPackages = [ pkgs.op-energy-api pkgs.op-energy-account-service ];
     # enable postgresql and declare op-energy DB
     services.postgresql = {
       enable = true;
