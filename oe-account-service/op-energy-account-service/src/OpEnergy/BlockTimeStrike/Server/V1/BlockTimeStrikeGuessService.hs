@@ -107,17 +107,16 @@ mgetBlockTimeStrikePast blockHeight nlocktime = do
         Nothing-> return Nothing
         Just strike -> return (Just strike)
 
-
 -- | O(ln accounts).
 -- Tries to create future block time strike. Requires authenticated user and blockheight should be in the future
 createBlockTimeStrikeFutureGuess :: AccountToken-> BlockHeight-> Natural Int-> SlowFast-> AppM ()
 createBlockTimeStrikeFutureGuess token blockHeight nlocktime guess = do
   State{ config = Config{ configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip = configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip
                         }
-       , blockTimeState = BlockTime.State{ currentTip = currentTipV }
+       , blockTimeState = BlockTime.State{ latestConfirmedBlock = latestConfirmedBlockV }
        } <- ask
-  mcurrentTip <- liftIO $ TVar.readTVarIO currentTipV
-  case mcurrentTip of
+  mlatestConfirmedBlock <- liftIO $ TVar.readTVarIO latestConfirmedBlockV
+  case mlatestConfirmedBlock of
     Nothing -> do
       let msg = "ERROR: there is no current tip yet"
       runLogging $ $(logError) msg

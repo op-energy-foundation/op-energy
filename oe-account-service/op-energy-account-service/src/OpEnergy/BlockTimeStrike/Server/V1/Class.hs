@@ -14,17 +14,16 @@ import           OpEnergy.Account.Server.V1.Config
 
 -- | defines the whole state used by backend
 data State = State
-  { currentTip :: TVar (Maybe BlockHeader) -- this variable will be used to check limits during creation of block time strikes and/or guesses
+  { latestConfirmedBlock :: TVar (Maybe BlockHeader) -- this variable will be used to check limits during creation of block time strikes and/or guesses
   , blockTimeStrikeCurrentTip :: MVar BlockHeader -- this variable will be used to notify BlockTimeStrikeService.newTipHandlerLoop about new current tip
   }
 
 -- | constructs default state with given config and DB pool
 defaultState :: MonadIO m => Config-> m State
 defaultState _ = do
-  _currentTip <- liftIO $ TVar.newTVarIO Nothing
-  _currentTip <- liftIO $ TVar.newTVarIO Nothing
+  latestConfirmedBlock <- liftIO $ TVar.newTVarIO Nothing
   blockTimeStrikeCurrentTipV <- liftIO $ MVar.newEmptyMVar
   return $ State
-    { currentTip = _currentTip -- websockets' init data relies on whole BlockHeader
+    { latestConfirmedBlock = latestConfirmedBlock -- websockets' init data relies on whole BlockHeader
     , blockTimeStrikeCurrentTip = blockTimeStrikeCurrentTipV
     }

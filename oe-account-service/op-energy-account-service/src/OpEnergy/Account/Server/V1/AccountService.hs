@@ -1,24 +1,7 @@
 {-- | This module implements Account service in terms of OpEnergy.Account.API.V1.AccountV1API API, which you may
  - be insteresting to check for API description.
  -
- - Implementation details below
- -
- - 1. AccountToken's payload is currently implemented as tuple (uuid, loginsCount) encoded into JSON then encryped with AES (see Web.ClientSession from clientsession library) and then encoded into base64 form. Where:
- -  - uuid is of type UUID Person, which is unique string;
- -  - loginsCount - is of type Word64 and it is a monotonically increasing integer.
- - The reasoning behind such payload content is that it allowes us to consider AccountTokens to be valid only when loginsCount in the token matches loginsCounts field in DB record. It is supposed, that loginsCount DB record field will
-will be updated each time user logins in with 'login' API call.
- - This way we are able to ensure, that:
- - 1. each user will get unique tokens within a range of [ 0; MAX Word64 value ];
- - 2. only 1 unique token is assumed to be valid;
- - 3. there is no possibility to use old leaked token to access any users other than owner of such token;
- - 4. when user will overflow MAX Word64 value of logins counts, he will start to get repeating tokens
- -
- - Current AccountToken implementation's goal is to address those attack vectors:
- - 1. secret leak. reduced possibility of leak by requiring it only once for login;
- - 2. token leak. reduced damage by invalidating previous tokens at each new login;
- - 3. using tokens to access other users accounts. Tokens are only valid for an owner of the token.
- - 4. token modification. In order to modify token, an attacker should know encryption key which is being used by backend.
+ - Implementation details are defined in op-energy/README.md
  -
  - TODO: we may consider:
  - 1. using some random value of say [ 0; 10000] as default value for loginsCount instead of 0;

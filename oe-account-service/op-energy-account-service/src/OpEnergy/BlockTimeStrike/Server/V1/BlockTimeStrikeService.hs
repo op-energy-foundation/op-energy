@@ -67,10 +67,10 @@ getBlockTimeStrikeFuture token = do
 createBlockTimeStrikeFuture :: AccountToken-> BlockHeight-> Natural Int-> AppM ()
 createBlockTimeStrikeFuture token blockHeight nlocktime = do
   State{ config = Config{ configBlockTimeStrikeMinimumBlockAheadCurrentTip = configBlockTimeStrikeMinimumBlockAheadCurrentTip}
-       , blockTimeState = BlockTime.State{ currentTip = currentTipV }
+       , blockTimeState = BlockTime.State{ latestConfirmedBlock = latestConfirmedBlockV }
        } <- ask
-  mcurrentTip <- liftIO $ TVar.readTVarIO currentTipV
-  case mcurrentTip of
+  mlatestConfirmedBlock <- liftIO $ TVar.readTVarIO latestConfirmedBlockV
+  case mlatestConfirmedBlock of
     Nothing -> do
       let msg = "ERROR: there is no current tip yet"
       runLogging $ $(logError) msg

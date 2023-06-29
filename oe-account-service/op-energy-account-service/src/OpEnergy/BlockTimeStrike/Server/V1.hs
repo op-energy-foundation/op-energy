@@ -103,12 +103,12 @@ runBlockSpanClient = do
       runAppT state $ do
         State{ blockTimeState =
                BlockTime.State
-               { currentTip = currentTipV
+               { latestConfirmedBlock = latestConfirmedBlockV
                , blockTimeStrikeCurrentTip = blockTimeStrikeCurrentTipV
                }
              } <- ask
 
         runLogging $ $(logInfo) $ "received new current tip height: " <> (tshow $ blockHeaderHeight header)
         liftIO $ do
-          STM.atomically $ TVar.writeTVar currentTipV (Just header) -- blocktime and guesses create handlers will need this info
+          STM.atomically $ TVar.writeTVar latestConfirmedBlockV (Just header) -- blocktime and guesses create handlers will need this info
           MVar.putMVar blockTimeStrikeCurrentTipV header -- this way we will notify handler about new current tip
