@@ -176,7 +176,7 @@ in
     # enable postgresql and declare op-energy DB
     services.postgresql = {
       enable = true;
-      ensureDatabases = "${cfg.db_name}";
+      ensureDatabases = [ "${cfg.db_name}" ];
       ensureUsers = {
         name = "${cfg.db_user}";
         ensurePermissions = {
