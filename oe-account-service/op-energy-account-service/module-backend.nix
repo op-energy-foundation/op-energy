@@ -177,12 +177,12 @@ in
     services.postgresql = {
       enable = true;
       ensureDatabases = [ "${cfg.db_name}" ];
-      ensureUsers = {
+      ensureUsers = [ {
         name = "${cfg.db_user}";
         ensurePermissions = {
           "DATABASE ${cfg.db_name}" = "ALL PRIVILEGES";
         };
-      };
+      } ];
     };
     systemd.services = {
       postgresql-op-energy-users = {
