@@ -81,86 +81,8 @@ in
   config = lib.mkIf cfg.enable {
     services.nginx = {
       enable = true;
-      appendConfig = ''
-        worker_processes auto;
-        worker_rlimit_nofile 100000;
-      '';
-      eventsConfig = ''
-        worker_connections 9000;
-        multi_accept on;
-      '';
-      serverTokens = false;
-      clientMaxBodySize = "10m";
-      commonHttpConfig = ''
-        sendfile on;
-        tcp_nopush on;
-        tcp_nodelay on;
-
-        server_name_in_redirect off;
-
-
-
-        # reset timed out connections freeing ram
-        reset_timedout_connection on;
-        # maximum time between packets the client can pause when sending nginx any data
-        client_body_timeout 10s;
-        # maximum time the client has to send the entire header to nginx
-        client_header_timeout 10s;
-        # timeout which a single keep-alive client connection will stay open
-        keepalive_timeout 69s;
-        # maximum time between packets nginx is allowed to pause when sending the client data
-        send_timeout 69s;
-
-        # number of requests per connection, does not affect SPDY
-        keepalive_requests 1337;
-
-        # enable gzip compression
-        gzip on;
-        gzip_vary on;
-        gzip_comp_level 6;
-        gzip_min_length 1000;
-        gzip_proxied expired no-cache no-store private auth;
-        # text/html is always compressed by gzip module
-        gzip_types application/javascript application/json application/ld+json application/manifest+json application/x-font-ttf application/x-web-app-manifest+json application/xhtml+xml application/xml font/opentype image/bmp image/svg+xml image/x-icon text/cache-manifest text/css text/plain text/vcard;
-
-        # limit request body size
-
-        # proxy cache
-        proxy_cache off;
-        proxy_cache_path /var/cache/nginx keys_zone=cache:20m levels=1:2 inactive=600s max_size=500m;
-
-        # exempt localhost from rate limit
-        geo $limited_ip {
-                default         1;
-                127.0.0.1       0;
-        }
-        map $limited_ip $limited_ip_key {
-                1 $binary_remote_addr;
-                0 \'\';
-        }
-
-        # rate limit requests
-        limit_req_zone $limited_ip_key zone=api:5m rate=200r/m;
-        limit_req_status 429;
-
-        # rate limit connections
-        limit_conn_zone $limited_ip_key zone=websocket:10m;
-        limit_conn_status 429;
-
-        server {
-                listen 127.0.0.1:80;
-        }
-      '';
       virtualHosts.op-energy = {
         extraConfig = ''
-          # enable browser and proxy caching
-          add_header Cache-Control "public, no-transform";
-          add_header 'Access-Control-Allow-Origin' '*' always;
-
-          # vary cache if user changes language preference
-          add_header Vary Accept-Language;
-          add_header Vary Cookie;
-
           location /api/v1/account {
                   limit_req zone=api burst=10 nodelay;
                   proxy_pass http://127.0.0.1:${toString cfg.api_port}/api/v1/account;
@@ -237,6 +159,11 @@ in
           OPENERGY_ACCOUNT_SERVICE_CONFIG_FILE="${openergy_config}" op-energy-account-service +RTS -c -N -s
         '';
       };
+    };
+    networking.firewall = {
+      allowedTCPPorts = [
+        cfg.api_port
+      ];
     };
   };
 }
