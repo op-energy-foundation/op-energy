@@ -35,8 +35,7 @@ type AccountV1API
     :> Description "Performs login with given account secret. Returns AccountToken value for being used with the rest API calls"
     :> Post '[JSON] AccountToken
 
-  :<|> "user"
-    :> "displayname"
+  :<|> "displayname"
     :> ReqBody '[JSON] PostUserDisplayNameRequest
     :> Description "Updates displayname for a given user"
     :> Post '[JSON] ()
