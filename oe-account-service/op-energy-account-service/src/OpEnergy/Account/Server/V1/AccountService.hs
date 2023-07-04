@@ -13,6 +13,12 @@ will be updated each time user logins in with 'login' API call.
  - 2. only 1 unique token is assumed to be valid;
  - 3. there is no possibility to use old leaked token to access any users other than owner of such token;
  - 4. when user will overflow MAX Word64 value of logins counts, he will start to get repeating tokens
+ -
+ - Current AccountToken implementation's goal is to address those attack vectors:
+ - 1. secret leak. reduced possibility of leak by requiring it only once for login;
+ - 2. token leak. reduced damage by invalidating previous tokens at each new login;
+ - 3. using tokens to access other users accounts. Tokens are only valid for an owner of the token.
+ - 4. token modification. In order to modify token, an attacker should know encryption key which is being used by backend.
  -}
 {-# LANGUAGE TemplateHaskell          #-}
 {-# LANGUAGE OverloadedStrings          #-}
