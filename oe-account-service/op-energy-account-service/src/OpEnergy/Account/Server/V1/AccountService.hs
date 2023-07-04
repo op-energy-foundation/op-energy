@@ -19,6 +19,12 @@ will be updated each time user logins in with 'login' API call.
  - 2. token leak. reduced damage by invalidating previous tokens at each new login;
  - 3. using tokens to access other users accounts. Tokens are only valid for an owner of the token.
  - 4. token modification. In order to modify token, an attacker should know encryption key which is being used by backend.
+ -
+ - TODO: we may consider:
+ - 1. using some random value of say [ 0; 10000] as default value for loginsCount instead of 0;
+ - 2. increasing loginsCount not by 1, but by random value [1;10000].
+ - This way we can increase an entropy in case of worries of lacking of randomness in token. This will reduce the time
+ - to overflow the loginsCount accumulator, but it is expected to happen at some point anyway...
  -}
 {-# LANGUAGE TemplateHaskell          #-}
 {-# LANGUAGE OverloadedStrings          #-}
