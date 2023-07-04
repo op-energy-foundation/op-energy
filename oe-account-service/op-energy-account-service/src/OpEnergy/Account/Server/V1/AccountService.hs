@@ -172,6 +172,7 @@ mgetPersonByDisplayName displayName = do
           return (Just (Entity key person { personLastSeenTime = now}))
 
 -- | 2 * O(ln n): lookup + update. This function returns Nothing if there is no Person exist in DB with given AccountToken. Otherwise, it will update LastSeenTime to the current UTC time and returns (Entity Person)
+-- this function is expected to be used by other services in order to authenticate user
 mgetPersonByAccountToken :: (MonadIO m, MonadMonitor m) => AccountToken-> AppT m (Maybe (Entity Person))
 mgetPersonByAccountToken token = do
   State{ config = Config { configAccountTokenEncryptionPrivateKey = configAccountTokenEncryptionPrivateKey
@@ -204,7 +205,7 @@ mgetPersonByAccountToken token = do
              
 
 
--- | see OpEnergy.Account.API.V1.AccountV1API for reference of 'register' API call
+-- | see OpEnergy.Account.API.V1.AccountV1API for reference of 'displayname' API call
 postDisplayName :: PostUserDisplayNameRequest -> AppM ()
 postDisplayName (PostUserDisplayNameRequest token newName) = do
   State{ accountDBPool = pool
