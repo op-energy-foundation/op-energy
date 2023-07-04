@@ -67,6 +67,7 @@ instance ToParamSchema AccountSecret where
 defaultAccountSecret :: AccountSecret
 defaultAccountSecret = AccountSecret "a86c139a32e7dac42afe4265a955a0fd9d8c2885e26c7e92d4270b3813faa356"
 
+-- | you can think of this value as a JWT token, but we explicitely require it as part of API calls in order to be able to explicitely describe it with swagger spec
 newtype AccountToken = AccountToken
   { unAccountToken:: Text -- base64 encoded encrypted data
   }
@@ -83,6 +84,7 @@ instance ToSchema AccountToken where
 defaultAccountToken :: AccountToken
 defaultAccountToken = verifyAccountToken "h+3b0A7XIfbmjg=="
 
+-- | the goal of this function is to only filter out invalid input. It does not decode/decrypt/analyze payload, just filters out obviously incorrect base64 encoded string
 everifyAccountToken :: Text-> Either Text AccountToken
 everifyAccountToken raw =
   case () of
@@ -92,12 +94,14 @@ everifyAccountToken raw =
     limitedSize = T.copy $ T.take 2048 raw -- do not allow too big input
     isBase64Char c = isAlphaNum c || c == '=' || c == '+' || c == '/' || c == '_' || c == '-' || c == '*'
 
+-- | the goal of this function is to only filter out invalid input. It does not decode/decrypt/analyze payload, just filters out obviously incorrect base64 encoded string
 mverifyAccountToken :: Text-> Maybe AccountToken
 mverifyAccountToken v =
   case everifyAccountToken v of
     Left _ -> Nothing
     Prelude.Right r -> Just r
 
+-- | the goal of this function is to only filter out invalid input. It does not decode/decrypt/analyze payload, just filters out obviously incorrect base64 encoded string
 verifyAccountToken :: Text-> AccountToken
 verifyAccountToken v =
   case everifyAccountToken v of
@@ -191,18 +195,19 @@ data GuessResult
 share [mkPersist sqlSettings, mkMigrate "migrateAccount"] [persistLowerCase|
 Person
   -- data
-  uuid (UUID Person) -- will be used by other services as primary key. local relations should use PersonId instead
-  hashedHashedSecret (Hashed ( Hashed AccountSecret))
-  lastSeenTime POSIXTime Maybe
-  lastUpdated POSIXTime -- either CreationTime or last time of the lastest update
-  lastTokenCookie Word32 Maybe -- this field may contain the lastest token cookie, that randomly generated at each login
+  uuid (UUID Person) -- will be used by other services as foreign key. local relations should use PersonId instead. If you in doubt why not use only Key, then think if you will be able to ensure that Key won't be changed in case of archieving persons, that haven't been seen for a long time.
+  hashedSecret (Hashed AccountSecret) -- hash of the secret in order to not to store plain secrets
+  loginsCount Word64 -- this field contains an integer value of how many times person had performed login. Default is 0
   email EMailString Maybe -- can be empty (initially)
   displayName DisplayName
   -- metadata
   creationTime POSIXTime
+  lastSeenTime POSIXTime -- timestamp of the last seen time. By default the same as creationTime
+  lastUpdated POSIXTime -- either CreationTime or last time of the lastest update
   -- constraints
-  UniquePersonHashedHashedSecret hashedHashedSecret
+  UniquePersonHashedSecret hashedSecret
   UniqueUUID uuid
+  UniqueDisplayName displayName -- it will be confusing if we will allow persons with identical names
   deriving Eq Show Generic
 
 BlockTimeStrikeFuture

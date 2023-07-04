@@ -27,6 +27,8 @@ newtype UUID a = UUID ShortByteString
 
 instance ToJSON (UUID a) where
   toJSON (UUID s) = toJSON $! TE.decodeUtf8 $! BS.fromShort s
+instance FromJSON (UUID a) where
+  parseJSON = withText "UUID" $ pure . verifyUUID
 
 
 generateRandomUUID :: IO (UUID a)

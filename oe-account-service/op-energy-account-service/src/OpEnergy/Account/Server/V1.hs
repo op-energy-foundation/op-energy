@@ -27,6 +27,8 @@ import           OpEnergy.Account.Server.V1.AccountService
 
 import           Prometheus(MonadMonitor)
 
+-- | this is the implementation of OpEnergy.Account.API.V1.AccountV1API. Check this type for the reference and API
+-- documentation
 accountServer :: ServerT AccountV1API (AppT Handler)
 accountServer
   = OpEnergy.Account.Server.V1.AccountService.register

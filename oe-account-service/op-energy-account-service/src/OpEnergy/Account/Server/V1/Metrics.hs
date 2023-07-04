@@ -19,50 +19,50 @@ import           Data.OpEnergy.API.V1.Positive
 
 -- | defines the whole state used by backend
 data MetricsState = MetricsState
-  { loadDBState :: P.Histogram
-  , accountLogin :: P.Histogram
+  { accountLogin :: P.Histogram
   , accountDBLookup :: P.Histogram
   , accountInsert :: P.Histogram
   , accountRegister :: P.Histogram
   , accountPostDisplayName :: P.Histogram
+  , accountUpdateLoginsCount :: P.Histogram
   , accountTokenEncrypt :: P.Histogram
   , accountTokenDecrypt :: P.Histogram
-  , accountGenerateUUIDSecret :: P.Histogram
   , accountMgetPersonByHashedSecret :: P.Histogram
   , accountMgetPersonByHashedSecretUpdatingTokenCookie :: P.Histogram
   , accountMgetPersonByHashedSecretTokenCookie :: P.Histogram
+  , accountMgetPersonByAccountToken :: P.Histogram
   }
 
 -- | constructs default state with given config and DB pool
 initMetrics :: MonadIO m => Config-> m MetricsState
 initMetrics _config = do
-  loadDBState <- P.register $ P.histogram (P.Info "loadDBState" "") microBuckets
   accountLogin <- P.register $ P.histogram (P.Info "accountLogin" "") microBuckets
   accountDBLookup <- P.register $ P.histogram (P.Info "accountDBLookup" "") microBuckets
   accountInsert <- P.register $ P.histogram (P.Info "accountInsert" "") microBuckets
   accountRegister <- P.register $ P.histogram (P.Info "register" "") microBuckets
+  accountUpdateLoginsCount <- P.register $ P.histogram (P.Info "accountUpdateLoginsCount" "") microBuckets
   accountPostDisplayName <- P.register $ P.histogram (P.Info "accountPostDisplayName" "") microBuckets
   accountTokenEncrypt <- P.register $ P.histogram (P.Info "accountTokenEncrypt" "") microBuckets
   accountTokenDecrypt <- P.register $ P.histogram (P.Info "accountTokenDecrypt" "") microBuckets
-  accountGenerateUUIDSecret <- P.register $ P.histogram (P.Info "accountGenerateUUIDSecret" "") microBuckets
   accountMgetPersonByHashedSecret <- P.register $ P.histogram (P.Info "accountMgetPersonByHashedSecret" "") microBuckets
   accountMgetPersonByHashedSecretUpdatingTokenCookie <- P.register $ P.histogram (P.Info "accountMgetPersonByHashedSecretUpdatingTokenCookie" "") microBuckets
   accountMgetPersonByHashedSecretTokenCookie <- P.register $ P.histogram (P.Info "accountMgetPersonByHashedSecretTokenCookie" "") microBuckets
+  accountMgetPersonByAccountToken <- P.register $ P.histogram (P.Info "accountMgetPersonByAccountToken" "") microBuckets
   _ <- P.register P.ghcMetrics
   _ <- P.register P.procMetrics
   return $ MetricsState
-    { loadDBState = loadDBState
-    , accountLogin = accountLogin
+    { accountLogin = accountLogin
     , accountDBLookup = accountDBLookup
     , accountInsert = accountInsert
     , accountRegister = accountRegister
+    , accountUpdateLoginsCount = accountUpdateLoginsCount
     , accountPostDisplayName = accountPostDisplayName
     , accountTokenDecrypt = accountTokenDecrypt
     , accountTokenEncrypt = accountTokenEncrypt
-    , accountGenerateUUIDSecret = accountGenerateUUIDSecret
     , accountMgetPersonByHashedSecret = accountMgetPersonByHashedSecret
     , accountMgetPersonByHashedSecretUpdatingTokenCookie = accountMgetPersonByHashedSecretUpdatingTokenCookie
     , accountMgetPersonByHashedSecretTokenCookie = accountMgetPersonByHashedSecretTokenCookie
+    , accountMgetPersonByAccountToken = accountMgetPersonByAccountToken
     }
   where
     microBuckets = [ 0.0000001 -- 100 nanoseconds
