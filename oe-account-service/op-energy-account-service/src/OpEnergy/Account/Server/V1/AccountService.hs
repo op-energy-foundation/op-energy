@@ -235,7 +235,7 @@ postDisplayName (PostUserDisplayNameRequest token newName) = do
             runLogging $ $(logError) msg
             throwError err404
 
--- | performs read from DB in order to set State.currentHeightTip
+-- | this function is being called on boot and supposed to be used to load some state from DB
 loadDBState :: AppT IO ()
 loadDBState = do
   -- TODO: maybe some cache fill and etc
