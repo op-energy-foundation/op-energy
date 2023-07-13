@@ -36,16 +36,12 @@ import           Data.ByteString.Short (ShortByteString)
 import qualified Data.ByteString.Short as BS (toShort, fromShort)
 import qualified Data.ByteString as BS (pack)
 
-import           Servant.API(ToHttpApiData(..), FromHttpApiData(..))
 import           Database.Persist.TH
 import           Database.Persist
 import           Database.Persist.Sql
 
-import           Data.OpEnergy.API.V1.Block(BlockHeight, defaultBlockHeight)
 import           Data.OpEnergy.Account.API.V1.UUID
 import           Data.OpEnergy.Account.API.V1.Hash
-import           Data.OpEnergy.API.V1.Block(BlockHash)
-import qualified Data.OpEnergy.API.V1.Hash as BlockHash (defaultHash)
 
 newtype AccountSecret = AccountSecret
   { unAccountSecret :: ShortByteString
@@ -209,133 +205,10 @@ Person
   UniqueUUID uuid
   UniqueDisplayName displayName -- it will be confusing if we will allow persons with identical names
   deriving Eq Show Generic
-
-BlockTimeStrikeFuture
-  -- data
-  block BlockHeight
-  nlocktime POSIXTime 
-  -- metadata
-  creationTime POSIXTime
-  -- constraints
-  UniqueBlockTimeStrikeFutureBlockNLockTime block nlocktime
-  deriving Eq Show Generic
-
-BlockTimeStrikeFutureGuess
-  -- data
-  guess SlowFast
-  -- metadata
-  creationTime POSIXTime
-  -- reflinks
-  person PersonId
-  strike BlockTimeStrikeFutureId
-  -- constraints
-  UniquePersonStrikeGuess person strike -- only 1 guess per strike is allowed for person
-  deriving Eq Show Generic
-
-BlockTimeStrikePast
-  -- data
-  block BlockHeight
-  nlocktime POSIXTime
-  observedResult SlowFast
-  observedBlockMediantime POSIXTime
-  observedBlockHash BlockHash
-  -- metadata
-  creationTime POSIXTime
-  futureStrikeCreationTime  POSIXTime
-  -- constraints
-  UniqueBlockTimeStrikePastBlockNLockTime block nlocktime -- for now it is forbidden to have multiple strikes of the same (block,nlocktime) values
-  deriving Eq Show Generic
-
-BlockTimeStrikePastGuess
-  -- data
-  guess SlowFast
-  observedResult SlowFast
-  -- metadata
-  creationTime POSIXTime
-  futureGuessCreationTime POSIXTime
-  -- reflinks
-  strike BlockTimeStrikePastId
-  person PersonId
-  -- constraints
-  UniquePersonStrikeGuessResult person strike -- only 1 guess per strike is allowed for person
-  deriving Eq Show Generic
 |]
 
 defaultPOSIXTime :: POSIXTime
 defaultPOSIXTime = fromIntegral (0::Int)
-
-defaultBlockTimeStrikeFuture :: BlockTimeStrikeFuture
-defaultBlockTimeStrikeFuture = BlockTimeStrikeFuture
-  { blockTimeStrikeFutureBlock = defaultBlockHeight
-  , blockTimeStrikeFutureNlocktime = defaultPOSIXTime
-  , blockTimeStrikeFutureCreationTime = defaultPOSIXTime
-  }
-instance ToJSON BlockTimeStrikeFuture
-instance ToSchema BlockTimeStrikeFuture where
-  declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikeFuture") $ mempty
-    & type_ ?~ SwaggerObject
-    & example ?~ toJSON defaultBlockTimeStrikeFuture
-
-instance ToJSON BlockTimeStrikePast
-instance ToSchema BlockTimeStrikePast where
-  declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikePast") $ mempty
-    & type_ ?~ SwaggerObject
-    & example ?~ toJSON defaultBlockTimeStrikePast
-defaultBlockTimeStrikePast :: BlockTimeStrikePast
-defaultBlockTimeStrikePast = BlockTimeStrikePast
-  { blockTimeStrikePastBlock = defaultBlockHeight
-  , blockTimeStrikePastNlocktime = defaultPOSIXTime
-  , blockTimeStrikePastCreationTime = defaultPOSIXTime
-  , blockTimeStrikePastFutureStrikeCreationTime = defaultPOSIXTime
-  , blockTimeStrikePastObservedResult = defaultSlowFast
-  , blockTimeStrikePastObservedBlockMediantime = defaultPOSIXTime
-  , blockTimeStrikePastObservedBlockHash = BlockHash.defaultHash
-  }
-
-data BlockTimeStrikeGuessPublic = BlockTimeStrikeGuessPublic
-  { person :: UUID Person
-  , strike ::  BlockTimeStrikeFuture
-  , creationTime :: POSIXTime
-  , guess :: SlowFast
-  }
-  deriving (Eq, Show, Generic)
-instance ToJSON BlockTimeStrikeGuessPublic
-instance ToSchema BlockTimeStrikeGuessPublic where
-  declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikeGuessPublic") $ mempty
-    & type_ ?~ SwaggerObject
-    & example ?~ toJSON defaultBlockTimeStrikeGuessPublic
-
-defaultBlockTimeStrikeGuessPublic :: BlockTimeStrikeGuessPublic
-defaultBlockTimeStrikeGuessPublic = BlockTimeStrikeGuessPublic
-  { person = defaultUUID
-  , strike = defaultBlockTimeStrikeFuture
-  , creationTime = defaultPOSIXTime
-  , guess = defaultSlowFast
-  }
-
-data BlockTimeStrikeGuessResultPublic = BlockTimeStrikeGuessResultPublic
-  { person :: UUID Person
-  , strike :: BlockTimeStrikePast
-  , creationTime :: POSIXTime
-  , archiveTime :: POSIXTime
-  , guess :: SlowFast
-  , observedResult :: SlowFast
-  }
-  deriving (Eq, Show, Generic)
-instance ToJSON BlockTimeStrikeGuessResultPublic
-instance ToSchema BlockTimeStrikeGuessResultPublic where
-  declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikeGuessResultPublic") $ mempty
-    & type_ ?~ SwaggerObject
-    & example ?~ toJSON defaultBlockTimeStrikeGuessResultPublic
-defaultBlockTimeStrikeGuessResultPublic :: BlockTimeStrikeGuessResultPublic
-defaultBlockTimeStrikeGuessResultPublic = BlockTimeStrikeGuessResultPublic
-  { person = defaultUUID
-  , strike = defaultBlockTimeStrikePast
-  , creationTime = defaultPOSIXTime
-  , archiveTime = defaultPOSIXTime
-  , guess = defaultSlowFast
-  , observedResult = defaultSlowFast
-  }
 
 instance PersistField POSIXTime where
   toPersistValue posix = toPersistValue word
@@ -381,42 +254,3 @@ verifyAccountSecret raw =
   case everifyAccountSecret raw of
     Prelude.Right ret -> ret
     Left some -> error (show some)
-
-data SlowFast
-  = Slow
-  | Fast
-  deriving (Eq, Enum, Show)
-
-instance ToJSON SlowFast where
-  toJSON Slow = toJSON ("slow" :: Text)
-  toJSON Fast = toJSON ("fast" :: Text)
-instance FromJSON SlowFast where
-  parseJSON = withText "SlowFast" $! pure . verifySlowFast
-instance PersistField SlowFast where
-  toPersistValue Slow = toPersistValue ("slow"::Text)
-  toPersistValue Fast = toPersistValue ("fast"::Text)
-  fromPersistValue (PersistText "slow") = Prelude.Right $! Slow
-  fromPersistValue (PersistText "fast") = Prelude.Right $! Fast
-  fromPersistValue _ = Left $ "fromPersistValue SlowFastGuess, expected Text"
-instance PersistFieldSql SlowFast where
-  sqlType _ = SqlString
-
-instance ToParamSchema SlowFast where
-  toParamSchema _ = mempty
-    & type_ ?~ SwaggerString
-    & enum_ ?~ (map toJSON $ enumFrom Slow)
-instance ToHttpApiData SlowFast where
-  toUrlPiece Slow = "slow"
-  toUrlPiece Fast = "fast"
-instance FromHttpApiData SlowFast where
-  parseUrlPiece "slow" = Prelude.Right Slow
-  parseUrlPiece "fast" = Prelude.Right Slow
-  parseUrlPiece _ = Left "wrong SlowFast value"
-  
-defaultSlowFast :: SlowFast
-defaultSlowFast = Slow
-
-verifySlowFast :: Text-> SlowFast
-verifySlowFast "slow" = Slow
-verifySlowFast "fast" = Fast
-verifySlowFast _ = error "verifySlowFast: wrong value"

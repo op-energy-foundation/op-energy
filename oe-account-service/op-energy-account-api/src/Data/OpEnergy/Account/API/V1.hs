@@ -23,6 +23,8 @@ import           Data.OpEnergy.API.V1(GitHashResponse)
 import           Data.OpEnergy.API.V1.Block
 import           Data.OpEnergy.API.V1.Natural
 import           Data.OpEnergy.Account.API.V1.Account
+import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
+import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
 
 -- | API specifications of a backend service for Swagger
 type AccountV1API
@@ -46,7 +48,7 @@ type AccountV1API
 
 type BlockTimeV1API
   = "ws"
-    :> Description "websockets handler"
+    :> Description "websockets handler. The goal is to be able to recieve"
     :> WebSocket
 
   :<|> "future"
