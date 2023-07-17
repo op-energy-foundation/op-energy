@@ -53,11 +53,13 @@ type BlockTimeV1API
 
   :<|> "future"
     :> "strike"
+    :> ReqBody '[JSON] AccountToken -- require authentication
     :> Description ""
     :> Get '[JSON] [BlockTimeStrikeFuture]
 
   :<|> "future"
     :> "strike"
+    :> ReqBody '[JSON] AccountToken -- require authentication
     :> Capture "BlockHeight" BlockHeight
     :> Capture "nLockTime" (Natural Int)
     :> Description ""
@@ -66,6 +68,7 @@ type BlockTimeV1API
   :<|> "future"
     :> "strike"
     :> "guess"
+    :> ReqBody '[JSON] AccountToken -- require authentication
     :> Capture "BlockHeight" BlockHeight
     :> Capture "nLockTime" (Natural Int)
     :> Description ""
@@ -74,6 +77,7 @@ type BlockTimeV1API
   :<|> "future"
     :> "strike"
     :> "guess"
+    :> ReqBody '[JSON] AccountToken -- require authentication
     :> Capture "BlockHeight" BlockHeight
     :> Capture "nLockTime" (Natural Int)
     :> Capture "guess" SlowFast
@@ -82,12 +86,14 @@ type BlockTimeV1API
 
   :<|> "past"
     :> "strike"
+    :> ReqBody '[JSON] AccountToken -- require authentication
     :> Description ""
     :> Get '[JSON] [BlockTimeStrikePast]
 
   :<|> "past"
     :> "strike"
     :> "guess"
+    :> ReqBody '[JSON] AccountToken -- require authentication
     :> Description ""
     :> Get '[JSON] [BlockTimeStrikeGuessResultPublic]
 
