@@ -1,4 +1,4 @@
 [submodule "ope-blockspan-service"]
-	branch = reorganize-repo
+	branch = main
 	path = ope-blockspan-service
 	url = ssh://git@github.com/girish-velas/ope-blockspan-service.git
