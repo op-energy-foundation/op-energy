@@ -79,7 +79,10 @@ runBlockSpanClient :: MonadIO m => AppT m ()
 runBlockSpanClient = do
   state@State{ config = Config { configBlockTimeStrikeBlockSpanAPIURL = burl}
              } <- ask
-  liftIO $ WS.runClient (baseUrlHost burl) (baseUrlPort burl) (baseUrlPath burl) (clientMain state)
+  liftIO $ do
+    runAppT state $ do
+        runLogging $ $(logInfo) $ "trying to connect to: " <> tshow burl
+    WS.runClient (baseUrlHost burl) (baseUrlPort burl) (baseUrlPath burl) (clientMain state)
   where
     clientMain :: State-> Connection-> IO ()
     clientMain state conn = do
