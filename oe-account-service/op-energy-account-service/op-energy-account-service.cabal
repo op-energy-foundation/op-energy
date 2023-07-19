@@ -37,6 +37,7 @@ executable op-energy-account-service
                     , monad-logger
                     , prometheus-client
                     , wai-middleware-prometheus
+                    , network
     hs-source-dirs:   app
     default-language: Haskell2010
     extensions:       OverloadedStrings
