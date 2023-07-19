@@ -16,6 +16,7 @@ import           Control.Exception as E
 import           Control.Monad.IO.Class( liftIO)
 import           Control.Monad.Logger (runStdoutLoggingT, logInfo, askLoggerIO, LoggingT)
 import           Prometheus(MonadMonitor(..))
+import           Network.Socket( withSocketDo)
 
 import           Data.OpEnergy.Account.API
 import           OpEnergy.Account.Server
@@ -28,7 +29,7 @@ import           OpEnergy.BlockTimeStrike.Server as BlockTimeStrike
 
 -- | entry point
 main :: IO ()
-main = runStdoutLoggingT $ do
+main = withSocketsDo {- needed for websocket client -} $ runStdoutLoggingT $ do
   config <- liftIO $ OpEnergy.Account.Server.V1.Config.getConfigFromEnvironment
   (state, prometheusA) <- OpEnergy.Account.Server.initState config
   runAppT state $ runLogging $ $(logInfo) "bootstrap tasks"
