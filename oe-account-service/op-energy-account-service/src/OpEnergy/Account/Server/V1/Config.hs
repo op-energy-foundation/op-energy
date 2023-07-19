@@ -57,7 +57,7 @@ data Config = Config
     -- ^ secret key used to encrypt/decrypt AccountToken
   , configBlockTimeStrikeMinimumBlockAheadCurrentTip :: Positive Int
     -- ^ this value defines the minimum amount of blocks that block time strike should be ahead of current tip to be accepted to be created
-  , configBlockTimeStrikeBlockSpanAPIURL :: BaseUrl
+  , configBlockTimeStrikeBlockSpanWebsocketAPIURL :: BaseUrl
     -- ^ defines URL of blockspan API service
   }
   deriving Show
@@ -78,7 +78,7 @@ instance FromJSON Config where
     <*> ( v .:? "CACHE_CHUNK_SIZE" .!= (configCacheChunkSize defaultConfig))
     <*> ( v .:? "ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY" .!= (configAccountTokenEncryptionPrivateKey defaultConfig))
     <*> ( v .:? "BLOCKTIME_STRIKE_MINIMUM_BLOCKS_AHEAD_CURRENT_TIP" .!= (configBlockTimeStrikeMinimumBlockAheadCurrentTip defaultConfig))
-    <*> ((v .:? "BLOCKTIME_STRIKE_BLOCKSPAN_API_URL" .!= (showBaseUrl $ configBlockTimeStrikeBlockSpanAPIURL defaultConfig)) >>= parseBaseUrl)
+    <*> ((v .:? "BLOCKTIME_STRIKE_BLOCKSPAN_WEBSOCKET_API_URL" .!= (showBaseUrl $ configBlockTimeStrikeBlockSpanWebsocketAPIURL defaultConfig)) >>= parseBaseUrl)
 
 -- need to get Key from json, which represented as base64-encoded string
 instance FromJSON Key where
@@ -105,7 +105,7 @@ defaultConfig = Config
   , configCacheChunkSize = 50000
   , configAccountTokenEncryptionPrivateKey = error "defaultConfig: you are missing ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY from config. Please generate it with \"dd if=/dev/urandom bs=1 count=96 2>/dev/null | base64 -w 0\" command"
   , configBlockTimeStrikeMinimumBlockAheadCurrentTip = 12 -- 6 blocks gives us the unconfirmed tip and 6 more gives minimum barrier ahead
-  , configBlockTimeStrikeBlockSpanAPIURL = BaseUrl Http "localhost" 8999 "/api/v1/ws"
+  , configBlockTimeStrikeBlockSpanWebsocketAPIURL = BaseUrl Http "127.0.0.1" 8999 "/api/v1/ws"
   }
 
 getConfigFromEnvironment :: IO Config

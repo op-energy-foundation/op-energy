@@ -23,10 +23,14 @@ import qualified Control.Concurrent.STM.TVar as TVar
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.Logger (logInfo)
 import           Control.Monad.IO.Class (liftIO)
+import           Data.Text (Text)
+import qualified Data.Text.Encoding as Text
 import           Data.Text.Show (tshow)
+import qualified Data.ByteString.Lazy as BS
 
 import           Network.WebSockets as WS( Connection, runClient, sendTextData, receiveData)
 import           Servant.Client(BaseUrl(..))
+import qualified Data.Aeson as Aeson
 import           Prometheus(MonadMonitor)
 
 import           Data.OpEnergy.Account.API.V1
@@ -77,7 +81,7 @@ schedulerIteration = return ()
 -- notifications about discover new current tip
 runBlockSpanClient :: MonadIO m => AppT m ()
 runBlockSpanClient = do
-  state@State{ config = Config { configBlockTimeStrikeBlockSpanAPIURL = burl}
+  state@State{ config = Config { configBlockTimeStrikeBlockSpanWebsocketAPIURL = burl}
              } <- ask
   liftIO $ do
     runAppT state $ do
@@ -91,8 +95,11 @@ runBlockSpanClient = do
     -- | receive new current tip notifications from backend
     receiveCurrentTipInLoop :: State -> Connection-> IO ()
     receiveCurrentTipInLoop state conn = do
-      (msg :: Message) <- WS.receiveData conn
-      handleMessage state msg
+      (tmsg :: Text) <- WS.receiveData conn
+      let (mmsg :: Maybe Message) = Aeson.decode $ BS.fromStrict $ Text.encodeUtf8 tmsg
+      case mmsg of
+        Just msg -> handleMessage state msg
+        Nothing -> return ()
       receiveCurrentTipInLoop state conn
     -- | handle new message
     handleMessage _ MessagePong = return () -- ignore pong message
