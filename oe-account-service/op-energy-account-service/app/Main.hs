@@ -16,7 +16,7 @@ import           Control.Exception as E
 import           Control.Monad.IO.Class( liftIO)
 import           Control.Monad.Logger (runStdoutLoggingT, logInfo, askLoggerIO, LoggingT)
 import           Prometheus(MonadMonitor(..))
-import           Network.Socket( withSocketDo)
+import           Network.Socket( withSocketsDo)
 
 import           Data.OpEnergy.Account.API
 import           OpEnergy.Account.Server
