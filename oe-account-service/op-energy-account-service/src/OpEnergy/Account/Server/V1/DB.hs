@@ -30,6 +30,8 @@ import           Database.Persist.Postgresql
 
 import           OpEnergy.Account.Server.V1.Config
 import           Data.OpEnergy.Account.API.V1.Account
+import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
+import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
 import           Data.OpEnergy.API.V1.Positive(fromPositive)
 
 -- | connect to DB. Returns connection pool
@@ -44,7 +46,10 @@ getConnection config = do
   pool <- createPostgresqlPool
     connStr
     (fromPositive $ configDBConnectionPoolSize config)
-  liftIO $ flip runSqlPersistMPool pool $ runMigration migrateAccount -- perform necessary migrations. currently only BlockHeader table's migrations
+  liftIO $ flip runSqlPersistMPool pool $ do
+    runMigration migrateAccount -- perform necessary migrations. currently only BlockHeader table's migrations
+    runMigration migrateBlockTimeStrike
+    runMigration migrateBlockTimeStrikeGuess
   return pool
   where
     connStr = TE.encodeUtf8

@@ -17,6 +17,7 @@ import           Database.Persist.Postgresql (SqlBackend)
 import           Prometheus(MonadMonitor(..))
 
 import           Data.OpEnergy.Account.API.V1.Account
+import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.Account.Server.V1.Metrics
 
@@ -36,6 +37,8 @@ data State = State
   , logLevel :: TVar LogLevel
   , metrics :: MetricsState
   -- ^ contains metrics handlers
+  , blockTimeState :: BlockTime.State
+  -- ^ block time strike state
   }
 
 type AppT = ReaderT State
@@ -45,12 +48,14 @@ type AppM = ReaderT State Handler
 defaultState :: (MonadLoggerIO m ) => Config-> MetricsState-> LogFunc-> Pool SqlBackend-> m State
 defaultState config metrics logFunc accountDBPool = do
   logLevelV <- liftIO $ TVar.newTVarIO (configLogLevelMin config)
+  blockTimeState <- BlockTime.defaultState config
   return $ State
     { config = config
     , accountDBPool = accountDBPool
     , logFunc = logFunc
     , logLevel = logLevelV
     , metrics = metrics
+    , blockTimeState = blockTimeState
     }
 
 -- | Runs app transformer with given context

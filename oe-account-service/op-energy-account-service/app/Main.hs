@@ -23,6 +23,7 @@ import           OpEnergy.Account.Server.V1
 import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.Account.Server.V1.Metrics
 import           OpEnergy.Account.Server.V1.Class (State(..), defaultState, runAppT, runLogging)
+import           OpEnergy.BlockTimeStrike.Server as BlockTimeStrike
 
 
 -- | entry point
@@ -36,6 +37,12 @@ main = runStdoutLoggingT $ do
   schedulerA <- liftIO $ asyncBound $ runAppT state $ do -- this is scheduler thread, which goal is to perform periodical tasks
     runLogging $ $(logInfo) "scheduler thread"
     OpEnergy.Account.Server.schedulerMainLoop
+  schedulerBlockTimeStrikeA <- liftIO $ asyncBound $ runAppT state $ do -- this is scheduler thread, which goal is to perform periodical tasks
+    runLogging $ $(logInfo) "scheduler thread blocktime strike"
+    BlockTimeStrike.schedulerMainLoop
+  blockTimeStrikeWebsocketClientA <- liftIO $ asyncBound $ runAppT state $ do -- this thread is for serving HTTP/websockets requests
+    runLogging $ $(logInfo) "block time strike websocket client API"
+    BlockTimeStrike.runBlockSpanClient
   serverA <- liftIO $ asyncBound $ runAppT state $ do -- this thread is for serving HTTP/websockets requests
     runLogging $ $(logInfo) "serving API"
     runServer
@@ -43,5 +50,7 @@ main = runStdoutLoggingT $ do
     [ serverA
     , schedulerA
     , prometheusA
+    , schedulerBlockTimeStrikeA
+    , blockTimeStrikeWebsocketClientA
     ]
   return ()

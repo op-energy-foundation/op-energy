@@ -13,7 +13,6 @@
 module OpEnergy.Account.Server.V1
   ( schedulerIteration
   , accountServer
-  , blockTimeServer
   )where
 
 import           Servant
@@ -35,9 +34,6 @@ accountServer
   :<|> OpEnergy.Account.Server.V1.AccountService.login
   :<|> OpEnergy.Account.Server.V1.AccountService.postDisplayName
   :<|> oeGitHashGet
-
-blockTimeServer :: ServerT BlockTimeV1API (AppT Handler)
-blockTimeServer = undefined
 
 -- | one iteration that called from scheduler thread
 schedulerIteration :: (MonadIO m, MonadMonitor m) => AppT m ()

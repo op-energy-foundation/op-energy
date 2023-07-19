@@ -31,6 +31,9 @@ data MetricsState = MetricsState
   , accountMgetPersonByHashedSecretUpdatingTokenCookie :: P.Histogram
   , accountMgetPersonByHashedSecretTokenCookie :: P.Histogram
   , accountMgetPersonByAccountToken :: P.Histogram
+  , getBlockTimeStrikeFuture :: P.Histogram
+  , createBlockTimeStrikeFuture :: P.Histogram
+  , getBlockTimeStrikePast :: P.Histogram
   }
 
 -- | constructs default state with given config and DB pool
@@ -48,6 +51,9 @@ initMetrics _config = do
   accountMgetPersonByHashedSecretUpdatingTokenCookie <- P.register $ P.histogram (P.Info "accountMgetPersonByHashedSecretUpdatingTokenCookie" "") microBuckets
   accountMgetPersonByHashedSecretTokenCookie <- P.register $ P.histogram (P.Info "accountMgetPersonByHashedSecretTokenCookie" "") microBuckets
   accountMgetPersonByAccountToken <- P.register $ P.histogram (P.Info "accountMgetPersonByAccountToken" "") microBuckets
+  getBlockTimeStrikeFuture <- P.register $ P.histogram (P.Info "getBlockTimeStrikeFuture" "") microBuckets
+  createBlockTimeStrikeFuture <- P.register $ P.histogram (P.Info "createBlockTimeStrikeFuture" "") microBuckets
+  getBlockTimeStrikePast <- P.register $ P.histogram (P.Info "getBlockTimeStrikePast" "") microBuckets
   _ <- P.register P.ghcMetrics
   _ <- P.register P.procMetrics
   return $ MetricsState
@@ -63,6 +69,9 @@ initMetrics _config = do
     , accountMgetPersonByHashedSecretUpdatingTokenCookie = accountMgetPersonByHashedSecretUpdatingTokenCookie
     , accountMgetPersonByHashedSecretTokenCookie = accountMgetPersonByHashedSecretTokenCookie
     , accountMgetPersonByAccountToken = accountMgetPersonByAccountToken
+    , getBlockTimeStrikeFuture = getBlockTimeStrikeFuture
+    , createBlockTimeStrikeFuture = createBlockTimeStrikeFuture
+    , getBlockTimeStrikePast = getBlockTimeStrikePast
     }
   where
     microBuckets = [ 0.0000001 -- 100 nanoseconds
