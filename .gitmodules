@@ -1,4 +1,4 @@
 [submodule "ope-blockspan-service"]
-	branch = minimum-6-blocks-blockspans
+	branch = api-errors-should-return-error-body
 	path = ope-blockspan-service
 	url = ssh://git@github.com/girish-velas/ope-blockspan-service.git
