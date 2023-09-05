@@ -10,7 +10,7 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
   , calculateResultsLoop
   ) where
 
-import           Servant (err404, throwError)
+import           Servant (err404, throwError, errBody)
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.IO.Class (liftIO, MonadIO)
 import           Control.Monad.Logger(logDebug, logError)
@@ -20,6 +20,8 @@ import           Data.Maybe(fromJust)
 import qualified Control.Concurrent.STM.TVar as TVar
 import           Control.Monad(forM, forM_, forever)
 import           Control.Concurrent(threadDelay)
+import qualified Data.ByteString.Lazy as BS
+import qualified Data.Text.Encoding as Text
 
 import           Data.Text.Show(tshow)
 import           Database.Persist.Postgresql
@@ -45,11 +47,17 @@ getBlockTimeStrikeFutureGuesses :: AccountToken-> BlockHeight-> Natural Int-> Ap
 getBlockTimeStrikeFutureGuesses token blockHeight nlocktime = do
   mperson <- mgetPersonByAccountToken token
   case mperson of
-    Nothing -> throwError err404
+    Nothing -> do
+      let err = "ERROR: getBlockTimeStrikeFutureGuesses: failed to authenticate user"
+      runLogging $ $(logError) err
+      throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
     Just person -> do
       mret <- getBlockTimeStrikeFutureGuesses person
       case mret of
-        Nothing-> throwError err404
+        Nothing-> do
+          let err = "ERROR: getBlockTimeStrikeFutureGuesses: failed to get future strike for a given user"
+          runLogging $ $(logError) err
+          throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
         Just ret-> return ret
   where
     getBlockTimeStrikeFutureGuesses :: (MonadIO m, MonadMonitor m) => Entity Person -> AppT m (Maybe [BlockTimeStrikeGuessPublic])
@@ -118,33 +126,33 @@ createBlockTimeStrikeFutureGuess token blockHeight nlocktime guess = do
   mlatestConfirmedBlock <- liftIO $ TVar.readTVarIO latestConfirmedBlockV
   case mlatestConfirmedBlock of
     Nothing -> do
-      let msg = "ERROR: there is no current tip yet"
-      runLogging $ $(logError) msg
-      throwError err404
+      let err = "ERROR: createBlockTimeStrikeFutureGuess: there is no current tip yet"
+      runLogging $ $(logError) err
+      throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
     Just tip
       | blockHeaderMediantime tip > fromIntegral nlocktime -> do
-        let msg = "ERROR: nlocktime is in the past, which is not expected"
-        runLogging $ $(logError) msg
-        throwError err404
+        let err = "ERROR: createBlockTimeStrikeFutureGuess: nlocktime is in the past, which is not expected"
+        runLogging $ $(logError) err
+        throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
     Just tip
       | blockHeaderHeight tip + naturalFromPositive configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip > blockHeight -> do
-        let msg = "ERROR: block height for new block time strike should be in the future + minimum configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip"
-        runLogging $ $(logError) msg
-        throwError err404
+        let err = "ERROR: createBlockTimeStrikeFutureGuess: block height for new block time strike should be in the future + minimum configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip"
+        runLogging $ $(logError) err
+        throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
     _ -> do
       mperson <- mgetPersonByAccountToken token
       case mperson of
         Nothing-> do
-          let msg = "ERROR: person was not able to authenticate itself"
-          runLogging $ $(logError) msg
-          throwError err404
+          let err = "ERROR: createBlockTimeStrikeFutureGuess: person was not able to authenticate itself"
+          runLogging $ $(logError) err
+          throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
         Just (Entity personKey _) -> do
           mstrike <- mgetBlockTimeStrikeFuture blockHeight nlocktime
           case mstrike of
             Nothing-> do
-              let msg = "ERROR: future strike was not able to authenticate itself"
-              runLogging $ $(logError) msg
-              throwError err404
+              let err = "ERROR: createBlockTimeStrikeFutureGuess: future strike was not able to authenticate itself"
+              runLogging $ $(logError) err
+              throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
             Just (Entity strikeKey _) -> do
               createBlockTimeStrikeFutureGuess personKey strikeKey guess
   where
@@ -176,11 +184,11 @@ getBlockTimeStrikeGuessResults token blockHeight nlocktime = do
       case mstrike of
         Just strike-> getBlockTimeStrikeGuessResult person strike
         Nothing-> do
-          let msg = "ERROR: there is no past blocktime strike with given block height and nlocktime"
-          runLogging $ $(logError) msg
-          throwError err404
+          let err = "ERROR: getBlockTimeStrikeGuessResults: there is no past blocktime strike with given block height and nlocktime"
+          runLogging $ $(logError) err
+          throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
     Nothing -> do
-      let msg = "ERROR: person was not able to authenticate itself"
+      let msg = "ERROR: getBlockTimeStrikeGuessResults: person was not able to authenticate itself"
       runLogging $ $(logError) msg
       throwError err404
   where

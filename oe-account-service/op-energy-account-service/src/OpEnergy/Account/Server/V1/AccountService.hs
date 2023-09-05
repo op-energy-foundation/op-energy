@@ -19,7 +19,7 @@ module OpEnergy.Account.Server.V1.AccountService
   , mgetPersonByAccountToken -- supposed that another services will use this function to authenticate user
   ) where
 
-import           Servant (err404, throwError)
+import           Servant (err404, throwError, errBody)
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.IO.Class (liftIO, MonadIO)
 import           Control.Monad.Logger(logError)
@@ -104,7 +104,10 @@ login secret = do
     let hashedSecret = hashSBS configSalt unAccountSecret secret
     mperson <- mgetPersonByHashedSecret hashedSecret
     case mperson of
-      Nothing -> throwError err404
+      Nothing -> do
+        let err = "ERROR: login: failed to find user account with given secret"
+        runLogging $ $(logError) err
+        throwError err404{errBody = LBS.fromStrict (Text.encodeUtf8 err)}
       Just (Entity personKey person) -> do
         -- increase loginsCount returning new value
         loginsCount <- liftIO $! P.observeDuration accountUpdateLoginsCount $ flip runSqlPersistMPool pool $ do
@@ -196,9 +199,9 @@ postDisplayName (PostUserDisplayNameRequest token newName) = do
     mperson <- mgetPersonByAccountToken token
     case mperson of
       Nothing-> do
-        let msg = "ERROR: postDisplayName: invalid token"
-        runLogging $ $(logError) msg
-        throwError err404
+        let err = "ERROR: postDisplayName: invalid token"
+        runLogging $ $(logError) err
+        throwError err404 {errBody = LBS.fromStrict (Text.encodeUtf8 err)}
       Just ( Entity key _ ) -> do
         -- now we need to ensure, that new name do not overlaps with already existing
         mexists <- mgetPersonByDisplayName newName
@@ -211,9 +214,9 @@ postDisplayName (PostUserDisplayNameRequest token newName) = do
                          , PersonLastUpdated =. now
                          ]
           Just _ -> do
-            let msg = "ERROR: postDisplayName: user with given display name already exists"
-            runLogging $ $(logError) msg
-            throwError err404
+            let err = "ERROR: postDisplayName: user with given display name already exists"
+            runLogging $ $(logError) err
+            throwError err404 {errBody = LBS.fromStrict (Text.encodeUtf8 err)}
 
 -- | this function is being called on boot and supposed to be used to load some state from DB
 loadDBState :: AppT IO ()

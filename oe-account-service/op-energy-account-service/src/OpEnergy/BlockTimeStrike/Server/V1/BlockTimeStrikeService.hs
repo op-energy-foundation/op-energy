@@ -11,7 +11,7 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
   , archiveFutureStrikesLoop
   ) where
 
-import           Servant (err404, throwError)
+import           Servant (err404, throwError, errBody)
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.IO.Class (liftIO, MonadIO)
 import qualified Data.List as List
@@ -22,6 +22,8 @@ import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
 import qualified Control.Concurrent.STM.TVar as TVar
 import qualified Control.Concurrent.MVar as MVar
 import           Control.Concurrent(threadDelay)
+import qualified Data.ByteString.Lazy as BS
+import qualified Data.Text.Encoding as Text
 
 import           Database.Persist.Postgresql
 import           Prometheus(MonadMonitor)
@@ -48,9 +50,9 @@ getBlockTimeStrikeFuture token = do
   mperson <- mgetPersonByAccountToken token
   case mperson of
     Nothing -> do
-      let msg = "ERROR: authentication failure"
-      runLogging $ $(logError) msg
-      throwError err404
+      let err = "ERROR: getBlockTimeStrikeFuture: authentication failure"
+      runLogging $ $(logError) err
+      throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
     Just person -> getBlockTimeStrikeFuture person
   where
     getBlockTimeStrikeFuture :: (MonadIO m, MonadMonitor m) => Entity Person -> AppT m [BlockTimeStrikeFuture]
@@ -72,26 +74,26 @@ createBlockTimeStrikeFuture token blockHeight nlocktime = do
   mlatestConfirmedBlock <- liftIO $ TVar.readTVarIO latestConfirmedBlockV
   case mlatestConfirmedBlock of
     Nothing -> do
-      let msg = "ERROR: there is no current tip yet"
-      runLogging $ $(logError) msg
-      throwError err404
+      let err = "ERROR: createBlockTimeStrikeFuture: there is no current tip yet"
+      runLogging $ $(logError) err
+      throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
     Just tip
       | blockHeaderMediantime tip > fromIntegral nlocktime -> do
-        let msg = "ERROR: nlocktime is in the past, which is not expected"
-        runLogging $ $(logError) msg
-        throwError err404
+        let err = "ERROR: nlocktime is in the past, which is not expected"
+        runLogging $ $(logError) err
+        throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
     Just tip
       | blockHeaderHeight tip + naturalFromPositive configBlockTimeStrikeMinimumBlockAheadCurrentTip > blockHeight -> do
-        let msg = "ERROR: block height for new block time strike should be in the future + minimum configBlockTimeStrikeMinimumBlockAheadCurrentTip"
+        let msg = "ERROR: createBlockTimeStrikeFuture: block height for new block time strike should be in the future + minimum configBlockTimeStrikeMinimumBlockAheadCurrentTip"
         runLogging $ $(logError) msg
         throwError err404
     _ -> do
       mperson <- mgetPersonByAccountToken token
       case mperson of
         Nothing -> do
-          let msg = "ERROR: person was not able to authenticate itself"
-          runLogging $ $(logError) msg
-          throwError err404
+          let err = "ERROR: createBlockTimeStrikeFuture: person was not able to authenticate itself"
+          runLogging $ $(logError) err
+          throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
         Just person -> createBlockTimeStrikeFutureEsnuredConditions person
   where
     createBlockTimeStrikeFutureEsnuredConditions :: (MonadIO m, MonadMonitor m) => (Entity Person) -> AppT m ()
@@ -116,9 +118,9 @@ getBlockTimeStrikePast token = do
   mperson <- mgetPersonByAccountToken token
   case mperson of
     Nothing -> do
-      let msg = "ERROR: person was not able to authenticate itself"
-      runLogging $ $(logError) msg
-      throwError err404
+      let err = "ERROR: getBlockTimeStrikePast: person was not able to authenticate itself"
+      runLogging $ $(logError) err
+      throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
     Just person -> getBlockTimeStrikePast person
   where
     getBlockTimeStrikePast :: (MonadIO m, MonadMonitor m) => (Entity Person) -> AppT m [ BlockTimeStrikePast]
