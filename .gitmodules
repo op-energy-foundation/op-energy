@@ -1,4 +1,4 @@
 [submodule "ope-blockspan-service"]
-	branch = api-errors-should-return-error-body
+	branch = hashrate-widgets
 	path = ope-blockspan-service
 	url = ssh://git@github.com/girish-velas/ope-blockspan-service.git
