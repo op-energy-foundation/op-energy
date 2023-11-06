@@ -1,11 +1,11 @@
 {GIT_COMMIT_HASH}:
 let
-  op-energy-api-overlay = import ./ope-blockspan-service/op-energy-api/overlay.nix;
+  op-energy-api-overlay = import ./oe-blockspan-service/op-energy-api/overlay.nix;
   op-energy-account-api-overlay = import ./oe-account-service/op-energy-account-api/overlay.nix;
   op-energy-account-service-overlay = import ./oe-account-service/op-energy-account-service/overlay.nix {
     GIT_COMMIT_HASH = GIT_COMMIT_HASH;
   };
-  op-energy-backend-overlay = import ./ope-blockspan-service/op-energy-backend/overlay.nix {
+  op-energy-backend-overlay = import ./oe-blockspan-service/op-energy-backend/overlay.nix {
     GIT_COMMIT_HASH = GIT_COMMIT_HASH;
   };
   nixpkgs = fetchTarball "https://github.com/NixOS/nixpkgs/archive/4d2b37a84fad1091b9de401eb450aae66f1a741e.tar.gz";
