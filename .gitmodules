@@ -1,7 +1,3 @@
-[submodule "ope-blockspan-service"]
-	branch = main
-	path = ope-blockspan-service
-	url = ssh://git@github.com/girish-velas/ope-blockspan-service.git
 [submodule "oe-blockspan-service"]
 	path = oe-blockspan-service
 	url = ssh://git@github.com/op-energy-foundation/op-energy-blockspan-service
