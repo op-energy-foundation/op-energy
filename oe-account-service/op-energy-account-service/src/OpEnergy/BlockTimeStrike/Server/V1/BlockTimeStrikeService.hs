@@ -42,6 +42,7 @@ import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLog
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import qualified OpEnergy.Account.Server.V1.Metrics as Metrics(MetricsState(..))
 import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
+import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledFutureStrikeCreation as BlockTimeScheduledFutureStrikeCreation
 
 -- | O(ln users) + O(strike future)
 -- returns list BlockTimeStrikeFuture records. requires authenticated user
@@ -143,8 +144,6 @@ newTipHandlerLoop = forever $ do
   State{ blockTimeState = BlockTime.State
          { blockTimeStrikeCurrentTip = currentTipV
          }
-       , config = Config { configBlockspanURL = configBlockspanURL }
-       , accountDBPool = pool
        , metrics = Metrics.MetricsState { Metrics.getBlockTimeStrikeFuture = getBlockTimeStrikeFuture
                                         }
        } <- ask
@@ -153,53 +152,55 @@ newTipHandlerLoop = forever $ do
   runLogging $ $(logInfo) $ "BlockTimeStrikeService: tipHandler: received new current tip height: " <> (tshow $ blockHeaderHeight currentTip)
   -- find out any future strikes <= new current tip
   P.observeDuration getBlockTimeStrikeFuture $ do
-    liftIO $ flip runSqlPersistMPool pool $ do
-      futureBlocks <- selectList [ BlockTimeStrikeFutureBlock <=. blockHeaderHeight currentTip] []
-      forM_ futureBlocks $ \(Entity futureStrikeKey futureStrike) -> do
-        nowUTC <- liftIO getCurrentTime
-        let now = utcTimeToPOSIXSeconds nowUTC
-        -- create past block
-        blockHeader <-
-          if blockHeaderHeight currentTip == blockTimeStrikeFutureBlock futureStrike
-          then return currentTip -- if we already have this block header
-          else liftIO $! Blockspan.withClient configBlockspanURL $ getBlockByHeight (blockTimeStrikeFutureBlock futureStrike)
-        let pastStrike = BlockTimeStrikePast
-              { blockTimeStrikePastBlock = blockTimeStrikeFutureBlock futureStrike
-              , blockTimeStrikePastNlocktime = blockTimeStrikeFutureNlocktime futureStrike
-              , blockTimeStrikePastFutureStrikeCreationTime = blockTimeStrikeFutureCreationTime futureStrike
-              , blockTimeStrikePastObservedBlockMediantime = fromIntegral $ blockHeaderMediantime blockHeader
-              , blockTimeStrikePastObservedBlockHash = blockHeaderHash blockHeader
-              , blockTimeStrikePastCreationTime = now
-              , blockTimeStrikePastObservedResult =
-                if fromIntegral (blockHeaderMediantime blockHeader) <= blockTimeStrikeFutureNlocktime futureStrike
-                then Fast
-                else Slow
-              }
-        -- it is possible, that BlockTimeStrikePast already had been created, so we need to check if such strike exists and use it instead
-        pastStrikeKey <- do
+    moveFutureStrikesToPastStrikes currentTip
+    BlockTimeScheduledFutureStrikeCreation.maybeCreateFutureStrikes currentTip
+  where
+    moveFutureStrikesToPastStrikes currentTip = do
+      State{ config = Config { configBlockspanURL = configBlockspanURL }
+           , accountDBPool = pool
+           } <- ask
+      liftIO $ flip runSqlPersistMPool pool $ do
+        futureBlocks <- selectList [ BlockTimeStrikeFutureBlock <=. blockHeaderHeight currentTip] []
+        forM_ futureBlocks $ \(Entity futureStrikeKey futureStrike) -> do
+          nowUTC <- liftIO getCurrentTime
+          let now = utcTimeToPOSIXSeconds nowUTC
+          -- create past block
+          blockHeader <-
+            if blockHeaderHeight currentTip == blockTimeStrikeFutureBlock futureStrike
+            then return currentTip -- if we already have this block header
+            else liftIO $! Blockspan.withClient configBlockspanURL $ getBlockByHeight (blockTimeStrikeFutureBlock futureStrike)
+          -- it is possible, that BlockTimeStrikePast already had been created, so we need to check if such strike exists and ignore it
           mexist <- selectFirst
-            [ BlockTimeStrikePastBlock ==. blockTimeStrikePastBlock pastStrike
-            , BlockTimeStrikePastNlocktime ==. blockTimeStrikePastNlocktime pastStrike
+            [ BlockTimeStrikePastBlock ==. blockTimeStrikeFutureBlock futureStrike
+            , BlockTimeStrikePastNlocktime ==. blockTimeStrikeFutureNlocktime futureStrike
             ]
             []
           case mexist of
-            Nothing -> insert pastStrike
-            Just (Entity key _ )-> return key
-        let observedBlock = BlockTimeStrikeFutureObservedBlock
-              { blockTimeStrikeFutureObservedBlockFutureStrike = futureStrikeKey
-              , blockTimeStrikeFutureObservedBlockPastStrike = pastStrikeKey
-              , blockTimeStrikeFutureObservedBlockFutureStrikeBlock = blockTimeStrikeFutureBlock futureStrike
-              , blockTimeStrikeFutureObservedBlockFutureStrikeNlocktime = blockTimeStrikeFutureNlocktime futureStrike
-              }
-        _ <- do
-          -- ensure, that there is no observed block exist yet, that we may created on the previous run
-          mexist <- selectFirst [ BlockTimeStrikeFutureObservedBlockFutureStrikeBlock ==. blockTimeStrikeFutureBlock futureStrike
-                                , BlockTimeStrikeFutureObservedBlockFutureStrikeNlocktime ==. blockTimeStrikeFutureNlocktime futureStrike
-                                ] []
-          case mexist of
-            Nothing-> insert observedBlock -- we are sure, that no observed block exist yet
-            Just (Entity key _) -> return key -- this means, that we had already created appropriate block time strike past entity previously and future strike will be cleanedup when it will be ready
-        return ()
+            Nothing -> do
+              let pastStrike = BlockTimeStrikePast
+                    { blockTimeStrikePastBlock = blockTimeStrikeFutureBlock futureStrike
+                    , blockTimeStrikePastNlocktime = blockTimeStrikeFutureNlocktime futureStrike
+                    , blockTimeStrikePastFutureStrikeCreationTime = blockTimeStrikeFutureCreationTime futureStrike
+                    , blockTimeStrikePastObservedBlockMediantime = fromIntegral $ blockHeaderMediantime blockHeader
+                    , blockTimeStrikePastObservedBlockHash = blockHeaderHash blockHeader
+                    , blockTimeStrikePastCreationTime = now
+                    , blockTimeStrikePastObservedResult =
+                      if fromIntegral (blockHeaderMediantime blockHeader) <= blockTimeStrikeFutureNlocktime futureStrike
+                      then Fast
+                      else Slow
+                    }
+              pastStrikeKey <- insert pastStrike
+              let observedBlock = BlockTimeStrikeFutureObservedBlock
+                    { blockTimeStrikeFutureObservedBlockFutureStrike = futureStrikeKey
+                    , blockTimeStrikeFutureObservedBlockPastStrike = pastStrikeKey
+                    , blockTimeStrikeFutureObservedBlockFutureStrikeBlock = blockTimeStrikeFutureBlock futureStrike
+                    , blockTimeStrikeFutureObservedBlockFutureStrikeNlocktime = blockTimeStrikeFutureNlocktime futureStrike
+                    }
+              -- if there were no past strike yet, then observed is not exist as well
+              _ <- insert observedBlock -- we are sure, that no observed block exist yet
+              return ()
+            Just _ -> -- past strike exists, ignore it
+              return ()
 
 -- | this function is an entry point of thread, that removes BlockTimeStrikeFuture record when all the guesses had been
 -- already moved into results and thus there are no more references to the current record

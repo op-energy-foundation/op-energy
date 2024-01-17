@@ -60,6 +60,7 @@ library
                    , OpEnergy.BlockTimeStrike.Server.V1.Class
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
+                   , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledFutureStrikeCreation
                    , Data.Text.Show
     build-depends:    base ^>=4.15.1.0
                     , aeson

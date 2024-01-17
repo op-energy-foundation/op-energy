@@ -250,7 +250,12 @@ calculateResultsLoop = forever $ do
                 -- remove guess
                 delete guessId
               -- remove observedBlock
-              delete observedBlockKey
+              _ <- delete observedBlockKey
+              liftIO $ runAppT state $ do
+                runLogging $ $(logDebug) $ "calculateResultsLoop: removed observedBlockKey "
+                  <> tshow (blockTimeStrikePastBlock pastStrike) <> " , "
+                  <> tshow (blockTimeStrikeFutureBlock futureStrike)
+                  <> ", observedBlockKey : " <> tshow observedBlockKey
               -- mark blocktime strike future as ready to be removed
               _ <- insert $ BlockTimeStrikeFutureReadyToRemove
                 { blockTimeStrikeFutureReadyToRemoveFutureStrike = (blockTimeStrikeFutureObservedBlockFutureStrike observedBlock)
