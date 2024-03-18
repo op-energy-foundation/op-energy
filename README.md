@@ -374,6 +374,21 @@ sequenceDiagram
     end
 ```
 
+### automatic future block time strike creation
+
+Blocktime service provides automaticall creation of future strikes during handling latest confirmed block event. See oe-account-service/op-energy-account-service/src/OpEnergy/BlockTimeStrike/Server/V1/BlockTimeScheduledFutureStrikeCreation.hs for implementation. Current implementation ensures, that there are future strike exist in range `[ minimumFutureStrikeHeight, maximumFutureStrikeHeight]`, where:
+
+```haskell
+  minimumFutureStrikeHeight = blockHeaderHeight currentTip + configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip
+  maximumFutureStrikeHeight = blockHeaderHeight currentTip + configBlockTimeFutureStrikeShouldExistsAheadCurrentTip
+```
+
+```mermaid
+sequenceDiagram
+    blockspan service -> blocktime service: current tip event message (websocket)
+    blocktime service ->> blocktime service: ensureFutureStrikeExistsAhead(currentTip)
+```
+
 ### viewing list of block time strikes
 
 ```mermaid

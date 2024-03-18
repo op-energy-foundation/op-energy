@@ -38,6 +38,7 @@ data MetricsState = MetricsState
   , mgetBlockTimeStrikeFuture :: P.Histogram
   , createBlockTimeStrikeFutureGuess :: P.Histogram
   , mgetBlockTimeStrikePast :: P.Histogram
+  , ensureFutureStrikeExistsAhead :: P.Histogram
   }
 
 -- | constructs default state with given config and DB pool
@@ -61,7 +62,8 @@ initMetrics _config = do
   getBlockTimeStrikeFutureGuesses <- P.register $ P.histogram (P.Info "getBlockTimeStrikeFutureGuesses" "") microBuckets
   mgetBlockTimeStrikeFuture <- P.register $ P.histogram (P.Info "mgetBlockTimeStrikeFuture" "") microBuckets
   createBlockTimeStrikeFutureGuess <- P.register $ P.histogram (P.Info "createBlockTimeStrikeFutureGuess" "") microBuckets
-  mgetBlockTimeStrikePast <- P.register $ P.histogram (P.Info "mgetBlockTimeStrikePast " "") microBuckets
+  mgetBlockTimeStrikePast <- P.register $ P.histogram (P.Info "mgetBlockTimeStrikePast" "") microBuckets
+  ensureFutureStrikeExistsAhead <- P.register $ P.histogram (P.Info "ensureFutureStrikeExistsAhead" "") microBuckets
   _ <- P.register P.ghcMetrics
   _ <- P.register P.procMetrics
   return $ MetricsState
@@ -84,6 +86,7 @@ initMetrics _config = do
     , mgetBlockTimeStrikeFuture = mgetBlockTimeStrikeFuture
     , createBlockTimeStrikeFutureGuess = createBlockTimeStrikeFutureGuess
     , mgetBlockTimeStrikePast = mgetBlockTimeStrikePast
+    , ensureFutureStrikeExistsAhead = ensureFutureStrikeExistsAhead
     }
   where
     microBuckets = [ 0.0000001 -- 100 nanoseconds

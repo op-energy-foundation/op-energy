@@ -61,6 +61,8 @@ data Config = Config
     -- ^ this value defines the minimum ahead of future strike guess to require. It should be at least 6, as confirmed current tip is 6 blocks behind unconfirmed tip
   , configBlockspanURL :: BaseUrl
     -- ^ defines URL to blockspan api instance. Used to get block header info at block discovery
+  , configBlockTimeFutureStrikeShouldExistsAheadCurrentTip :: Positive Int
+    -- ^ defines how many blocks ahead of current tip there should exist a future strike. Effectively, this means, that there should exist future strikes for a range [ currentTip + configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip; currentTip + configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip + configBlockTimeFutureStrikeShouldExistsAheadCurrentTip ]
   }
   deriving Show
 instance FromJSON Config where
@@ -82,6 +84,7 @@ instance FromJSON Config where
     <*> ((v .:? "BLOCKTIME_STRIKE_BLOCKSPAN_WEBSOCKET_API_URL" .!= (showBaseUrl $ configBlockTimeStrikeBlockSpanWebsocketAPIURL defaultConfig)) >>= parseBaseUrl)
     <*> ( v .:? "BLOCKTIME_STRIKE_FUTURE_GUESS_MINIMUM_BLOCKS_AHEAD_CURRENT_TIP" .!= (configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip defaultConfig))
     <*> ((v .:? "BLOCKSPAN_API_URL" .!= (showBaseUrl $ configBlockspanURL defaultConfig)) >>= parseBaseUrl)
+    <*> ( v .:? "BLOCKTIME_FUTURE_STRIKE_SHOULD_EXISTS_AHEAD_CURRENT_TIP" .!= (configBlockTimeFutureStrikeShouldExistsAheadCurrentTip defaultConfig))
 
 -- need to get Key from json, which represented as base64-encoded string
 instance FromJSON Key where
@@ -110,6 +113,7 @@ defaultConfig = Config
   , configBlockTimeStrikeBlockSpanWebsocketAPIURL = BaseUrl Http "127.0.0.1" 8999 "/api/v1/ws"
   , configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip = 6
   , configBlockspanURL = BaseUrl Http "127.0.0.1" 8999 ""
+  , configBlockTimeFutureStrikeShouldExistsAheadCurrentTip = 12
   }
 
 getConfigFromEnvironment :: IO Config
