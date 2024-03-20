@@ -78,6 +78,7 @@ library
                     , lens
                     , scientific
                     , persistent, persistent-template, persistent-postgresql, monad-logger
+                    , persistent-pagination
                     , resource-pool
                     , random
                     , cryptohash-sha256
@@ -85,7 +86,9 @@ library
                     , op-energy-api
                     , op-energy-account-api
                     , conduit
+                    , resourcet
                     , exceptions
+                    , safe-exceptions
                     , mtl
                     , stm, stm-chans
                     , transformers

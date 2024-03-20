@@ -8,6 +8,7 @@
 , warp
 , scientific
 , persistent, persistent-template, persistent-postgresql, monad-logger
+, persistent-pagination
 , resource-pool
 , cryptohash-sha256, base16-bytestring
 , random
@@ -42,6 +43,7 @@ mkDerivation {
     lens
     scientific
     persistent persistent-template persistent-postgresql monad-logger
+    persistent-pagination
     resource-pool
     cryptohash-sha256 base16-bytestring
     random

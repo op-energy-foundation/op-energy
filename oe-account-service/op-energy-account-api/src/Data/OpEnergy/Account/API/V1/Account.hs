@@ -76,6 +76,10 @@ instance ToSchema AccountToken where
   declareNamedSchema _ = return $ NamedSchema (Just "AccountToken") $ mempty
     & type_ ?~ SwaggerString
     & example ?~ toJSON defaultAccountToken
+instance ToParamSchema AccountToken where
+  toParamSchema _ = mempty
+    & type_ ?~ SwaggerString
+    & format ?~ unAccountToken defaultAccountToken
 
 defaultAccountToken :: AccountToken
 defaultAccountToken = verifyAccountToken "h+3b0A7XIfbmjg=="
@@ -181,12 +185,6 @@ verifyDisplayName raw =
   case everifyDisplayName raw of
     Prelude.Right ret -> ret
     Left some -> error (show some)
-
-data GuessResult
-  = Wrong
-  | Right
-  deriving (Eq, Show)
-
 
 share [mkPersist sqlSettings, mkMigrate "migrateAccount"] [persistLowerCase|
 Person

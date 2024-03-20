@@ -56,6 +56,7 @@ blockTimeServer = websocketHandler
   :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeFutureGuesses
   :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.createBlockTimeStrikeFutureGuess
   :<|> getBlockTimeStrikePast
+  :<|> getBlockTimeStrikeExt
   :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessResults
   :<|> oeGitHashGet
   where

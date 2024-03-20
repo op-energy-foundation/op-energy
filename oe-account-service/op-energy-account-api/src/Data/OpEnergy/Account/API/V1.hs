@@ -25,6 +25,8 @@ import           Data.OpEnergy.API.V1.Natural
 import           Data.OpEnergy.Account.API.V1.Account
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
+import           Data.OpEnergy.Account.API.V1.PagingResult
+import           Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic
 
 -- | API specifications of a backend service for Swagger
 type AccountV1API
@@ -89,6 +91,12 @@ type BlockTimeV1API
     :> ReqBody '[JSON] AccountToken -- require authentication
     :> Description "returns list of past strikes, that have been already processed. Requires authentication. Time strike becomes \"past\" when it becomes confirmed and you can think about it as archived strike, that had been processed and now being kept as history"
     :> Post '[JSON] [BlockTimeStrikePast]
+
+  :<|> "past"
+    :> "strikeExt"
+    :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
+    :> Description "returns list of past strikes, that have been already processed. Results are ordered by block mediantime in descending order. Time strike becomes \"past\" when it becomes confirmed and you can think about it as archived strike, that had been processed and now being kept as history"
+    :> Get '[JSON] (PagingResult BlockTimeStrikePastPublic)
 
   :<|> "past"
     :> "strike"

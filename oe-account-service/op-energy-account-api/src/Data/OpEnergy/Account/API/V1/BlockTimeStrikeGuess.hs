@@ -33,12 +33,6 @@ import           Data.OpEnergy.Account.API.V1.Account
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
 import           Data.OpEnergy.Account.API.V1.UUID
 
-data GuessResult
-  = Wrong
-  | Right
-  deriving (Eq, Show)
-
-
 share [mkPersist sqlSettings, mkMigrate "migrateBlockTimeStrikeGuess"] [persistLowerCase|
 BlockTimeStrikeFutureGuess
   -- data

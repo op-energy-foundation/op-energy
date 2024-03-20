@@ -24,7 +24,10 @@ import           Control.Lens
 import           GHC.Generics
 import           Data.Aeson
 import           Data.Text                  (Text)
+import qualified Data.Text as Text
 import           Data.Time.Clock.POSIX(POSIXTime)
+import qualified Data.List as List
+import qualified Data.Char as Char
 
 import           Servant.API(ToHttpApiData(..), FromHttpApiData(..))
 import           Database.Persist.TH
@@ -35,12 +38,6 @@ import           Data.OpEnergy.API.V1.Block(BlockHeight, defaultBlockHeight)
 import           Data.OpEnergy.Account.API.V1.Account
 import           Data.OpEnergy.API.V1.Block(BlockHash)
 import qualified Data.OpEnergy.API.V1.Hash as BlockHash (defaultHash)
-
-data GuessResult
-  = Wrong
-  | Right
-  deriving (Eq, Show)
-
 
 share [mkPersist sqlSettings, mkMigrate "migrateBlockTimeStrike"] [persistLowerCase|
 BlockTimeStrikeFuture
@@ -92,13 +89,29 @@ defaultBlockTimeStrikeFuture = BlockTimeStrikeFuture
   , blockTimeStrikeFutureNlocktime = defaultPOSIXTime
   , blockTimeStrikeFutureCreationTime = defaultPOSIXTime
   }
-instance ToJSON BlockTimeStrikeFuture
 instance ToSchema BlockTimeStrikeFuture where
   declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikeFuture") $ mempty
     & type_ ?~ SwaggerObject
     & example ?~ toJSON defaultBlockTimeStrikeFuture
+instance ToJSON BlockTimeStrikeFuture where
+  toJSON = genericToJSON defaultOptions
+    { fieldLabelModifier =
+      (\s -> case s of
+          [] -> []
+          (h:t) -> (Char.toLower h):t
+      ) .  (List.drop (Text.length "BlockTimeStrikeFuture"))
+    , constructorTagModifier = List.map Char.toLower
+    }
+  toEncoding = genericToEncoding defaultOptions
+    { fieldLabelModifier =
+      (\s -> case s of
+          [] -> []
+          (h:t) -> (Char.toLower h):t
+      ) . (List.drop (Text.length "BlockTimeStrikeFuture"))
+    , constructorTagModifier = List.map Char.toLower
+    }
+instance FromJSON BlockTimeStrikeFuture
 
-instance ToJSON BlockTimeStrikePast
 instance ToSchema BlockTimeStrikePast where
   declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikePast") $ mempty
     & type_ ?~ SwaggerObject
@@ -113,7 +126,24 @@ defaultBlockTimeStrikePast = BlockTimeStrikePast
   , blockTimeStrikePastObservedBlockMediantime = defaultPOSIXTime
   , blockTimeStrikePastObservedBlockHash = BlockHash.defaultHash
   }
-
+instance ToJSON BlockTimeStrikePast where
+  toJSON = genericToJSON defaultOptions
+    { fieldLabelModifier =
+      (\s -> case s of
+          [] -> []
+          (h:t) -> (Char.toLower h):t
+      ) . (List.drop (Text.length "BlockTimeStrikePast"))
+    , constructorTagModifier = List.map Char.toLower
+    }
+  toEncoding = genericToEncoding defaultOptions
+    { fieldLabelModifier =
+      (\s -> case s of
+          [] -> []
+          (h:t) -> (Char.toLower h):t
+      ) . (List.drop (Text.length "BlockTimeStrikePast"))
+    , constructorTagModifier = List.map Char.toLower
+    }
+instance FromJSON BlockTimeStrikePast
 
 data SlowFast
   = Slow
@@ -153,3 +183,4 @@ verifySlowFast :: Text-> SlowFast
 verifySlowFast "slow" = Slow
 verifySlowFast "fast" = Fast
 verifySlowFast _ = error "verifySlowFast: wrong value"
+

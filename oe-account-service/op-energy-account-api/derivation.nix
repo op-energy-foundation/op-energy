@@ -11,6 +11,7 @@
 , random
 , cereal
 , op-energy-api
+, data-default
 , ...
 }:
 mkDerivation {
@@ -32,6 +33,7 @@ mkDerivation {
     persistent persistent-template
     cereal
     op-energy-api
+    data-default
   ];
   executableHaskellDepends = [
     base
