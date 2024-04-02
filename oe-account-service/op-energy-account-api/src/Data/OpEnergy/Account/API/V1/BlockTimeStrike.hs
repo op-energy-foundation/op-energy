@@ -38,6 +38,7 @@ import           Data.OpEnergy.API.V1.Block(BlockHeight, defaultBlockHeight)
 import           Data.OpEnergy.Account.API.V1.Account
 import           Data.OpEnergy.API.V1.Block(BlockHash)
 import qualified Data.OpEnergy.API.V1.Hash as BlockHash (defaultHash)
+import           Data.Default
 
 share [mkPersist sqlSettings, mkMigrate "migrateBlockTimeStrike"] [persistLowerCase|
 BlockTimeStrikeFuture
@@ -110,7 +111,17 @@ instance ToJSON BlockTimeStrikeFuture where
       ) . (List.drop (Text.length "BlockTimeStrikeFuture"))
     , constructorTagModifier = List.map Char.toLower
     }
-instance FromJSON BlockTimeStrikeFuture
+instance FromJSON BlockTimeStrikeFuture where
+  parseJSON = genericParseJSON defaultOptions
+    { fieldLabelModifier =
+      (\s -> case s of
+          [] -> []
+          (h:t) -> (Char.toLower h):t
+      ) . (List.drop (Text.length "BlockTimeStrikeFuture"))
+    , constructorTagModifier = List.map Char.toLower
+    }
+instance Default BlockTimeStrikeFuture where
+  def = defaultBlockTimeStrikeFuture
 
 instance ToSchema BlockTimeStrikePast where
   declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikePast") $ mempty

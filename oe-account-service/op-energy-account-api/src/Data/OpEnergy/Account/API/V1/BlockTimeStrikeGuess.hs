@@ -32,6 +32,7 @@ import           Database.Persist.Sql
 import           Data.OpEnergy.Account.API.V1.Account
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
 import           Data.OpEnergy.Account.API.V1.UUID
+import           Data.Default
 
 share [mkPersist sqlSettings, mkMigrate "migrateBlockTimeStrikeGuess"] [persistLowerCase|
 BlockTimeStrikeFutureGuess
@@ -73,6 +74,8 @@ instance ToSchema BlockTimeStrikeGuessPublic where
   declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikeGuessPublic") $ mempty
     & type_ ?~ SwaggerObject
     & example ?~ toJSON defaultBlockTimeStrikeGuessPublic
+instance Default BlockTimeStrikeGuessPublic where
+  def = defaultBlockTimeStrikeGuessPublic
 
 defaultBlockTimeStrikeGuessPublic :: BlockTimeStrikeGuessPublic
 defaultBlockTimeStrikeGuessPublic = BlockTimeStrikeGuessPublic
@@ -96,6 +99,8 @@ instance ToSchema BlockTimeStrikeGuessResultPublic where
   declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikeGuessResultPublic") $ mempty
     & type_ ?~ SwaggerObject
     & example ?~ toJSON defaultBlockTimeStrikeGuessResultPublic
+instance Default BlockTimeStrikeGuessResultPublic where
+  def = defaultBlockTimeStrikeGuessResultPublic
 defaultBlockTimeStrikeGuessResultPublic :: BlockTimeStrikeGuessResultPublic
 defaultBlockTimeStrikeGuessResultPublic = BlockTimeStrikeGuessResultPublic
   { person = defaultUUID

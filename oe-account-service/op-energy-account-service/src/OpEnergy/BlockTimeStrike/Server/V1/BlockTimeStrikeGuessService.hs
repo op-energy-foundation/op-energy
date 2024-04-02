@@ -7,12 +7,14 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
   ( getBlockTimeStrikeFutureGuesses
   , createBlockTimeStrikeFutureGuess
   , getBlockTimeStrikeGuessResults
+  , getBlockTimeStrikeGuessResultsPage
   , calculateResultsLoop
+  , getBlockTimeStrikeFutureGuessesPage
   ) where
 
-import           Servant (err404, throwError, errBody)
+import qualified Data.Text as Text
+import           Servant (err404, err500, throwError, errBody)
 import           Control.Monad.Trans.Reader (ask)
-import           Control.Monad.IO.Class (liftIO, MonadIO)
 import           Control.Monad.Logger(logDebug, logError)
 import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
@@ -24,22 +26,27 @@ import qualified Data.ByteString.Lazy as BS
 import qualified Data.Text.Encoding as Text
 
 import           Data.Text.Show(tshow)
+import qualified Data.Conduit as C
+import           Control.Monad.Trans
 import           Database.Persist.Postgresql
 import           Prometheus(MonadMonitor)
 import qualified Prometheus as P
+import           Control.Exception.Safe as E
 
 
 import           Data.OpEnergy.Account.API.V1.Account
-import           Data.OpEnergy.API.V1.Positive(naturalFromPositive)
+import           Data.OpEnergy.API.V1.Positive( naturalFromPositive)
 import           Data.OpEnergy.API.V1.Block
 import           Data.OpEnergy.API.V1.Natural
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
+import           Data.OpEnergy.Account.API.V1.PagingResult
 import           OpEnergy.Account.Server.V1.Config (Config(..))
 import           OpEnergy.Account.Server.V1.Class (runAppT, AppT, AppM, State(..), runLogging)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import qualified OpEnergy.Account.Server.V1.Metrics as Metrics(MetricsState(..))
 import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
+import           OpEnergy.PagingResult
 
 -- | O(ln users) + O(strike future)
 -- returns list BlockTimeStrikeFuture records. requires authenticated user
@@ -84,6 +91,38 @@ getBlockTimeStrikeFutureGuesses token blockHeight nlocktime = do
                          , guess = blockTimeStrikeFutureGuessGuess guess
                          }
                    ) ret >>= return . Just
+
+-- | O(ln users) + O(strike future)
+-- returns list BlockTimeStrikeFuture records. requires authenticated user
+getBlockTimeStrikeFutureGuessesPage :: BlockHeight-> Natural Int-> Maybe (Natural Int)-> AppM (PagingResult BlockTimeStrikeGuessPublic)
+getBlockTimeStrikeFutureGuessesPage blockHeight nlocktime mpage = do
+  State{ metrics = Metrics.MetricsState { Metrics.getBlockTimeStrikeFutureGuesses = getBlockTimeStrikeFutureGuesses
+                                        }
+        } <- ask
+  P.observeDuration getBlockTimeStrikeFutureGuesses $ do
+    mstrike <- mgetBlockTimeStrikeFuture blockHeight nlocktime
+    case mstrike of
+      Nothing -> do
+        let err = "getBlockTimeStrikeFutureGuessesPage: no blocktime strike future found"
+        runLogging $ $(logError) err
+        throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+      Just (Entity strikeId strike) -> do
+        eret <- pagingResult mpage [ BlockTimeStrikeFutureGuessStrike ==. strikeId ] BlockTimeStrikeFutureGuessCreationTime
+          $ ( C.awaitForever $ \(Entity _ guess) -> do
+              person <- lift $ get (blockTimeStrikeFutureGuessPerson guess) >>= return . fromJust
+              C.yield $! BlockTimeStrikeGuessPublic
+                        { person = personUuid person
+                        , strike = strike
+                        , creationTime = blockTimeStrikeFutureGuessCreationTime guess
+                        , guess = blockTimeStrikeFutureGuessGuess guess
+                        }
+            )
+        case eret of
+          Left some -> do
+            let err = "getBlockTimeStrikeFutureGuessesPage: " <> Text.pack (show some)
+            runLogging $ $(logError) err
+            throwError err500 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+          Right ret-> return ret
 
 mgetBlockTimeStrikeFuture :: (MonadIO m, MonadMonitor m) => BlockHeight-> Natural Int-> AppT m (Maybe (Entity BlockTimeStrikeFuture))
 mgetBlockTimeStrikeFuture blockHeight nlocktime = do
@@ -211,6 +250,44 @@ getBlockTimeStrikeGuessResults token blockHeight nlocktime = do
               , guess = blockTimeStrikePastGuessGuess guessResult
               , observedResult = blockTimeStrikePastGuessObservedResult guessResult
               }
+
+-- | O(ln accounts) + O(BlockTimeStrikePast).
+-- returns list BlockTimeStrikePast records
+getBlockTimeStrikeGuessResultsPage :: BlockHeight-> Natural Int-> Maybe (Natural Int) -> AppM (PagingResult BlockTimeStrikeGuessResultPublic)
+getBlockTimeStrikeGuessResultsPage blockHeight nlocktime mpage = do
+  mblock <- mgetBlockTimeStrikePast blockHeight nlocktime
+  case mblock of
+    Nothing -> do
+      let err = "ERROR: getBlockTimeStrikeGuessResultsPage: strike not found"
+      runLogging $ $(logError) err
+      throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+    Just pastE-> do
+      eret <- getBlockTimeStrikeGuessResults pastE
+      case eret of
+        Left some -> do
+          let err = "ERROR: getBlockTimeStrikeGuessResultsPage: " <> Text.pack (show some)
+          runLogging $ $(logError) err
+          throwError err500 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+        Right ret -> return ret
+  where
+    getBlockTimeStrikeGuessResults :: (MonadIO m, MonadMonitor m, MonadCatch m) => Entity BlockTimeStrikePast-> AppT m (Either SomeException (PagingResult BlockTimeStrikeGuessResultPublic))
+    getBlockTimeStrikeGuessResults (Entity pastId past) = do
+      State{ metrics = Metrics.MetricsState { Metrics.getBlockTimeStrikeFuture = getBlockTimeStrikeFuture
+                                            }
+           } <- ask
+      P.observeDuration getBlockTimeStrikeFuture $ do
+        pagingResult mpage [ BlockTimeStrikePastGuessStrike ==. pastId ] BlockTimeStrikePastGuessCreationTime
+          $ (C.awaitForever $ \(Entity _ guessResult) -> do
+              person <- lift $ get (blockTimeStrikePastGuessPerson guessResult) >>= return . fromJust -- persistent ensures that person with appropriate PersonId exist
+              C.yield $ BlockTimeStrikeGuessResultPublic
+                { person = personUuid person
+                , strike = past
+                , creationTime = blockTimeStrikePastGuessFutureGuessCreationTime guessResult
+                , archiveTime = blockTimeStrikePastGuessCreationTime guessResult
+                , guess = blockTimeStrikePastGuessGuess guessResult
+                , observedResult = blockTimeStrikePastGuessObservedResult guessResult
+                }
+            )
 
 calculateResultsLoop :: (MonadIO m, MonadMonitor m) => AppT m ()
 calculateResultsLoop = forever $ do

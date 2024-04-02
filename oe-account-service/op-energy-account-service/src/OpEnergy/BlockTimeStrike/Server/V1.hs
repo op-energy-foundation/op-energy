@@ -52,12 +52,15 @@ import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime(State(..)
 blockTimeServer :: ServerT BlockTimeV1API (AppT Handler)
 blockTimeServer = websocketHandler
   :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.getBlockTimeStrikeFuture
+  :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.getBlockTimeStrikeFuturePage
   :<|> createBlockTimeStrikeFuture
   :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeFutureGuesses
+  :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeFutureGuessesPage
   :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.createBlockTimeStrikeFutureGuess
   :<|> getBlockTimeStrikePast
-  :<|> getBlockTimeStrikeExt
+  :<|> getBlockTimeStrikePastPage
   :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessResults
+  :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessResultsPage
   :<|> oeGitHashGet
   where
     websocketHandler :: MonadIO m => Connection-> AppT m ()

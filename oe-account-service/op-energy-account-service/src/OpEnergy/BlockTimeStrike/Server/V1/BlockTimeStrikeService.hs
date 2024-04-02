@@ -5,14 +5,15 @@
 {-# LANGUAGE RecordWildCards          #-}
 module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
   ( getBlockTimeStrikeFuture
+  , getBlockTimeStrikeFuturePage
   , createBlockTimeStrikeFuture
   , getBlockTimeStrikePast
   , newTipHandlerLoop
   , archiveFutureStrikesLoop
-  , getBlockTimeStrikeExt
+  , getBlockTimeStrikePastPage
   ) where
 
-import           Servant (err404, throwError, errBody)
+import           Servant (err404, err500, throwError, errBody)
 import           Control.Monad.Trans.Reader (ask)
 import qualified Data.List as List
 import           Control.Monad.Logger(logDebug, logError, logInfo)
@@ -26,10 +27,8 @@ import qualified Data.ByteString.Lazy as BS
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Conduit as C
-import           Data.Conduit ((.|), runConduit)
 import qualified Data.Conduit.List as C
 import           Control.Monad.Trans
-import           Database.Persist.Pagination
 import           Control.Exception.Safe as E
 
 import           Database.Persist.Postgresql
@@ -42,7 +41,7 @@ import           Data.OpEnergy.Account.API.V1.Account
 import           Data.OpEnergy.Client as Blockspan
 import           Data.OpEnergy.API.V1.Block
 import           Data.OpEnergy.API.V1.Natural
-import           Data.OpEnergy.API.V1.Positive(fromPositive, naturalFromPositive)
+import           Data.OpEnergy.API.V1.Positive( naturalFromPositive)
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic
@@ -53,6 +52,7 @@ import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import qualified OpEnergy.Account.Server.V1.Metrics as Metrics(MetricsState(..))
 import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledFutureStrikeCreation as BlockTimeScheduledFutureStrikeCreation
+import           OpEnergy.PagingResult
 
 -- | O(ln users) + O(strike future)
 -- returns list BlockTimeStrikeFuture records. requires authenticated user
@@ -74,6 +74,26 @@ getBlockTimeStrikeFuture token = do
            } <- ask
       P.observeDuration getBlockTimeStrikeFuture $ do
         liftIO $ flip runSqlPersistMPool pool $ selectList [] [] >>= return . List.map (\(Entity _ blocktimeStrikeFuture) -> blocktimeStrikeFuture)
+
+-- | O(ln users) + O(strike future)
+-- returns list BlockTimeStrikeFuture records. requires authenticated user
+getBlockTimeStrikeFuturePage :: Maybe (Natural Int)-> AppM (PagingResult BlockTimeStrikeFuture)
+getBlockTimeStrikeFuturePage mpage = do
+  eret <- getBlockTimeStrikeFuture
+  case eret of
+    Left some -> do
+      let err = "ERROR: getBlockTimeStrikeFuturePage: " <> Text.pack (show some)
+      runLogging $ $(logError) err
+      throwError err500 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+    Right ret -> return ret
+  where
+    getBlockTimeStrikeFuture :: (MonadIO m, MonadMonitor m, MonadCatch m) => AppT m (Either SomeException (PagingResult BlockTimeStrikeFuture))
+    getBlockTimeStrikeFuture = do
+      State{ metrics = Metrics.MetricsState { Metrics.getBlockTimeStrikeFuture = getBlockTimeStrikeFuture
+                                            }
+           } <- ask
+      P.observeDuration getBlockTimeStrikeFuture $ do
+        pagingResult mpage [] BlockTimeStrikeFutureCreationTime $ C.map $ \(Entity _ v) -> v
 
 -- | O(ln accounts).
 -- Tries to create future block time strike. Requires authenticated user and blockheight should be in the future
@@ -145,8 +165,8 @@ getBlockTimeStrikePast token = do
 
 -- | O(ln accounts) + O(BlockTimeStrikePast).
 -- returns list of BlockTimeStrikePastPublic records. Do not require authentication.
-getBlockTimeStrikeExt :: Maybe (Natural Int)-> AppM (PagingResult BlockTimeStrikePastPublic)
-getBlockTimeStrikeExt mpage = do
+getBlockTimeStrikePastPage :: Maybe (Natural Int)-> AppM (PagingResult BlockTimeStrikePastPublic)
+getBlockTimeStrikePastPage mpage = do
   eret <- getBlockTimeStrikePast
   case eret of
     Left some -> do
@@ -155,51 +175,16 @@ getBlockTimeStrikeExt mpage = do
       throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
     Right ret -> return ret
   where
-    page = case mpage of
-      Nothing -> 0
-      Just ret -> ret
     getBlockTimeStrikePast = do
-      State{ accountDBPool = pool
-           , config = Config{ configRecordsPerReply = recordsPerReply}
-           , metrics = Metrics.MetricsState { Metrics.getBlockTimeStrikePast = getBlockTimeStrikePast
+      State{ metrics = Metrics.MetricsState { Metrics.getBlockTimeStrikePast = getBlockTimeStrikePast
                                             }
            } <- ask
       P.observeDuration getBlockTimeStrikePast $ do
-        eret <- E.handle
-          (\(err::SomeException) -> return (Left err))
-          $ liftIO $ flip runSqlPersistMPool pool $ do
-            totalCount <- count ([]::[Filter BlockTimeStrikePast])
-            if (fromNatural page) * (fromPositive recordsPerReply) >= totalCount
-              then return (Right (totalCount, [])) -- page out of range
-              else do
-                pageResults <- runConduit
-                  $ streamEntities
-                    []
-                    BlockTimeStrikePastObservedBlockMediantime
-                    (PageSize ((fromPositive recordsPerReply) + 1))
-                    Descend
-                    (Range Nothing Nothing)
-                  .| (C.drop (fromNatural page * fromPositive recordsPerReply) >> C.awaitForever C.yield) -- navigate to page
-                  .| ( C.awaitForever $ \(Entity strikeId strike) -> do
-                      resultsCnt <- lift $ count [ BlockTimeStrikePastGuessStrike ==. strikeId ]
-                      C.yield (BlockTimeStrikePastPublic {pastStrike = strike, guessesCount = fromIntegral resultsCnt})
-                    )
-                  .| C.take (fromPositive recordsPerReply + 1) -- we take +1 to understand if there is a next page available
-                return (Right (totalCount, pageResults))
-        case eret of
-          Left some -> return (Left some)
-          Right (totalCount, resultsTail) -> do
-            let newPage =
-                  if List.length resultsTail > fromPositive recordsPerReply
-                  then Just (fromIntegral (fromNatural page + 1))
-                  else Nothing
-                results = List.take (fromPositive recordsPerReply) resultsTail
-            return $ Right $ PagingResult
-              { pagingResultNextPage = newPage
-              , pagingResultCount = fromIntegral totalCount
-              , pagingResultResults = results
-              }
-
+        pagingResult mpage [] BlockTimeStrikePastObservedBlockMediantime
+          $ ( C.awaitForever $ \(Entity strikeId strike) -> do
+              resultsCnt <- lift $ count [ BlockTimeStrikePastGuessStrike ==. strikeId ]
+              C.yield (BlockTimeStrikePastPublic {pastStrike = strike, guessesCount = fromIntegral resultsCnt})
+            )
 
 -- | this function is an entry point for a process, that creates blocktime past strikes when such block is being
 -- confirmed. After BlockTimeStrikePast creation, it will add record to the BlockTimeStrikeFutureObservedBlock table
