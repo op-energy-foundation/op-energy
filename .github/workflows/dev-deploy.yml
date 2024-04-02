@@ -1,0 +1,27 @@
+name: "deploy branch to dev instance"
+on:
+  workflow_dispatch
+jobs:
+  dev-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - uses: webfactory/ssh-agent@v0.8.0
+      with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+    - uses: cachix/install-nix-action@v25
+      with:
+        nix_path: nixpkgs=channel:nixos-23.11
+        extra_nix_config: "system-features = nixos-test benchmark big-parallel kvm"
+    - run: git status
+    - run: git pull
+    - run: git branch -a
+    - run: git branch -D devel || true
+    - run: URL=$(git remote get-url origin); git remote set-url origin $(echo $URL | sed 's/https:\/\//ssh:\/\/git@/')
+    - run: git remote -v
+    - run: echo ${{ github.ref_name }}
+    - run: git checkout -b devel
+    - run: git submodule set-branch -b devel oe-blockspan-service && git submodule update --remote --recursive
+    - run: git push --force -u origin devel
+    - run: ssh -oStrictHostKeyChecking=no root@${{ vars.DEV_INSTANCE }} "cd /etc/nixos; git pull --rebase; git submodule update --remote --recursive; nixos-rebuild switch"
+
