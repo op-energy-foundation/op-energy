@@ -112,6 +112,13 @@ type BlockTimeV1API
   :<|> "past"
     :> "strikeExt"
     :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
+    :> Description "DEPRECATED: use /api/v1/past/strike/page instead"
+    :> Get '[JSON] (PagingResult BlockTimeStrikePastPublic)
+
+  :<|> "past"
+    :> "strike"
+    :> "page"
+    :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
     :> Description "returns list of past strikes, that have been already processed. Results are ordered by block mediantime in descending order. Time strike becomes \"past\" when it becomes confirmed and you can think about it as archived strike, that had been processed and now being kept as history"
     :> Get '[JSON] (PagingResult BlockTimeStrikePastPublic)
 
