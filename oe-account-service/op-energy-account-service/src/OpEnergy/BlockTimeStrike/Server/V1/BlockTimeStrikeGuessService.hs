@@ -93,7 +93,7 @@ getBlockTimeStrikeFutureGuesses token blockHeight nlocktime = do
                    ) ret >>= return . Just
 
 -- | O(ln users) + O(strike future)
--- returns list BlockTimeStrikeFuture records. requires authenticated user
+-- returns list BlockTimeStrikeFuture records
 getBlockTimeStrikeFutureGuessesPage :: BlockHeight-> Natural Int-> Maybe (Natural Int)-> AppM (PagingResult BlockTimeStrikeGuessPublic)
 getBlockTimeStrikeFutureGuessesPage blockHeight nlocktime mpage = do
   State{ metrics = Metrics.MetricsState { Metrics.getBlockTimeStrikeFutureGuesses = getBlockTimeStrikeFutureGuesses

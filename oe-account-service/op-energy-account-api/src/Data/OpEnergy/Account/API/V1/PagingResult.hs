@@ -1,3 +1,6 @@
+{-- | This module defines PagingResult data type.
+ -- The purpose is to be used as a generic container of list values with paging
+ --}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE DeriveGeneric              #-}
 module Data.OpEnergy.Account.API.V1.PagingResult where
@@ -13,10 +16,14 @@ import           Data.Text as Text
 import           Data.Default
 import           Data.Proxy
 
+-- | contains data for 1 page
 data PagingResult a = PagingResult
-  { pagingResultNextPage :: Maybe Word32 -- Nothing if there are no more pages coming
+  { pagingResultNextPage :: Maybe Word32
+    -- ^ Nothing if there are no more pages coming
   , pagingResultCount:: Word32
+    -- ^ records count. TOTAL, not count of elements of the page.
   , pagingResultResults :: [ a ]
+    -- ^ contains list of records on a request page. Count of records defined by services' configs. For blocktime service, check configRecordsPerReply
   }
   deriving (Show, Generic)
 instance FromJSON a => FromJSON (PagingResult a)
@@ -49,6 +56,7 @@ instance (Default a, ToJSON a, Show a) => ToSchema (PagingResult a) where
 instance Default a => Default (PagingResult a) where
   def = defaultPagingResult
 
+-- | default PageResult
 defaultPagingResult :: Default a => PagingResult a
 defaultPagingResult = PagingResult
   { pagingResultNextPage = Nothing

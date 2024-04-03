@@ -1,3 +1,5 @@
+{-- | This module defines BlockTimeStrikePastPublic datatype
+ --}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE DeriveGeneric              #-}
 module Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic where
@@ -14,11 +16,14 @@ import           Data.Default
 
 data BlockTimeStrikePastPublic = BlockTimeStrikePastPublic
   { pastStrike :: BlockTimeStrikePast
+    -- ^ past strike
   , guessesCount :: Word32
+    -- ^ amount of guesses
   }
   deriving (Show, Generic)
 instance FromJSON BlockTimeStrikePastPublic
 instance ToJSON BlockTimeStrikePastPublic where
+  -- alter serialization names
   toJSON = genericToJSON defaultOptions
     { A.fieldLabelModifier =
       (\s -> case s of

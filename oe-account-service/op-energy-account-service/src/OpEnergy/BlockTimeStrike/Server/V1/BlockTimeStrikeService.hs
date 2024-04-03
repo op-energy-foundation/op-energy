@@ -76,7 +76,7 @@ getBlockTimeStrikeFuture token = do
         liftIO $ flip runSqlPersistMPool pool $ selectList [] [] >>= return . List.map (\(Entity _ blocktimeStrikeFuture) -> blocktimeStrikeFuture)
 
 -- | O(ln users) + O(strike future)
--- returns list BlockTimeStrikeFuture records. requires authenticated user
+-- returns list BlockTimeStrikeFuture records
 getBlockTimeStrikeFuturePage :: Maybe (Natural Int)-> AppM (PagingResult BlockTimeStrikeFuture)
 getBlockTimeStrikeFuturePage mpage = do
   eret <- getBlockTimeStrikeFuture
