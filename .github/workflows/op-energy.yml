@@ -19,7 +19,7 @@ jobs:
     - run: rm -rf ../op-energy-dev-instance/overlays/op-energy/* && cp -r $(pwd)/* ../op-energy-dev-instance/overlays/op-energy/
     - run: echo \"ci-host\" > ../op-energy-dev-instance/local_hostname.nix
     # ci-tests.nix should be on the same level as op-energy-development
-    - run: cp ci-tests.nix ../
+    - run: cp ./oe-blockspan-service/ci-tests.nix ../
     # now actually run the builds and tests with passing git commit hash as an argument
     - run: cd ../ && nix-build ci-tests.nix --argstr GIT_COMMIT_HASH $( echo ${{github.sha}} | cut -c 1-8 )
 
