@@ -85,6 +85,7 @@ getBlockTimeStrikeFuturePage
   -> AppM (PagingResult BlockTimeStrikeFuture)
 getBlockTimeStrikeFuturePage mpage mfilter = do
   eret <- getBlockTimeStrikeFuture
+  runLogging $ $(logDebug) $ "filter: " <> (Text.pack $ show mfilter)
   case eret of
     Left some -> do
       let err = "ERROR: getBlockTimeStrikeFuturePage: " <> Text.pack (show some)
