@@ -123,24 +123,10 @@ instance ToSchema BlockTimeStrikeFutureFilter where
       ])
     & mapped.schema.example ?~ toJSON defaultBlockTimeStrikeFuture
 instance ToJSON BlockTimeStrikeFutureFilter where
-  toJSON v = (genericToJSON defaultOptions
-    { fieldLabelModifier =
-      (\s -> case s of
-          [] -> []
-          (first:rest)-> (Char.toLower first):rest
-      ) . (List.drop $ List.length $ List.takeWhile (not . Char.isSpace) $ show v)
-    , constructorTagModifier = List.map Char.toLower
-    }) v
+  toJSON v = genericToJSON (jsonCommonOptions v) v
   toEncoding v = genericToEncoding (jsonCommonOptions v) v
 instance FromJSON BlockTimeStrikeFutureFilter where
-  parseJSON v = (genericParseJSON defaultOptions
-    { fieldLabelModifier =
-      (\s -> case s of
-          [] -> []
-          (first:rest)-> (Char.toLower first):rest
-      ) . (List.drop $ List.length $ List.takeWhile (not . Char.isSpace) $ show v)
-    , constructorTagModifier = List.map Char.toLower
-    }) v
+  parseJSON = genericParseJSON (jsonCommonOptions (def :: BlockTimeStrikeFutureFilter))
 instance Default BlockTimeStrikeFutureFilter where
   def = defaultBlockTimeStrikeFutureFilter
 instance ToParamSchema BlockTimeStrikeFutureFilter where
