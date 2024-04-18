@@ -41,6 +41,7 @@ import           Data.OpEnergy.API.V1.Natural
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
 import           Data.OpEnergy.Account.API.V1.PagingResult
+import           Data.OpEnergy.Account.API.V1.FilterRequest
 import           OpEnergy.Account.Server.V1.Config (Config(..))
 import           OpEnergy.Account.Server.V1.Class (runAppT, AppT, AppM, State(..), runLogging)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
@@ -94,8 +95,13 @@ getBlockTimeStrikeFutureGuesses token blockHeight nlocktime = do
 
 -- | O(ln users) + O(strike future)
 -- returns list BlockTimeStrikeFuture records
-getBlockTimeStrikeFutureGuessesPage :: BlockHeight-> Natural Int-> Maybe (Natural Int)-> AppM (PagingResult BlockTimeStrikeGuessPublic)
-getBlockTimeStrikeFutureGuessesPage blockHeight nlocktime mpage = do
+getBlockTimeStrikeFutureGuessesPage
+  :: BlockHeight
+  -> Natural Int
+  -> Maybe (Natural Int)
+  -> Maybe (FilterRequest BlockTimeStrikeFutureGuess BlockTimeStrikeGuessPublicFilter)
+  -> AppM (PagingResult BlockTimeStrikeGuessPublic)
+getBlockTimeStrikeFutureGuessesPage blockHeight nlocktime mpage mfilter = do
   State{ metrics = Metrics.MetricsState { Metrics.getBlockTimeStrikeFutureGuesses = getBlockTimeStrikeFutureGuesses
                                         }
         } <- ask
@@ -107,7 +113,10 @@ getBlockTimeStrikeFutureGuessesPage blockHeight nlocktime mpage = do
         runLogging $ $(logError) err
         throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
       Just (Entity strikeId strike) -> do
-        eret <- pagingResult mpage [ BlockTimeStrikeFutureGuessStrike ==. strikeId ] BlockTimeStrikeFutureGuessCreationTime
+        eret <- pagingResult
+          mpage
+          ([ BlockTimeStrikeFutureGuessStrike ==. strikeId ] ++ maybe [] (buildFilter . unFilterRequest) mfilter
+          ) BlockTimeStrikeFutureGuessCreationTime
           $ ( C.awaitForever $ \(Entity _ guess) -> do
               person <- lift $ get (blockTimeStrikeFutureGuessPerson guess) >>= return . fromJust
               C.yield $! BlockTimeStrikeGuessPublic
@@ -253,8 +262,13 @@ getBlockTimeStrikeGuessResults token blockHeight nlocktime = do
 
 -- | O(ln accounts) + O(BlockTimeStrikePast).
 -- returns list BlockTimeStrikePast records
-getBlockTimeStrikeGuessResultsPage :: BlockHeight-> Natural Int-> Maybe (Natural Int) -> AppM (PagingResult BlockTimeStrikeGuessResultPublic)
-getBlockTimeStrikeGuessResultsPage blockHeight nlocktime mpage = do
+getBlockTimeStrikeGuessResultsPage
+  :: BlockHeight
+  -> Natural Int
+  -> Maybe (Natural Int)
+  -> Maybe (FilterRequest BlockTimeStrikePastGuess BlockTimeStrikeGuessResultPublicFilter)
+  -> AppM (PagingResult BlockTimeStrikeGuessResultPublic)
+getBlockTimeStrikeGuessResultsPage blockHeight nlocktime mpage mfilter = do
   mblock <- mgetBlockTimeStrikePast blockHeight nlocktime
   case mblock of
     Nothing -> do
@@ -276,7 +290,9 @@ getBlockTimeStrikeGuessResultsPage blockHeight nlocktime mpage = do
                                             }
            } <- ask
       P.observeDuration getBlockTimeStrikeFuture $ do
-        pagingResult mpage [ BlockTimeStrikePastGuessStrike ==. pastId ] BlockTimeStrikePastGuessCreationTime
+        pagingResult mpage
+          ([ BlockTimeStrikePastGuessStrike ==. pastId ] ++ maybe [] (buildFilter . unFilterRequest) mfilter
+          ) BlockTimeStrikePastGuessCreationTime
           $ (C.awaitForever $ \(Entity _ guessResult) -> do
               person <- lift $ get (blockTimeStrikePastGuessPerson guessResult) >>= return . fromJust -- persistent ensures that person with appropriate PersonId exist
               C.yield $ BlockTimeStrikeGuessResultPublic

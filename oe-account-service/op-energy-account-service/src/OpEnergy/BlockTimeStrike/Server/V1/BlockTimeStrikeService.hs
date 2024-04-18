@@ -11,6 +11,7 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
   , newTipHandlerLoop
   , archiveFutureStrikesLoop
   , getBlockTimeStrikePastPage
+  , getBlockTimeStrikePastExt
   ) where
 
 import           Servant (err404, err500, throwError, errBody)
@@ -46,6 +47,7 @@ import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic
 import           Data.OpEnergy.Account.API.V1.PagingResult
+import           Data.OpEnergy.Account.API.V1.FilterRequest
 import           OpEnergy.Account.Server.V1.Config (Config(..))
 import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
@@ -77,8 +79,11 @@ getBlockTimeStrikeFuture token = do
 
 -- | O(ln users) + O(strike future)
 -- returns list BlockTimeStrikeFuture records
-getBlockTimeStrikeFuturePage :: Maybe (Natural Int)-> AppM (PagingResult BlockTimeStrikeFuture)
-getBlockTimeStrikeFuturePage mpage = do
+getBlockTimeStrikeFuturePage
+  :: Maybe (Natural Int)
+  -> Maybe (FilterRequest BlockTimeStrikeFuture BlockTimeStrikeFutureFilter)
+  -> AppM (PagingResult BlockTimeStrikeFuture)
+getBlockTimeStrikeFuturePage mpage mfilter = do
   eret <- getBlockTimeStrikeFuture
   case eret of
     Left some -> do
@@ -87,13 +92,14 @@ getBlockTimeStrikeFuturePage mpage = do
       throwError err500 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
     Right ret -> return ret
   where
+    filter = maybe [] (buildFilter . unFilterRequest) mfilter
     getBlockTimeStrikeFuture :: (MonadIO m, MonadMonitor m, MonadCatch m) => AppT m (Either SomeException (PagingResult BlockTimeStrikeFuture))
     getBlockTimeStrikeFuture = do
       State{ metrics = Metrics.MetricsState { Metrics.getBlockTimeStrikeFuture = getBlockTimeStrikeFuture
                                             }
            } <- ask
       P.observeDuration getBlockTimeStrikeFuture $ do
-        pagingResult mpage [] BlockTimeStrikeFutureCreationTime $ C.map $ \(Entity _ v) -> v
+        pagingResult mpage filter BlockTimeStrikeFutureCreationTime $ C.map $ \(Entity _ v) -> v
 
 -- | O(ln accounts).
 -- Tries to create future block time strike. Requires authenticated user and blockheight should be in the future
@@ -165,8 +171,18 @@ getBlockTimeStrikePast token = do
 
 -- | O(ln accounts) + O(BlockTimeStrikePast).
 -- returns list of BlockTimeStrikePastPublic records. Do not require authentication.
-getBlockTimeStrikePastPage :: Maybe (Natural Int)-> AppM (PagingResult BlockTimeStrikePastPublic)
-getBlockTimeStrikePastPage mpage = do
+getBlockTimeStrikePastExt
+  :: Maybe (Natural Int)
+  -> AppM (PagingResult BlockTimeStrikePastPublic)
+getBlockTimeStrikePastExt mpage = getBlockTimeStrikePastPage mpage Nothing
+
+-- | O(ln accounts) + O(BlockTimeStrikePast).
+-- returns list of BlockTimeStrikePastPublic records. Do not require authentication.
+getBlockTimeStrikePastPage
+  :: Maybe (Natural Int)
+  -> Maybe (FilterRequest BlockTimeStrikePast BlockTimeStrikePastFilter)
+  -> AppM (PagingResult BlockTimeStrikePastPublic)
+getBlockTimeStrikePastPage mpage mfilter = do
   eret <- getBlockTimeStrikePast
   case eret of
     Left some -> do
@@ -180,7 +196,7 @@ getBlockTimeStrikePastPage mpage = do
                                             }
            } <- ask
       P.observeDuration getBlockTimeStrikePast $ do
-        pagingResult mpage [] BlockTimeStrikePastObservedBlockMediantime
+        pagingResult mpage (maybe [] (buildFilter . unFilterRequest) mfilter) BlockTimeStrikePastObservedBlockMediantime
           $ ( C.awaitForever $ \(Entity strikeId strike) -> do
               resultsCnt <- lift $ count [ BlockTimeStrikePastGuessStrike ==. strikeId ]
               C.yield (BlockTimeStrikePastPublic {pastStrike = strike, guessesCount = fromIntegral resultsCnt})

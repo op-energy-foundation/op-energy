@@ -52,6 +52,9 @@ library
                    , Data.OpEnergy.Account.API.V1.Hash
                    , Data.OpEnergy.Account.API.V1.UUID
                    , Data.OpEnergy.Account.API.V1.PagingResult
+                   , Data.OpEnergy.Account.API.V1.FilterRequest
+                   , Data.OpEnergy.Account.API.V1.Common
+
     build-depends:    base ^>=4.15.1.0
                     , aeson
                     , text
