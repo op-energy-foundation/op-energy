@@ -89,8 +89,6 @@ type BlockTimeV1API
     :> "strike"
     :> "guess"
     :> "page"
-    :> Capture "BlockHeight" BlockHeight
-    :> Capture "nLockTime" (Natural Int)
     :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
     :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter" ] "filter" (FilterRequest BlockTimeStrikeFutureGuess BlockTimeStrikeGuessPublicFilter)
     :> Description "returns list of the guesses for a given future time strike."

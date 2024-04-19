@@ -100,42 +100,56 @@ getBlockTimeStrikeFutureGuesses token blockHeight nlocktime = do
 -- | O(ln users) + O(strike future)
 -- returns list BlockTimeStrikeFuture records
 getBlockTimeStrikeFutureGuessesPage
-  :: BlockHeight
-  -> Natural Int
-  -> Maybe (Natural Int)
+  :: Maybe (Natural Int)
   -> Maybe (FilterRequest BlockTimeStrikeFutureGuess BlockTimeStrikeGuessPublicFilter)
   -> AppM (PagingResult BlockTimeStrikeGuessPublic)
-getBlockTimeStrikeFutureGuessesPage blockHeight nlocktime mpage mfilter = do
+getBlockTimeStrikeFutureGuessesPage mpage mfilter = do
   State{ metrics = Metrics.MetricsState { Metrics.getBlockTimeStrikeFutureGuesses = getBlockTimeStrikeFutureGuesses
                                         }
+        , config = Config{ configRecordsPerReply = recordsPerReply}
         } <- ask
   P.observeDuration getBlockTimeStrikeFutureGuesses $ do
-    mstrike <- mgetBlockTimeStrikeFuture blockHeight nlocktime
-    case mstrike of
-      Nothing -> do
-        let err = "getBlockTimeStrikeFutureGuessesPage: no blocktime strike future found"
-        runLogging $ $(logError) err
-        throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
-      Just (Entity strikeId strike) -> do
-        eret <- pagingResult
-          mpage
-          ([ BlockTimeStrikeFutureGuessStrike ==. strikeId ] ++ maybe [] (buildFilter . unFilterRequest) mfilter
-          ) BlockTimeStrikeFutureGuessCreationTime
-          $ ( C.awaitForever $ \(Entity _ guess) -> do
-              person <- lift $ get (blockTimeStrikeFutureGuessPerson guess) >>= return . fromJust
-              C.yield $! BlockTimeStrikeGuessPublic
-                        { person = personUuid person
-                        , strike = strike
-                        , creationTime = blockTimeStrikeFutureGuessCreationTime guess
-                        , guess = blockTimeStrikeFutureGuessGuess guess
-                        }
+    eret <- pagingResult mpage (maybe [] (buildFilter . unFilterRequest) mfilter ) BlockTimeStrikeFutureCreationTime
+      $ ( C.awaitForever $ \v@(Entity futureId _) -> do
+          C.toProducer $ C.zipSources
+            ( repeatC v
             )
-        case eret of
-          Left some -> do
-            let err = "getBlockTimeStrikeFutureGuessesPage: " <> Text.pack (show some)
-            runLogging $ $(logError) err
-            throwError err500 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
-          Right ret-> return ret
+            ( streamEntities
+              ( (BlockTimeStrikeFutureGuessStrike ==. futureId) : (maybe [] (buildFilter . unFilterRequest) mfilter))
+              BlockTimeStrikeFutureGuessCreationTime
+              (PageSize ((fromPositive recordsPerReply) + 1))
+              Descend
+              (Range Nothing Nothing)
+            )
+        )
+      .| ( C.awaitForever $ \(futureE, guessE@(Entity _ guessResult)) -> do
+          C.toProducer $ C.zipSources
+            ( repeatC (futureE, guessE)
+            )
+            ( streamEntities
+              ( (PersonId ==. blockTimeStrikeFutureGuessPerson guessResult) : (maybe [] (buildFilter . unFilterRequest) mfilter))
+              PersonCreationTime
+              (PageSize ((fromPositive recordsPerReply) + 1))
+              Descend
+              (Range Nothing Nothing)
+            )
+          )
+      .| ( C.awaitForever $ \((Entity _ strike, Entity _ guess), Entity _ person )-> do
+          C.yield $ BlockTimeStrikeGuessPublic
+                    { person = personUuid person
+                    , strike = strike
+                    , creationTime = blockTimeStrikeFutureGuessCreationTime guess
+                    , guess = blockTimeStrikeFutureGuessGuess guess
+                    }
+         )
+    case eret of
+      Left some -> do
+        let err = "getBlockTimeStrikeFutureGuessesPage: " <> Text.pack (show some)
+        runLogging $ $(logError) err
+        throwError err500 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+      Right ret-> return ret
+  where
+    repeatC v = C.yield v >> repeatC v
 
 mgetBlockTimeStrikeFuture :: (MonadIO m, MonadMonitor m) => BlockHeight-> Natural Int-> AppT m (Maybe (Entity BlockTimeStrikeFuture))
 mgetBlockTimeStrikeFuture blockHeight nlocktime = do
