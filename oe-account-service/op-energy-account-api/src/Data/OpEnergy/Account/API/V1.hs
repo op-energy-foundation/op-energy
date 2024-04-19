@@ -139,8 +139,6 @@ type BlockTimeV1API
     :> "strike"
     :> "guess"
     :> "page"
-    :> Capture "BlockHeight" BlockHeight
-    :> Capture "nLockTime" (Natural Int)
     :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
     :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter" ] "filter" (FilterRequest BlockTimeStrikePastGuess BlockTimeStrikeGuessResultPublicFilter)
     :> Description "returns results for the given blocktime strike in the past. Time strike becomes \"past\" when it becomes confirmed and you can think about it as archived strike, that had been processed and now being kept as history. 'Guess' becomes a 'result' when blocktime strike becomes confirmed and processed."

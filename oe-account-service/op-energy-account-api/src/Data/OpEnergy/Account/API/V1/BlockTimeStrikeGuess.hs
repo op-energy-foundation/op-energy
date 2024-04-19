@@ -41,6 +41,7 @@ import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
 import           Data.OpEnergy.Account.API.V1.UUID
 import           Data.OpEnergy.Account.API.V1.Common
 import           Data.OpEnergy.Account.API.V1.FilterRequest
+import           Data.OpEnergy.API.V1.Block(BlockHeight)
 
 share [mkPersist sqlSettings, mkMigrate "migrateBlockTimeStrikeGuess"] [persistLowerCase|
 BlockTimeStrikeFutureGuess
@@ -94,15 +95,19 @@ data BlockTimeStrikeGuessPublicFilter = BlockTimeStrikeGuessPublicFilter
   , blockTimeStrikeGuessPublicFilterGuessNEQ :: Maybe SlowFast
   , blockTimeStrikeGuessPublicFilterPersonEQ :: Maybe (UUID Person)
   , blockTimeStrikeGuessPublicFilterPersonNEQ :: Maybe (UUID Person)
+  , blockTimeStrikeGuessPublicFilterBlockHeightGTE :: Maybe BlockHeight
+  , blockTimeStrikeGuessPublicFilterBlockHeightLTE :: Maybe BlockHeight
+  , blockTimeStrikeGuessPublicFilterNlocktimeGTE             :: Maybe POSIXTime
+  , blockTimeStrikeGuessPublicFilterNlocktimeLTE             :: Maybe POSIXTime
   }
   deriving (Eq, Show, Generic)
 instance Default BlockTimeStrikeGuessPublicFilter where
   def = defaultBlockTimeStrikeGuessPublicFilter
 instance ToJSON BlockTimeStrikeGuessPublicFilter where
-  toJSON v = genericToJSON (jsonCommonOptions v) v
-  toEncoding v = genericToEncoding (jsonCommonOptions v) v
+  toJSON = commonToJSON genericToJSON
+  toEncoding = commonToJSON genericToEncoding
 instance FromJSON BlockTimeStrikeGuessPublicFilter where
-  parseJSON = genericParseJSON (jsonCommonOptions defaultBlockTimeStrikeGuessPublicFilter)
+  parseJSON = commonParseJSON
 instance ToSchema BlockTimeStrikeGuessPublicFilter where
   declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
     & mapped.schema.description ?~ (Text.unlines
@@ -145,6 +150,17 @@ instance BuildFilter Person BlockTimeStrikeGuessPublicFilter where
     , maybe [] (\v-> [ PersonUuid !=. v ])
       $ blockTimeStrikeGuessPublicFilterPersonNEQ v
     ]
+instance BuildFilter BlockTimeStrikeFuture BlockTimeStrikeGuessPublicFilter where
+  buildFilter v = List.concat
+    [ maybe [] (\v-> [ BlockTimeStrikeFutureBlock >=. v ])
+      $  blockTimeStrikeGuessPublicFilterBlockHeightGTE v
+    , maybe [] (\v-> [ BlockTimeStrikeFutureBlock <=. v ])
+      $  blockTimeStrikeGuessPublicFilterBlockHeightLTE v
+    , maybe [] (\v-> [ BlockTimeStrikeFutureNlocktime >=. v ])
+      $  blockTimeStrikeGuessPublicFilterNlocktimeGTE v
+    , maybe [] (\v-> [ BlockTimeStrikeFutureNlocktime <=. v ])
+      $  blockTimeStrikeGuessPublicFilterNlocktimeLTE v
+    ]
 
 defaultBlockTimeStrikeGuessPublicFilter :: BlockTimeStrikeGuessPublicFilter
 defaultBlockTimeStrikeGuessPublicFilter = BlockTimeStrikeGuessPublicFilter
@@ -156,6 +172,10 @@ defaultBlockTimeStrikeGuessPublicFilter = BlockTimeStrikeGuessPublicFilter
   , blockTimeStrikeGuessPublicFilterGuessNEQ = Just Fast
   , blockTimeStrikeGuessPublicFilterPersonEQ = Just defaultUUID
   , blockTimeStrikeGuessPublicFilterPersonNEQ = Just defaultUUID
+  , blockTimeStrikeGuessPublicFilterBlockHeightGTE = Just 1
+  , blockTimeStrikeGuessPublicFilterBlockHeightLTE = Just 1
+  , blockTimeStrikeGuessPublicFilterNlocktimeGTE = Just 1
+  , blockTimeStrikeGuessPublicFilterNlocktimeLTE = Just 1
   }
 
 
@@ -194,25 +214,36 @@ defaultBlockTimeStrikeGuessResultPublic = BlockTimeStrikeGuessResultPublic
   }
 
 data BlockTimeStrikeGuessResultPublicFilter = BlockTimeStrikeGuessResultPublicFilter
+    -- person
   { blockTimeStrikeGuessResultPublicFilterPersonEQ                    :: Maybe (UUID Person)
   , blockTimeStrikeGuessResultPublicFilterPersonNEQ                   :: Maybe (UUID Person)
+    -- creationTime
   , blockTimeStrikeGuessResultPublicFilterCreationTimeGTE             :: Maybe POSIXTime
   , blockTimeStrikeGuessResultPublicFilterCreationTimeLTE             :: Maybe POSIXTime
+    -- archive time
   , blockTimeStrikeGuessResultPublicFilterArchiveTimeGTE              :: Maybe POSIXTime
   , blockTimeStrikeGuessResultPublicFilterArchiveTimeLTE              :: Maybe POSIXTime
+    -- guess
   , blockTimeStrikeGuessResultPublicFilterGuessEQ                     :: Maybe SlowFast
   , blockTimeStrikeGuessResultPublicFilterGuessNEQ                    :: Maybe SlowFast
+    -- observedResult
   , blockTimeStrikeGuessResultPublicFilterObservedResultEQ            :: Maybe SlowFast
   , blockTimeStrikeGuessResultPublicFilterObservedResultNEQ           :: Maybe SlowFast
+    -- strike block height
+  , blockTimeStrikeGuessResultPublicFilterObservedBlockHeightGTE      :: Maybe BlockHeight
+  , blockTimeStrikeGuessResultPublicFilterObservedBlockHeightLTE      :: Maybe BlockHeight
+    -- strike nlocktime
+  , blockTimeStrikeGuessResultPublicFilterObservedNlocktimeGTE        :: Maybe POSIXTime
+  , blockTimeStrikeGuessResultPublicFilterObservedNlocktimeLTE        :: Maybe POSIXTime
   }
   deriving (Eq, Show, Generic)
 instance Default BlockTimeStrikeGuessResultPublicFilter where
   def = defaultBlockTimeStrikeGuessResultPublicFilter
 instance ToJSON BlockTimeStrikeGuessResultPublicFilter where
-  toJSON v = genericToJSON (jsonCommonOptions v) v
-  toEncoding v = genericToEncoding (jsonCommonOptions v) v
+  toJSON = commonToJSON genericToJSON
+  toEncoding = commonToJSON genericToEncoding
 instance FromJSON BlockTimeStrikeGuessResultPublicFilter where
-  parseJSON = genericParseJSON (jsonCommonOptions defaultBlockTimeStrikeGuessResultPublicFilter)
+  parseJSON = commonParseJSON
 instance ToSchema BlockTimeStrikeGuessResultPublicFilter where
   declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
     & mapped.schema.description ?~ (Text.unlines
@@ -263,6 +294,19 @@ instance BuildFilter Person BlockTimeStrikeGuessResultPublicFilter where
     , maybe [] (\v-> [ PersonUuid !=. v ])
       $ blockTimeStrikeGuessResultPublicFilterPersonNEQ v
     ]
+instance BuildFilter BlockTimeStrikePast BlockTimeStrikeGuessResultPublicFilter where
+  buildFilter v = List.concat
+        -- strike block height
+    [ maybe [] (\v -> [ BlockTimeStrikePastBlock >=. v])
+      $ blockTimeStrikeGuessResultPublicFilterObservedBlockHeightGTE v
+    , maybe [] (\v -> [ BlockTimeStrikePastBlock <=. v])
+      $ blockTimeStrikeGuessResultPublicFilterObservedBlockHeightLTE v
+        -- strike nlocktime
+    , maybe [] (\v -> [ BlockTimeStrikePastNlocktime >=. v])
+      $ blockTimeStrikeGuessResultPublicFilterObservedNlocktimeGTE v
+    , maybe [] (\v -> [ BlockTimeStrikePastNlocktime <=. v])
+      $ blockTimeStrikeGuessResultPublicFilterObservedNlocktimeLTE v
+    ]
 
 defaultBlockTimeStrikeGuessResultPublicFilter :: BlockTimeStrikeGuessResultPublicFilter
 defaultBlockTimeStrikeGuessResultPublicFilter =  BlockTimeStrikeGuessResultPublicFilter
@@ -276,4 +320,9 @@ defaultBlockTimeStrikeGuessResultPublicFilter =  BlockTimeStrikeGuessResultPubli
   , blockTimeStrikeGuessResultPublicFilterGuessNEQ                    = Just Fast
   , blockTimeStrikeGuessResultPublicFilterObservedResultEQ            = Just Slow
   , blockTimeStrikeGuessResultPublicFilterObservedResultNEQ           = Just Fast
+  , blockTimeStrikeGuessResultPublicFilterObservedBlockHeightGTE      = Just 1
+  , blockTimeStrikeGuessResultPublicFilterObservedBlockHeightLTE      = Just 1
+    -- strike nlocktime
+  , blockTimeStrikeGuessResultPublicFilterObservedNlocktimeGTE        = Just 1
+  , blockTimeStrikeGuessResultPublicFilterObservedNlocktimeLTE        = Just 1
   }

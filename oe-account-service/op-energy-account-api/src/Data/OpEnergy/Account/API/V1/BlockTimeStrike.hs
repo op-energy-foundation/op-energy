@@ -28,7 +28,6 @@ import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import           Data.Time.Clock.POSIX(POSIXTime)
 import qualified Data.List as List
-import qualified Data.Char as Char
 import qualified Data.ByteString.Lazy as BS
 
 import           Servant.API(ToHttpApiData(..), FromHttpApiData(..))
@@ -123,10 +122,10 @@ instance ToSchema BlockTimeStrikeFutureFilter where
       ])
     & mapped.schema.example ?~ toJSON defaultBlockTimeStrikeFuture
 instance ToJSON BlockTimeStrikeFutureFilter where
-  toJSON v = genericToJSON (jsonCommonOptions v) v
-  toEncoding v = genericToEncoding (jsonCommonOptions v) v
+  toJSON = commonToJSON genericToJSON
+  toEncoding = commonToJSON genericToEncoding
 instance FromJSON BlockTimeStrikeFutureFilter where
-  parseJSON = genericParseJSON (jsonCommonOptions (def :: BlockTimeStrikeFutureFilter))
+  parseJSON = commonParseJSON
 instance Default BlockTimeStrikeFutureFilter where
   def = defaultBlockTimeStrikeFutureFilter
 instance ToParamSchema BlockTimeStrikeFutureFilter where
@@ -169,31 +168,10 @@ instance ToSchema BlockTimeStrikeFuture where
     & type_ ?~ SwaggerObject
     & example ?~ toJSON defaultBlockTimeStrikeFuture
 instance ToJSON BlockTimeStrikeFuture where
-  toJSON = genericToJSON defaultOptions
-    { fieldLabelModifier =
-      (\s -> case s of
-          [] -> []
-          (h:t) -> (Char.toLower h):t
-      ) .  (List.drop (Text.length "BlockTimeStrikeFuture"))
-    , constructorTagModifier = List.map Char.toLower
-    }
-  toEncoding = genericToEncoding defaultOptions
-    { fieldLabelModifier =
-      (\s -> case s of
-          [] -> []
-          (h:t) -> (Char.toLower h):t
-      ) . (List.drop (Text.length "BlockTimeStrikeFuture"))
-    , constructorTagModifier = List.map Char.toLower
-    }
+  toJSON = commonToJSON genericToJSON
+  toEncoding = commonToJSON genericToEncoding
 instance FromJSON BlockTimeStrikeFuture where
-  parseJSON = genericParseJSON defaultOptions
-    { fieldLabelModifier =
-      (\s -> case s of
-          [] -> []
-          (h:t) -> (Char.toLower h):t
-      ) . (List.drop (Text.length "BlockTimeStrikeFuture"))
-    , constructorTagModifier = List.map Char.toLower
-    }
+  parseJSON = commonParseJSON
 instance Default BlockTimeStrikeFuture where
   def = defaultBlockTimeStrikeFuture
 
@@ -212,23 +190,12 @@ defaultBlockTimeStrikePast = BlockTimeStrikePast
   , blockTimeStrikePastObservedBlockHash = BlockHash.defaultHash
   }
 instance ToJSON BlockTimeStrikePast where
-  toJSON = genericToJSON defaultOptions
-    { fieldLabelModifier =
-      (\s -> case s of
-          [] -> []
-          (h:t) -> (Char.toLower h):t
-      ) . (List.drop (Text.length "BlockTimeStrikePast"))
-    , constructorTagModifier = List.map Char.toLower
-    }
-  toEncoding = genericToEncoding defaultOptions
-    { fieldLabelModifier =
-      (\s -> case s of
-          [] -> []
-          (h:t) -> (Char.toLower h):t
-      ) . (List.drop (Text.length "BlockTimeStrikePast"))
-    , constructorTagModifier = List.map Char.toLower
-    }
-instance FromJSON BlockTimeStrikePast
+  toJSON = commonToJSON genericToJSON
+  toEncoding = commonToJSON genericToEncoding
+instance FromJSON BlockTimeStrikePast where
+  parseJSON = commonParseJSON
+instance Default BlockTimeStrikePast where
+  def = defaultBlockTimeStrikePast
 
 data SlowFast
   = Slow
@@ -302,10 +269,10 @@ data BlockTimeStrikePastFilter = BlockTimeStrikePastFilter
   }
   deriving (Eq, Show, Generic)
 instance ToJSON BlockTimeStrikePastFilter where
-  toJSON v = genericToJSON (jsonCommonOptions v) v
-  toEncoding v = genericToEncoding (jsonCommonOptions v) v
+  toJSON = commonToJSON genericToJSON
+  toEncoding = commonToJSON genericToEncoding
 instance FromJSON BlockTimeStrikePastFilter where
-  parseJSON v = genericParseJSON (jsonCommonOptions v) v
+  parseJSON = commonParseJSON
 instance Default BlockTimeStrikePastFilter where
   def = defaultBlockTimeStrikePastFilter
 instance ToSchema BlockTimeStrikePastFilter where
