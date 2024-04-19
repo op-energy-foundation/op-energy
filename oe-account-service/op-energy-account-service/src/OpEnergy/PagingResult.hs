@@ -46,7 +46,7 @@ pagingResult mpage filter field next = E.handle (\(err::SomeException)-> return 
        , config = Config{ configRecordsPerReply = recordsPerReply}
        } <- ask
   eret <- liftIO $ flip runSqlPersistMPool pool $ do
-    totalCount <- count (emptyList filter)
+    totalCount <- count (filter)
     if (fromNatural page) * (fromPositive recordsPerReply) >= totalCount
       then return (Right (totalCount, [])) -- page out of range
       else do
@@ -76,5 +76,3 @@ pagingResult mpage filter field next = E.handle (\(err::SomeException)-> return 
         }
   where
     page = maybe 0 id mpage
-    emptyList :: [Filter r] -> [Filter r]
-    emptyList _ = []
