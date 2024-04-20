@@ -200,7 +200,7 @@ getBlockTimeStrikePastPage mpage mfilter = do
         pagingResult mpage (maybe [] (buildFilter . unFilterRequest) mfilter) BlockTimeStrikePastObservedBlockMediantime
           $ ( C.awaitForever $ \(Entity strikeId strike) -> do
               resultsCnt <- lift $ count [ BlockTimeStrikePastGuessStrike ==. strikeId ]
-              C.yield (BlockTimeStrikePastPublic {pastStrike = strike, guessesCount = fromIntegral resultsCnt})
+              C.yield (BlockTimeStrikePastPublic {blockTimeStrikePastPublicPastStrike = strike, blockTimeStrikePastPublicGuessesCount = fromIntegral resultsCnt})
             )
 
 -- | this function is an entry point for a process, that creates blocktime past strikes when such block is being
