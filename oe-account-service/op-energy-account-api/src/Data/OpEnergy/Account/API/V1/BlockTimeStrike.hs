@@ -131,7 +131,11 @@ instance Default BlockTimeStrikeFutureFilter where
 instance ToParamSchema BlockTimeStrikeFutureFilter where
   toParamSchema v = mempty
     & type_ ?~ SwaggerString
-    & format ?~ (Text.decodeUtf8 $ BS.toStrict $ encode $ def1 v)
+    & format ?~ ( Text.unlines
+                 $ List.map (<>",")
+                 $ Text.splitOn ","
+                 $ Text.decodeUtf8 $ BS.toStrict $ encode $ def1 v
+                )
     where
       def1 :: Default a => Proxy a-> a
       def1 = def
@@ -284,7 +288,14 @@ instance ToSchema BlockTimeStrikePastFilter where
 instance ToParamSchema BlockTimeStrikePastFilter where
   toParamSchema v = mempty
     & type_ ?~ SwaggerString
-    & format ?~ (Text.decodeUtf8 $ BS.toStrict $ encode $ def1 v)
+    & format ?~ ( Text.unlines
+                 $ List.map (<>",")
+                 $ Text.splitOn ","
+                 $ Text.decodeUtf8
+                 $ BS.toStrict
+                 $ encode
+                 $ def1 v
+                )
     where
       def1 :: Default a => Proxy a-> a
       def1 = def
