@@ -14,9 +14,9 @@ import           Data.OpEnergy.Account.API.V1.Common
 import           Data.Default
 
 data BlockTimeStrikePastPublic = BlockTimeStrikePastPublic
-  { pastStrike :: BlockTimeStrikePast
+  { blockTimeStrikePastPublicPastStrike :: BlockTimeStrikePast
     -- ^ past strike
-  , guessesCount :: Word32
+  , blockTimeStrikePastPublicGuessesCount :: Word32
     -- ^ amount of guesses
   }
   deriving (Show, Generic)
@@ -34,6 +34,6 @@ instance Default BlockTimeStrikePastPublic where
   def = defaultBlockTimeStrikePastPublic
 defaultBlockTimeStrikePastPublic :: BlockTimeStrikePastPublic
 defaultBlockTimeStrikePastPublic = BlockTimeStrikePastPublic
-  { pastStrike = defaultBlockTimeStrikePast
-  , guessesCount = 0
+  { blockTimeStrikePastPublicPastStrike = defaultBlockTimeStrikePast
+  , blockTimeStrikePastPublicGuessesCount = 0
   }
