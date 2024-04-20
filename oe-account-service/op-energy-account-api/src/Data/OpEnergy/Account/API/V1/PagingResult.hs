@@ -45,7 +45,7 @@ instance ToJSON a => ToJSON (PagingResult a) where
     , A.constructorTagModifier = List.map Char.toLower
     }
 instance (Default a, ToJSON a, Show a) => ToSchema (PagingResult a) where
-  declareNamedSchema v = return $ NamedSchema (Just ("PagingResult " <> Text.pack (List.takeWhile (/=' ') (show (List.head (pagingResultResults (def1 v))))))) $ mempty
+  declareNamedSchema v = return $ NamedSchema (Just ("PagingResult" <> Text.pack (List.takeWhile (/=' ') (show (List.head (pagingResultResults (def1 v))))))) $ mempty
     & type_ ?~ SwaggerObject
     & example ?~ toJSON (def1 v)
     where
