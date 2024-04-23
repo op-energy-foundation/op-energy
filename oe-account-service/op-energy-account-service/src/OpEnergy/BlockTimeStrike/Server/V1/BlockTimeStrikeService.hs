@@ -14,7 +14,7 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
   , getBlockTimeStrikePastExt
   ) where
 
-import           Servant (err404, err500, throwError, errBody)
+import           Servant (err400, err404, err500, throwError, errBody)
 import           Control.Monad.Trans.Reader (ask)
 import qualified Data.List as List
 import           Control.Monad.Logger(logDebug, logError, logInfo)
@@ -114,24 +114,24 @@ createBlockTimeStrikeFuture token blockHeight nlocktime = do
     Nothing -> do
       let err = "ERROR: createBlockTimeStrikeFuture: there is no current tip yet"
       runLogging $ $(logError) err
-      throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+      throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
     Just tip
       | blockHeaderMediantime tip > fromIntegral nlocktime -> do
         let err = "ERROR: nlocktime is in the past, which is not expected"
         runLogging $ $(logError) err
-        throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+        throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
     Just tip
       | blockHeaderHeight tip + naturalFromPositive configBlockTimeStrikeMinimumBlockAheadCurrentTip > blockHeight -> do
         let msg = "ERROR: createBlockTimeStrikeFuture: block height for new block time strike should be in the future + minimum configBlockTimeStrikeMinimumBlockAheadCurrentTip"
         runLogging $ $(logError) msg
-        throwError err404
+        throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 msg)}
     _ -> do
       mperson <- mgetPersonByAccountToken token
       case mperson of
         Nothing -> do
           let err = "ERROR: createBlockTimeStrikeFuture: person was not able to authenticate itself"
           runLogging $ $(logError) err
-          throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+          throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
         Just person -> createBlockTimeStrikeFutureEsnuredConditions person
   where
     createBlockTimeStrikeFutureEsnuredConditions :: (MonadIO m, MonadMonitor m) => (Entity Person) -> AppT m ()
@@ -189,7 +189,7 @@ getBlockTimeStrikePastPage mpage mfilter = do
     Left some -> do
       let err = "ERROR: getBlockTimeStrikeExt: " <> Text.pack (show some)
       runLogging $ $(logError) err
-      throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+      throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
     Right ret -> return ret
   where
     getBlockTimeStrikePast = do
