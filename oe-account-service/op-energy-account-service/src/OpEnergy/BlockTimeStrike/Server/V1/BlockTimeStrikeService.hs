@@ -34,7 +34,6 @@ import           Control.Exception.Safe as E
 
 import           Database.Persist.Postgresql
 import           Prometheus(MonadMonitor)
-import qualified Prometheus as P
 
 
 import           Data.Text.Show (tshow)
@@ -49,9 +48,8 @@ import           Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic
 import           Data.OpEnergy.Account.API.V1.PagingResult
 import           Data.OpEnergy.Account.API.V1.FilterRequest
 import           OpEnergy.Account.Server.V1.Config (Config(..))
-import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging)
+import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging, profile, withDBTransaction)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
-import qualified OpEnergy.Account.Server.V1.Metrics as Metrics(MetricsState(..))
 import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledFutureStrikeCreation as BlockTimeScheduledFutureStrikeCreation
 import           OpEnergy.PagingResult
@@ -59,23 +57,22 @@ import           OpEnergy.PagingResult
 -- | O(ln users) + O(strike future)
 -- returns list BlockTimeStrikeFuture records. requires authenticated user
 getBlockTimeStrikeFuture :: AccountToken-> AppM [BlockTimeStrikeFuture ]
-getBlockTimeStrikeFuture token = do
+getBlockTimeStrikeFuture token = profile "getBlockTimeStrikeFuture" $ do
   mperson <- mgetPersonByAccountToken token
   case mperson of
     Nothing -> do
       let err = "ERROR: getBlockTimeStrikeFuture: authentication failure"
       runLogging $ $(logError) err
-      throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
-    Just person -> getBlockTimeStrikeFuture person
+      throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+    Just person -> do
+      mret <- getBlockTimeStrikeFuture person
+      case mret of
+        Just ret -> return ret
+        Nothing -> throwError err500 {errBody = "something went wrong"}
   where
-    getBlockTimeStrikeFuture :: (MonadIO m, MonadMonitor m) => Entity Person -> AppT m [BlockTimeStrikeFuture]
+    getBlockTimeStrikeFuture :: (MonadIO m, MonadMonitor m) => Entity Person -> AppT m (Maybe [BlockTimeStrikeFuture])
     getBlockTimeStrikeFuture (Entity _ _) = do
-      State{ accountDBPool = pool
-           , metrics = Metrics.MetricsState { Metrics.getBlockTimeStrikeFuture = getBlockTimeStrikeFuture
-                                            }
-           } <- ask
-      P.observeDuration getBlockTimeStrikeFuture $ do
-        liftIO $ flip runSqlPersistMPool pool $ selectList [] [] >>= return . List.map (\(Entity _ blocktimeStrikeFuture) -> blocktimeStrikeFuture)
+      withDBTransaction "" $ selectList [] [] >>= return . List.map (\(Entity _ blocktimeStrikeFuture) -> blocktimeStrikeFuture)
 
 -- | O(ln users) + O(strike future)
 -- returns list BlockTimeStrikeFuture records
@@ -83,29 +80,23 @@ getBlockTimeStrikeFuturePage
   :: Maybe (Natural Int)
   -> Maybe (FilterRequest BlockTimeStrikeFuture BlockTimeStrikeFutureFilter)
   -> AppM (PagingResult BlockTimeStrikeFuture)
-getBlockTimeStrikeFuturePage mpage mfilter = do
-  eret <- getBlockTimeStrikeFuture
+getBlockTimeStrikeFuturePage mpage mfilter = profile "getBlockTimeStrikeFuturePage" $ do
+  mret <- getBlockTimeStrikeFuture
   runLogging $ $(logDebug) $ "filter: " <> (Text.pack $ show mfilter)
-  case eret of
-    Left some -> do
-      let err = "ERROR: getBlockTimeStrikeFuturePage: " <> Text.pack (show some)
-      runLogging $ $(logError) err
-      throwError err500 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
-    Right ret -> return ret
+  case mret of
+    Nothing -> do
+      throwError err500 {errBody = "something went wrong"}
+    Just ret -> return ret
   where
     filter = maybe [] (buildFilter . unFilterRequest) mfilter
-    getBlockTimeStrikeFuture :: (MonadIO m, MonadMonitor m, MonadCatch m) => AppT m (Either SomeException (PagingResult BlockTimeStrikeFuture))
+    getBlockTimeStrikeFuture :: (MonadIO m, MonadMonitor m, MonadCatch m) => AppT m (Maybe (PagingResult BlockTimeStrikeFuture))
     getBlockTimeStrikeFuture = do
-      State{ metrics = Metrics.MetricsState { Metrics.getBlockTimeStrikeFuture = getBlockTimeStrikeFuture
-                                            }
-           } <- ask
-      P.observeDuration getBlockTimeStrikeFuture $ do
-        pagingResult mpage filter BlockTimeStrikeFutureCreationTime $ C.map $ \(Entity _ v) -> v
+      pagingResult mpage filter BlockTimeStrikeFutureCreationTime $ C.map $ \(Entity _ v) -> v
 
 -- | O(ln accounts).
 -- Tries to create future block time strike. Requires authenticated user and blockheight should be in the future
 createBlockTimeStrikeFuture :: AccountToken-> BlockHeight-> Natural Int-> AppM ()
-createBlockTimeStrikeFuture token blockHeight nlocktime = do
+createBlockTimeStrikeFuture token blockHeight nlocktime = profile "createBlockTimeStrikeFuture" $ do
   State{ config = Config{ configBlockTimeStrikeMinimumBlockAheadCurrentTip = configBlockTimeStrikeMinimumBlockAheadCurrentTip}
        , blockTimeState = BlockTime.State{ latestConfirmedBlock = latestConfirmedBlockV }
        } <- ask
@@ -132,22 +123,22 @@ createBlockTimeStrikeFuture token blockHeight nlocktime = do
           let err = "ERROR: createBlockTimeStrikeFuture: person was not able to authenticate itself"
           runLogging $ $(logError) err
           throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
-        Just person -> createBlockTimeStrikeFutureEsnuredConditions person
+        Just person -> do
+          mret <- createBlockTimeStrikeFutureEsnuredConditions person
+          case mret of
+            Just ret -> return ret
+            Nothing -> do
+              throwError err500 {errBody = "something went wrong"}
   where
-    createBlockTimeStrikeFutureEsnuredConditions :: (MonadIO m, MonadMonitor m) => (Entity Person) -> AppT m ()
+    createBlockTimeStrikeFutureEsnuredConditions :: (MonadIO m, MonadMonitor m) => (Entity Person) -> AppT m (Maybe ())
     createBlockTimeStrikeFutureEsnuredConditions _ = do
-      State{ accountDBPool = pool
-           , metrics = Metrics.MetricsState { Metrics.createBlockTimeStrikeFuture = createBlockTimeStrikeFuture
-                                            }
-           } <- ask
-      P.observeDuration createBlockTimeStrikeFuture $ do
-        nowUTC <- liftIO getCurrentTime
-        let now = utcTimeToPOSIXSeconds nowUTC
-        liftIO $ flip runSqlPersistMPool pool $ insert_ $! BlockTimeStrikeFuture
-          { blockTimeStrikeFutureBlock = blockHeight
-          , blockTimeStrikeFutureNlocktime = fromIntegral nlocktime
-          , blockTimeStrikeFutureCreationTime = now
-          }
+      nowUTC <- liftIO getCurrentTime
+      let now = utcTimeToPOSIXSeconds nowUTC
+      withDBTransaction "" $ insert_ $! BlockTimeStrikeFuture
+        { blockTimeStrikeFutureBlock = blockHeight
+        , blockTimeStrikeFutureNlocktime = fromIntegral nlocktime
+        , blockTimeStrikeFutureCreationTime = now
+        }
 
 -- | O(ln accounts) + O(BlockTimeStrikePast).
 -- returns list BlockTimeStrikePast records. requires authenticated user
@@ -159,16 +150,15 @@ getBlockTimeStrikePast token = do
       let err = "ERROR: getBlockTimeStrikePast: person was not able to authenticate itself"
       runLogging $ $(logError) err
       throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
-    Just person -> getBlockTimeStrikePast person
+    Just person -> do
+      mret <- getBlockTimeStrikePast person
+      case mret of
+        Nothing -> throwError err500 { errBody = "something went wrong"}
+        Just ret -> return ret
   where
-    getBlockTimeStrikePast :: (MonadIO m, MonadMonitor m) => (Entity Person) -> AppT m [ BlockTimeStrikePast]
+    getBlockTimeStrikePast :: (MonadIO m, MonadMonitor m) => (Entity Person) -> AppT m (Maybe [ BlockTimeStrikePast])
     getBlockTimeStrikePast _ = do
-      State{ accountDBPool = pool
-           , metrics = Metrics.MetricsState { Metrics.getBlockTimeStrikePast = getBlockTimeStrikePast
-                                            }
-           } <- ask
-      P.observeDuration getBlockTimeStrikePast $ do
-        liftIO $ flip runSqlPersistMPool pool $ selectList [] [] >>= return . List.map (\(Entity _ blocktimeStrikeFuture) -> blocktimeStrikeFuture)
+      withDBTransaction "" $ selectList [] [] >>= return . List.map (\(Entity _ blocktimeStrikeFuture) -> blocktimeStrikeFuture)
 
 -- | O(ln accounts) + O(BlockTimeStrikePast).
 -- returns list of BlockTimeStrikePastPublic records. Do not require authentication.
@@ -183,25 +173,19 @@ getBlockTimeStrikePastPage
   :: Maybe (Natural Int)
   -> Maybe (FilterRequest BlockTimeStrikePast BlockTimeStrikePastFilter)
   -> AppM (PagingResult BlockTimeStrikePastPublic)
-getBlockTimeStrikePastPage mpage mfilter = do
-  eret <- getBlockTimeStrikePast
-  case eret of
-    Left some -> do
-      let err = "ERROR: getBlockTimeStrikeExt: " <> Text.pack (show some)
-      runLogging $ $(logError) err
-      throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
-    Right ret -> return ret
+getBlockTimeStrikePastPage mpage mfilter = profile "getBlockTimeStrikePastPage" $ do
+  mret <- getBlockTimeStrikePast
+  case mret of
+    Nothing -> do
+      throwError err500 {errBody = "something went wrong"}
+    Just ret -> return ret
   where
     getBlockTimeStrikePast = do
-      State{ metrics = Metrics.MetricsState { Metrics.getBlockTimeStrikePast = getBlockTimeStrikePast
-                                            }
-           } <- ask
-      P.observeDuration getBlockTimeStrikePast $ do
-        pagingResult mpage (maybe [] (buildFilter . unFilterRequest) mfilter) BlockTimeStrikePastObservedBlockMediantime
-          $ ( C.awaitForever $ \(Entity strikeId strike) -> do
-              resultsCnt <- lift $ count [ BlockTimeStrikePastGuessStrike ==. strikeId ]
-              C.yield (BlockTimeStrikePastPublic {blockTimeStrikePastPublicPastStrike = strike, blockTimeStrikePastPublicGuessesCount = fromIntegral resultsCnt})
-            )
+      pagingResult mpage (maybe [] (buildFilter . unFilterRequest) mfilter) BlockTimeStrikePastObservedBlockMediantime
+        $ ( C.awaitForever $ \(Entity strikeId strike) -> do
+            resultsCnt <- lift $ count [ BlockTimeStrikePastGuessStrike ==. strikeId ]
+            C.yield (BlockTimeStrikePastPublic {blockTimeStrikePastPublicPastStrike = strike, blockTimeStrikePastPublicGuessesCount = fromIntegral resultsCnt})
+          )
 
 -- | this function is an entry point for a process, that creates blocktime past strikes when such block is being
 -- confirmed. After BlockTimeStrikePast creation, it will add record to the BlockTimeStrikeFutureObservedBlock table
@@ -213,22 +197,19 @@ newTipHandlerLoop = forever $ do
   State{ blockTimeState = BlockTime.State
          { blockTimeStrikeCurrentTip = currentTipV
          }
-       , metrics = Metrics.MetricsState { Metrics.getBlockTimeStrikeFuture = getBlockTimeStrikeFuture
-                                        }
        } <- ask
   -- get new current tip notification from upstream handler
   currentTip <- liftIO $ MVar.takeMVar currentTipV
   runLogging $ $(logInfo) $ "BlockTimeStrikeService: tipHandler: received new current tip height: " <> (tshow $ blockHeaderHeight currentTip)
   -- find out any future strikes <= new current tip
-  P.observeDuration getBlockTimeStrikeFuture $ do
-    moveFutureStrikesToPastStrikes currentTip
+  profile "newTipHandlerIteration" $ do
+    _ <- moveFutureStrikesToPastStrikes currentTip
     BlockTimeScheduledFutureStrikeCreation.maybeCreateFutureStrikes currentTip
   where
-    moveFutureStrikesToPastStrikes currentTip = do
+    moveFutureStrikesToPastStrikes currentTip = profile "moveFutureStrikesToPastStrikes" $ do
       State{ config = Config { configBlockspanURL = configBlockspanURL }
-           , accountDBPool = pool
            } <- ask
-      liftIO $ flip runSqlPersistMPool pool $ do
+      withDBTransaction "" $ do
         futureBlocks <- selectList [ BlockTimeStrikeFutureBlock <=. blockHeaderHeight currentTip] []
         forM_ futureBlocks $ \(Entity futureStrikeKey futureStrike) -> do
           nowUTC <- liftIO getCurrentTime
@@ -277,14 +258,12 @@ archiveFutureStrikesLoop :: (MonadIO m, MonadMonitor m) => AppT m ()
 archiveFutureStrikesLoop = forever $ do
   State{ config = Config {configSchedulerPollRateSecs = configSchedulerPollRateSecs}} <- ask
   runLogging $ $(logDebug) $ "archiveFutureStrikesLoop: iteration"
-  archiveFutureStrikesIteration
+  _ <- archiveFutureStrikesIteration
   liftIO $ threadDelay $ 1000000 * (fromIntegral configSchedulerPollRateSecs) -- sleep for poll rate secs
   where
-    archiveFutureStrikesIteration :: (MonadIO m, MonadMonitor m) => AppT m ()
-    archiveFutureStrikesIteration = do
-      State{ accountDBPool = pool
-           } <- ask
-      liftIO $ flip runSqlPersistMPool pool $ do
+    archiveFutureStrikesIteration :: (MonadIO m, MonadMonitor m) => AppT m (Maybe ())
+    archiveFutureStrikesIteration = profile "archiveFutureStrikesIteration" $ do
+      withDBTransaction "" $ do
         (futureStrikesToRemove :: [Entity BlockTimeStrikeFutureReadyToRemove]) <- selectList [] []
         forM_ futureStrikesToRemove $ \(Entity futureStrikeToRemoveKey futureStrikeToRemove) -> do
           delete futureStrikeToRemoveKey -- clean BlockTimeStrikeFutureReadyToRemove record as well

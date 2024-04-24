@@ -3,9 +3,15 @@
  -}
 module OpEnergy.Account.Server.V1.Metrics where
 
+import           Data.Text(Text)
 import           Control.Monad.IO.Class(MonadIO)
 import           Control.Concurrent.MVar(MVar)
 import qualified Control.Concurrent.MVar as MVar
+import           Control.Concurrent.STM.TVar(TVar)
+import qualified Control.Concurrent.STM as STM
+import           Data.Map (Map)
+import qualified Data.Map as Map
+import           Control.Monad.IO.Class(liftIO)
 
 import qualified Prometheus as P
 import qualified Network.Wai.Middleware.Prometheus as P
@@ -39,6 +45,7 @@ data MetricsState = MetricsState
   , createBlockTimeStrikeFutureGuess :: P.Histogram
   , mgetBlockTimeStrikePast :: P.Histogram
   , ensureFutureStrikeExistsAhead :: P.Histogram
+  , dynamicHistograms :: TVar (Map Text P.Histogram)
   }
 
 -- | constructs default state with given config and DB pool
@@ -66,6 +73,7 @@ initMetrics _config = do
   ensureFutureStrikeExistsAhead <- P.register $ P.histogram (P.Info "ensureFutureStrikeExistsAhead" "") microBuckets
   _ <- P.register P.ghcMetrics
   _ <- P.register P.procMetrics
+  tmap <- liftIO $ STM.newTVarIO (Map.empty)
   return $ MetricsState
     { accountLogin = accountLogin
     , accountDBLookup = accountDBLookup
@@ -87,18 +95,20 @@ initMetrics _config = do
     , createBlockTimeStrikeFutureGuess = createBlockTimeStrikeFutureGuess
     , mgetBlockTimeStrikePast = mgetBlockTimeStrikePast
     , ensureFutureStrikeExistsAhead = ensureFutureStrikeExistsAhead
+    , dynamicHistograms = tmap
     }
-  where
-    microBuckets = [ 0.0000001 -- 100 nanoseconds
-                   , 0.00000025 -- 250 ns
-                   , 0.0000005 -- 500 ns
-                   , 0.000001 -- 1 microsecond
-                   , 0.00001 -- 10 microseconds
-                   , 0.0001 -- 100 microseconds
-                   , 0.00025 -- 250 microseconds
-                   , 0.0005 -- 500 microseconds
-                   , 0.001 -- 1 ms
-                   ] ++ P.defaultBuckets
+
+microBuckets :: [Double]
+microBuckets = [ 0.0000001 -- 100 nanoseconds
+                , 0.00000025 -- 250 ns
+                , 0.0000005 -- 500 ns
+                , 0.000001 -- 1 microsecond
+                , 0.00001 -- 10 microseconds
+                , 0.0001 -- 100 microseconds
+                , 0.00025 -- 250 microseconds
+                , 0.0005 -- 500 microseconds
+                , 0.001 -- 1 ms
+                ] ++ P.defaultBuckets
 
 -- | runs metrics HTTP server
 runMetricsServer :: Config -> MVar MetricsState -> IO ()
@@ -107,3 +117,13 @@ runMetricsServer config metricsV = do
   metrics <- initMetrics config
   MVar.putMVar metricsV metrics
   W.run (fromPositive metricsPort) P.metricsApp
+
+dynamicHistogram :: TVar (Map Text P.Histogram) -> Text -> IO P.Histogram
+dynamicHistogram tmap name = do
+  map <- STM.atomically $ STM.readTVar tmap
+  case Map.lookup name map of
+    Just some -> return some
+    Nothing-> do
+      ret <- P.register $ P.histogram (P.Info name "") microBuckets
+      STM.atomically $ STM.modifyTVar tmap $ Map.insert name ret
+      return ret

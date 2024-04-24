@@ -17,13 +17,14 @@ import           Database.Persist.Pagination
 import           Database.Persist.Postgresql
 import           Control.Exception.Safe as E
 import           Control.Monad.Trans.Resource
+import           Prometheus(MonadMonitor(..))
 
 import           Data.OpEnergy.Account.API.V1.PagingResult
 import           Data.OpEnergy.API.V1.Positive(fromPositive)
 import           Data.OpEnergy.API.V1.Natural
 
 import           OpEnergy.Account.Server.V1.Config (Config(..))
-import           OpEnergy.Account.Server.V1.Class ( AppT, State(..))
+import           OpEnergy.Account.Server.V1.Class ( AppT, State(..), profile, withDBTransaction)
 
 pagingResult
   :: ( PersistEntity r
@@ -32,6 +33,7 @@ pagingResult
      , Ord typ
      , MonadIO m
      , MonadCatch m
+     , MonadMonitor m
      )
   =>  Maybe (Natural Int)
   -> [Filter r]
@@ -40,15 +42,14 @@ pagingResult
     (Entity r)
     (r1)
     (ReaderT SqlBackend (NoLoggingT (ResourceT IO))) ()
-  -> AppT m (Either SomeException (PagingResult r1) )
-pagingResult mpage filter field next = E.handle (\(err::SomeException)-> return $ Left err) $ do
-  State{ accountDBPool = pool
-       , config = Config{ configRecordsPerReply = recordsPerReply}
+  -> AppT m (Maybe (PagingResult r1) )
+pagingResult mpage filter field next = profile "pagingResult" $ do
+  State{ config = Config{ configRecordsPerReply = recordsPerReply}
        } <- ask
-  eret <- liftIO $ flip runSqlPersistMPool pool $ do
+  mret <- withDBTransaction "" $ do
     totalCount <- count (filter)
     if (fromNatural page) * (fromPositive recordsPerReply) >= totalCount
-      then return (Right (totalCount, [])) -- page out of range
+      then return (totalCount, []) -- page out of range
       else do
         pageResults <- runConduit
           $ streamEntities
@@ -60,16 +61,16 @@ pagingResult mpage filter field next = E.handle (\(err::SomeException)-> return 
           .| (C.drop (fromNatural page * fromPositive recordsPerReply) >> C.awaitForever C.yield) -- navigate to page
           .| next
           .| C.take (fromPositive recordsPerReply + 1) -- we take +1 to understand if there is a next page available
-        return (Right (totalCount, pageResults))
-  case eret of
-    Left err -> return (Left err)
-    Right (totalCount, resultsTail) -> do
+        return (totalCount, pageResults)
+  case mret of
+    Nothing -> return Nothing
+    Just (totalCount, resultsTail) -> do
       let newPage =
             if List.length resultsTail > fromPositive recordsPerReply
             then Just (fromIntegral (fromNatural page + 1))
             else Nothing
           results = List.take (fromPositive recordsPerReply) resultsTail
-      return $ Right $ PagingResult
+      return $ Just $ PagingResult
         { pagingResultNextPage = newPage
         , pagingResultCount = fromIntegral totalCount
         , pagingResultResults = results
