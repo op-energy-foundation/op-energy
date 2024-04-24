@@ -37,13 +37,14 @@ pagingResult
      )
   =>  Maybe (Natural Int)
   -> [Filter r]
+  -> SortOrder
   -> EntityField r typ
   -> ConduitT
     (Entity r)
     (r1)
     (ReaderT SqlBackend (NoLoggingT (ResourceT IO))) ()
   -> AppT m (Maybe (PagingResult r1) )
-pagingResult mpage filter field next = profile "pagingResult" $ do
+pagingResult mpage filter sortOrder field next = profile "pagingResult" $ do
   State{ config = Config{ configRecordsPerReply = recordsPerReply}
        } <- ask
   mret <- withDBTransaction "" $ do
@@ -56,7 +57,7 @@ pagingResult mpage filter field next = profile "pagingResult" $ do
             filter
             field
             (PageSize ((fromPositive recordsPerReply) + 1))
-            Descend
+            sortOrder
             (Range Nothing Nothing)
           .| (C.drop (fromNatural page * fromPositive recordsPerReply) >> C.awaitForever C.yield) -- navigate to page
           .| next

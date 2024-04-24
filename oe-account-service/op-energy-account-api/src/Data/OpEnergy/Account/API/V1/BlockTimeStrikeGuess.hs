@@ -32,6 +32,7 @@ import qualified Data.List as List
 import           Database.Persist.TH
 import           Database.Persist
 import           Database.Persist.Sql
+import           Database.Persist.Pagination
 import           Data.Default
 import           Data.Proxy
 import           Servant.API(ToHttpApiData(..), FromHttpApiData(..))
@@ -99,6 +100,7 @@ data BlockTimeStrikeGuessPublicFilter = BlockTimeStrikeGuessPublicFilter
   , blockTimeStrikeGuessPublicFilterBlockHeightLTE :: Maybe BlockHeight
   , blockTimeStrikeGuessPublicFilterNlocktimeGTE             :: Maybe POSIXTime
   , blockTimeStrikeGuessPublicFilterNlocktimeLTE             :: Maybe POSIXTime
+  , blockTimeStrikeGuessPublicFilterSort                     :: Maybe SortOrder
   }
   deriving (Eq, Show, Generic)
 instance Default BlockTimeStrikeGuessPublicFilter where
@@ -137,7 +139,8 @@ instance FromHttpApiData BlockTimeStrikeGuessPublicFilter where
     Left some -> Left (Text.pack some)
     Right some -> Right some
 instance BuildFilter BlockTimeStrikeFutureGuess BlockTimeStrikeGuessPublicFilter where
-  buildFilter v = List.concat
+  sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessPublicFilterSort filter)
+  buildFilter (v, _) = List.concat
     [ maybe [] (\time-> [ BlockTimeStrikeFutureGuessCreationTime >=. time ])
       $ blockTimeStrikeGuessPublicFilterCreationTimeGTE v
     , maybe [] (\time-> [ BlockTimeStrikeFutureGuessCreationTime <=. time ])
@@ -148,14 +151,16 @@ instance BuildFilter BlockTimeStrikeFutureGuess BlockTimeStrikeGuessPublicFilter
       $  blockTimeStrikeGuessPublicFilterGuessNEQ v
     ]
 instance BuildFilter Person BlockTimeStrikeGuessPublicFilter where
-  buildFilter v = List.concat
+  sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessPublicFilterSort filter)
+  buildFilter (v, _) = List.concat
     [ maybe [] (\v-> [ PersonUuid ==. v ])
       $ blockTimeStrikeGuessPublicFilterPersonEQ v
     , maybe [] (\v-> [ PersonUuid !=. v ])
       $ blockTimeStrikeGuessPublicFilterPersonNEQ v
     ]
 instance BuildFilter BlockTimeStrikeFuture BlockTimeStrikeGuessPublicFilter where
-  buildFilter v = List.concat
+  sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessPublicFilterSort filter)
+  buildFilter (v, _) = List.concat
     [ maybe [] (\v-> [ BlockTimeStrikeFutureBlock >=. v ])
       $  blockTimeStrikeGuessPublicFilterBlockHeightGTE v
     , maybe [] (\v-> [ BlockTimeStrikeFutureBlock <=. v ])
@@ -180,6 +185,7 @@ defaultBlockTimeStrikeGuessPublicFilter = BlockTimeStrikeGuessPublicFilter
   , blockTimeStrikeGuessPublicFilterBlockHeightLTE = Just 1
   , blockTimeStrikeGuessPublicFilterNlocktimeGTE = Just 1
   , blockTimeStrikeGuessPublicFilterNlocktimeLTE = Just 1
+  , blockTimeStrikeGuessPublicFilterSort         = Just Descend
   }
 
 
@@ -239,6 +245,7 @@ data BlockTimeStrikeGuessResultPublicFilter = BlockTimeStrikeGuessResultPublicFi
     -- strike nlocktime
   , blockTimeStrikeGuessResultPublicFilterObservedNlocktimeGTE        :: Maybe POSIXTime
   , blockTimeStrikeGuessResultPublicFilterObservedNlocktimeLTE        :: Maybe POSIXTime
+  , blockTimeStrikeGuessResultPublicFilterSort                        :: Maybe SortOrder
   }
   deriving (Eq, Show, Generic)
 instance Default BlockTimeStrikeGuessResultPublicFilter where
@@ -276,7 +283,8 @@ instance FromHttpApiData BlockTimeStrikeGuessResultPublicFilter where
     Left some -> Left (Text.pack some)
     Right some -> Right some
 instance BuildFilter BlockTimeStrikePastGuess BlockTimeStrikeGuessResultPublicFilter where
-  buildFilter v = List.concat
+  sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultPublicFilterSort filter)
+  buildFilter (v, _) = List.concat
     [ maybe [] (\v-> [BlockTimeStrikePastGuessFutureGuessCreationTime >=. v])
       $ blockTimeStrikeGuessResultPublicFilterCreationTimeGTE v
     , maybe [] (\v-> [BlockTimeStrikePastGuessFutureGuessCreationTime <=. v])
@@ -295,14 +303,16 @@ instance BuildFilter BlockTimeStrikePastGuess BlockTimeStrikeGuessResultPublicFi
       $ blockTimeStrikeGuessResultPublicFilterObservedResultNEQ v
     ]
 instance BuildFilter Person BlockTimeStrikeGuessResultPublicFilter where
-  buildFilter v = List.concat
+  sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultPublicFilterSort filter)
+  buildFilter (v, _) = List.concat
     [ maybe [] (\v-> [ PersonUuid ==. v ])
       $ blockTimeStrikeGuessResultPublicFilterPersonEQ v
     , maybe [] (\v-> [ PersonUuid !=. v ])
       $ blockTimeStrikeGuessResultPublicFilterPersonNEQ v
     ]
 instance BuildFilter BlockTimeStrikePast BlockTimeStrikeGuessResultPublicFilter where
-  buildFilter v = List.concat
+  sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultPublicFilterSort filter)
+  buildFilter (v, _) = List.concat
         -- strike block height
     [ maybe [] (\v -> [ BlockTimeStrikePastBlock >=. v])
       $ blockTimeStrikeGuessResultPublicFilterObservedBlockHeightGTE v
@@ -332,4 +342,5 @@ defaultBlockTimeStrikeGuessResultPublicFilter =  BlockTimeStrikeGuessResultPubli
     -- strike nlocktime
   , blockTimeStrikeGuessResultPublicFilterObservedNlocktimeGTE        = Just 1
   , blockTimeStrikeGuessResultPublicFilterObservedNlocktimeLTE        = Just 1
+  , blockTimeStrikeGuessResultPublicFilterSort                        = Just Descend
   }

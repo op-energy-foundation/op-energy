@@ -73,5 +73,6 @@ library
                     , cereal
                     , op-energy-api
                     , data-default
+                    , persistent-pagination
 
     ghc-options:    -O2 -Wall -Werror -Wno-unticked-promoted-constructors -fno-warn-name-shadowing -Wno-orphans

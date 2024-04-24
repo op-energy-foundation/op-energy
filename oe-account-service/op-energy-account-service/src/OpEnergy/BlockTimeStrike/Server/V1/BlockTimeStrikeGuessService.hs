@@ -3,6 +3,7 @@
 {-# LANGUAGE TemplateHaskell          #-}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE RecordWildCards          #-}
+{-# LANGUAGE FlexibleContexts          #-}
 module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
   ( getBlockTimeStrikeFutureGuesses
   , createBlockTimeStrikeFutureGuess
@@ -97,7 +98,7 @@ getBlockTimeStrikeFutureGuessesPage
 getBlockTimeStrikeFutureGuessesPage mpage mfilter = profile "getBlockTimeStrikeFutureGuessesPage" $ do
   State{  config = Config{ configRecordsPerReply = recordsPerReply}
         } <- ask
-  mret <- pagingResult mpage (maybe [] (buildFilter . unFilterRequest) mfilter ) BlockTimeStrikeFutureCreationTime
+  mret <- pagingResult mpage (maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter ) sort BlockTimeStrikeFutureCreationTime
     $ ( C.awaitForever $ \v@(Entity futureId _) -> do
         C.toProducer $ C.zipSources
           ( repeatC v
@@ -115,7 +116,7 @@ getBlockTimeStrikeFutureGuessesPage mpage mfilter = profile "getBlockTimeStrikeF
           ( repeatC (futureE, guessE)
           )
           ( streamEntities
-            ( (PersonId ==. blockTimeStrikeFutureGuessPerson guessResult) : (maybe [] (buildFilter . unFilterRequest) mfilter))
+            ( (PersonId ==. blockTimeStrikeFutureGuessPerson guessResult) : (maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter))
             PersonCreationTime
             (PageSize ((fromPositive recordsPerReply) + 1))
             Descend
@@ -136,6 +137,7 @@ getBlockTimeStrikeFutureGuessesPage mpage mfilter = profile "getBlockTimeStrikeF
     Just ret-> return ret
   where
     repeatC v = C.yield v >> repeatC v
+    sort = maybe Descend (sortOrder . unFilterRequest) mfilter
 
 mgetBlockTimeStrikeFuture :: (MonadIO m, MonadMonitor m) => BlockHeight-> Natural Int-> AppT m (Maybe (Entity BlockTimeStrikeFuture))
 mgetBlockTimeStrikeFuture blockHeight nlocktime = profile "mgetBlockTimeStrikeFuture" $ do
@@ -266,17 +268,21 @@ getBlockTimeStrikeGuessResultsPage mpage mfilter = do
     Just ret -> return ret
   where
     repeatC v = C.yield v >> repeatC v
+    sort = maybe Descend (sortOrder . unFilterRequest . id1 . mapFilter) mfilter
+      where
+        id1 :: FilterRequest BlockTimeStrikePast BlockTimeStrikeGuessResultPublicFilter -> FilterRequest BlockTimeStrikePast BlockTimeStrikeGuessResultPublicFilter
+        id1 = id -- helping typechecker
     getBlockTimeStrikeGuessResults :: (MonadIO m, MonadMonitor m, MonadCatch m) => AppT m (Maybe (PagingResult BlockTimeStrikeGuessResultPublic))
     getBlockTimeStrikeGuessResults = do
       State{ config = Config{ configRecordsPerReply = recordsPerReply}
            } <- ask
-      pagingResult mpage (maybe [] (buildFilter . unFilterRequest ) mfilter) BlockTimeStrikePastObservedBlockMediantime
+      pagingResult mpage (maybe [] (buildFilter . unFilterRequest . mapFilter ) mfilter) sort BlockTimeStrikePastObservedBlockMediantime
         $ ( C.awaitForever $ \v@(Entity pastId _)-> do
             C.toProducer $ C.zipSources
               ( repeatC v
               )
               ( streamEntities
-                ( (BlockTimeStrikePastGuessStrike ==. pastId) : (maybe [] (buildFilter . unFilterRequest) mfilter))
+                ( (BlockTimeStrikePastGuessStrike ==. pastId) : (maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter))
                 BlockTimeStrikePastGuessCreationTime
                 (PageSize ((fromPositive recordsPerReply) + 1))
                 Descend
@@ -288,7 +294,7 @@ getBlockTimeStrikeGuessResultsPage mpage mfilter = do
               ( repeatC (pastE, guessE)
               )
               ( streamEntities
-                ( (PersonId ==. blockTimeStrikePastGuessPerson guessResult) : (maybe [] (buildFilter . unFilterRequest) mfilter))
+                ( (PersonId ==. blockTimeStrikePastGuessPerson guessResult) : (maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter))
                 PersonCreationTime
                 (PageSize ((fromPositive recordsPerReply) + 1))
                 Descend

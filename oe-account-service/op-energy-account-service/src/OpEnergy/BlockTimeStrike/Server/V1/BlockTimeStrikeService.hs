@@ -33,6 +33,7 @@ import           Control.Monad.Trans
 import           Control.Exception.Safe as E
 
 import           Database.Persist.Postgresql
+import           Database.Persist.Pagination
 import           Prometheus(MonadMonitor)
 
 
@@ -89,9 +90,10 @@ getBlockTimeStrikeFuturePage mpage mfilter = profile "getBlockTimeStrikeFuturePa
     Just ret -> return ret
   where
     filter = maybe [] (buildFilter . unFilterRequest) mfilter
+    sort = maybe Descend (sortOrder . unFilterRequest) mfilter
     getBlockTimeStrikeFuture :: (MonadIO m, MonadMonitor m, MonadCatch m) => AppT m (Maybe (PagingResult BlockTimeStrikeFuture))
     getBlockTimeStrikeFuture = do
-      pagingResult mpage filter BlockTimeStrikeFutureCreationTime $ C.map $ \(Entity _ v) -> v
+      pagingResult mpage filter sort BlockTimeStrikeFutureCreationTime $ C.map $ \(Entity _ v) -> v
 
 -- | O(ln accounts).
 -- Tries to create future block time strike. Requires authenticated user and blockheight should be in the future
@@ -180,8 +182,9 @@ getBlockTimeStrikePastPage mpage mfilter = profile "getBlockTimeStrikePastPage" 
       throwError err500 {errBody = "something went wrong"}
     Just ret -> return ret
   where
+    sort = maybe Descend (sortOrder . unFilterRequest) mfilter
     getBlockTimeStrikePast = do
-      pagingResult mpage (maybe [] (buildFilter . unFilterRequest) mfilter) BlockTimeStrikePastObservedBlockMediantime
+      pagingResult mpage (maybe [] (buildFilter . unFilterRequest) mfilter) sort BlockTimeStrikePastObservedBlockMediantime
         $ ( C.awaitForever $ \(Entity strikeId strike) -> do
             resultsCnt <- lift $ count [ BlockTimeStrikePastGuessStrike ==. strikeId ]
             C.yield (BlockTimeStrikePastPublic {blockTimeStrikePastPublicPastStrike = strike, blockTimeStrikePastPublicGuessesCount = fromIntegral resultsCnt})

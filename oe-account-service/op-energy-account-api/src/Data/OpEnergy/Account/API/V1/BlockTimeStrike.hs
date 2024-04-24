@@ -34,6 +34,7 @@ import           Servant.API(ToHttpApiData(..), FromHttpApiData(..))
 import           Database.Persist.TH
 import           Database.Persist
 import           Database.Persist.Sql
+import           Database.Persist.Pagination
 import           Data.Proxy
 import           Data.Default
 
@@ -90,15 +91,17 @@ BlockTimeStrikeFutureReadyToRemove -- FSM state 2: record here means, that all g
 
 data BlockTimeStrikeFutureFilter = BlockTimeStrikeFutureFilter
   { blockTimeStrikeFutureFilterCreationTimeGTE :: Maybe POSIXTime
-  , blockTimeStrikeFutureFilterCreationTimeLTE   :: Maybe POSIXTime
-  , blockTimeStrikeFutureFilterNlocktimeGTE   :: Maybe POSIXTime
-  , blockTimeStrikeFutureFilterNlocktimeLTE     :: Maybe POSIXTime
+  , blockTimeStrikeFutureFilterCreationTimeLTE :: Maybe POSIXTime
+  , blockTimeStrikeFutureFilterNlocktimeGTE    :: Maybe POSIXTime
+  , blockTimeStrikeFutureFilterNlocktimeLTE    :: Maybe POSIXTime
   , blockTimeStrikeFutureFilterBlockHeightGTE  :: Maybe BlockHeight
-  , blockTimeStrikeFutureFilterBlockHeightLTE    :: Maybe BlockHeight
+  , blockTimeStrikeFutureFilterBlockHeightLTE  :: Maybe BlockHeight
+  , blockTimeStrikeFutureFilterSort            :: Maybe SortOrder
   }
   deriving (Eq, Show, Generic)
 instance BuildFilter BlockTimeStrikeFuture BlockTimeStrikeFutureFilter where
-  buildFilter filter = List.concat
+  sortOrder (filter, _) = maybe Descend id (blockTimeStrikeFutureFilterSort filter)
+  buildFilter (filter, _) = List.concat
     $ [ maybe [] (\time -> [ BlockTimeStrikeFutureCreationTime >=. time ])
         $ blockTimeStrikeFutureFilterCreationTimeGTE filter
       , maybe [] (\time -> [ BlockTimeStrikeFutureCreationTime <=. time ])
@@ -150,7 +153,6 @@ instance FromHttpApiData BlockTimeStrikeFutureFilter where
     Left some -> Left (Text.pack some)
     Right some -> Right some
 
-
 defaultBlockTimeStrikeFutureFilter :: BlockTimeStrikeFutureFilter
 defaultBlockTimeStrikeFutureFilter = BlockTimeStrikeFutureFilter
   { blockTimeStrikeFutureFilterCreationTimeGTE = Just 1
@@ -159,6 +161,7 @@ defaultBlockTimeStrikeFutureFilter = BlockTimeStrikeFutureFilter
   , blockTimeStrikeFutureFilterNlocktimeLTE    = Just 1
   , blockTimeStrikeFutureFilterBlockHeightGTE  = Just 1
   , blockTimeStrikeFutureFilterBlockHeightLTE  = Just 1
+  , blockTimeStrikeFutureFilterSort            = Just Descend
   }
 
 defaultBlockTimeStrikeFuture :: BlockTimeStrikeFuture
@@ -192,6 +195,7 @@ defaultBlockTimeStrikePast = BlockTimeStrikePast
   , blockTimeStrikePastObservedResult = defaultSlowFast
   , blockTimeStrikePastObservedBlockMediantime = defaultPOSIXTime
   , blockTimeStrikePastObservedBlockHash = BlockHash.defaultHash
+
   }
 instance ToJSON BlockTimeStrikePast where
   toJSON = commonToJSON genericToJSON
@@ -270,6 +274,7 @@ data BlockTimeStrikePastFilter = BlockTimeStrikePastFilter
     -- future strike creation time
   , blockTimeStrikePastFilterFutureStrikeCreationTimeGTE :: Maybe POSIXTime
   , blockTimeStrikePastFilterFutureStrikeCreationTimeLTE :: Maybe POSIXTime
+  , blockTimeStrikePastFilterSort                        :: Maybe SortOrder
   }
   deriving (Eq, Show, Generic)
 instance ToJSON BlockTimeStrikePastFilter where
@@ -310,7 +315,8 @@ instance FromHttpApiData BlockTimeStrikePastFilter where
     Left some -> Left (Text.pack some)
     Right some -> Right some
 instance BuildFilter BlockTimeStrikePast BlockTimeStrikePastFilter where
-  buildFilter v = List.concat
+  sortOrder (filter, _) = maybe Descend id (blockTimeStrikePastFilterSort filter)
+  buildFilter (v, _) = List.concat
     [ maybe [] (\v-> [BlockTimeStrikePastCreationTime >=. v])
       $ blockTimeStrikePastFilterCreationTimeGTE v
     , maybe [] (\v-> [BlockTimeStrikePastCreationTime <=. v])
@@ -364,5 +370,6 @@ defaultBlockTimeStrikePastFilter = BlockTimeStrikePastFilter
     -- future strike creation time
   , blockTimeStrikePastFilterFutureStrikeCreationTimeGTE = Just 1
   , blockTimeStrikePastFilterFutureStrikeCreationTimeLTE = Just 1
+  , blockTimeStrikePastFilterSort                        = Just Descend
   }
 
