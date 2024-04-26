@@ -8,9 +8,11 @@
 , scientific
 , cryptohash-sha256, base16-bytestring
 , persistent, persistent-template
+, persistent-pagination
 , random
 , cereal
 , op-energy-api
+, data-default
 , ...
 }:
 mkDerivation {
@@ -30,8 +32,10 @@ mkDerivation {
     cryptohash-sha256 base16-bytestring
     random
     persistent persistent-template
+    persistent-pagination
     cereal
     op-energy-api
+    data-default
   ];
   executableHaskellDepends = [
     base

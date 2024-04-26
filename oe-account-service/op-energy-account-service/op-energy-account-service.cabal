@@ -62,6 +62,7 @@ library
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledFutureStrikeCreation
                    , Data.Text.Show
+                   , OpEnergy.PagingResult
     build-depends:    base ^>=4.15.1.0
                     , aeson
                     , aeson-pretty
@@ -78,6 +79,7 @@ library
                     , lens
                     , scientific
                     , persistent, persistent-template, persistent-postgresql, monad-logger
+                    , persistent-pagination
                     , resource-pool
                     , random
                     , cryptohash-sha256
@@ -85,7 +87,9 @@ library
                     , op-energy-api
                     , op-energy-account-api
                     , conduit
+                    , resourcet
                     , exceptions
+                    , safe-exceptions
                     , mtl
                     , stm, stm-chans
                     , transformers

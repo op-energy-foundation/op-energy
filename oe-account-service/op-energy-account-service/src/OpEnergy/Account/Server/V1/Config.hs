@@ -63,6 +63,8 @@ data Config = Config
     -- ^ defines URL to blockspan api instance. Used to get block header info at block discovery
   , configBlockTimeFutureStrikeShouldExistsAheadCurrentTip :: Positive Int
     -- ^ defines how many blocks ahead of current tip there should exist a future strike. Effectively, this means, that there should exist future strikes for a range [ currentTip + configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip; currentTip + configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip + configBlockTimeFutureStrikeShouldExistsAheadCurrentTip ]
+  , configRecordsPerReply :: Positive Int
+    -- ^ defines how much records should be returned in one page
   }
   deriving Show
 instance FromJSON Config where
@@ -85,6 +87,7 @@ instance FromJSON Config where
     <*> ( v .:? "BLOCKTIME_STRIKE_FUTURE_GUESS_MINIMUM_BLOCKS_AHEAD_CURRENT_TIP" .!= (configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip defaultConfig))
     <*> ((v .:? "BLOCKSPAN_API_URL" .!= (showBaseUrl $ configBlockspanURL defaultConfig)) >>= parseBaseUrl)
     <*> ( v .:? "BLOCKTIME_FUTURE_STRIKE_SHOULD_EXISTS_AHEAD_CURRENT_TIP" .!= (configBlockTimeFutureStrikeShouldExistsAheadCurrentTip defaultConfig))
+    <*> ( v .:? "BLOCKTIME_RECORDS_PER_REPLY" .!= (configRecordsPerReply defaultConfig))
 
 -- need to get Key from json, which represented as base64-encoded string
 instance FromJSON Key where
@@ -114,6 +117,7 @@ defaultConfig = Config
   , configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip = 6
   , configBlockspanURL = BaseUrl Http "127.0.0.1" 8999 ""
   , configBlockTimeFutureStrikeShouldExistsAheadCurrentTip = 12
+  , configRecordsPerReply = 100
   }
 
 getConfigFromEnvironment :: IO Config

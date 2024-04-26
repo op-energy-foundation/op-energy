@@ -25,6 +25,9 @@ import           Data.OpEnergy.API.V1.Natural
 import           Data.OpEnergy.Account.API.V1.Account
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
+import           Data.OpEnergy.Account.API.V1.PagingResult
+import           Data.OpEnergy.Account.API.V1.FilterRequest
+import           Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic
 
 -- | API specifications of a backend service for Swagger
 type AccountV1API
@@ -59,6 +62,14 @@ type BlockTimeV1API
 
   :<|> "future"
     :> "strike"
+    :> "page"
+    :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
+    :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter" ] "filter" (FilterRequest BlockTimeStrikeFuture BlockTimeStrikeFutureFilter)
+    :> Description "returns list of the future time strikes"
+    :> Get '[JSON] (PagingResult BlockTimeStrikeFuture)
+
+  :<|> "future"
+    :> "strike"
     :> ReqBody '[JSON] AccountToken -- require authentication
     :> Capture "BlockHeight" BlockHeight
     :> Capture "nLockTime" (Natural Int)
@@ -77,6 +88,15 @@ type BlockTimeV1API
   :<|> "future"
     :> "strike"
     :> "guess"
+    :> "page"
+    :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
+    :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter" ] "filter" (FilterRequest BlockTimeStrikeFutureGuess BlockTimeStrikeGuessPublicFilter)
+    :> Description "returns list of the guesses for a given future time strike."
+    :> Get '[JSON] (PagingResult BlockTimeStrikeGuessPublic)
+
+  :<|> "future"
+    :> "strike"
+    :> "guess"
     :> ReqBody '[JSON] AccountToken -- require authentication
     :> Capture "BlockHeight" BlockHeight
     :> Capture "nLockTime" (Natural Int)
@@ -91,6 +111,20 @@ type BlockTimeV1API
     :> Post '[JSON] [BlockTimeStrikePast]
 
   :<|> "past"
+    :> "strikeExt"
+    :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
+    :> Description "DEPRECATED: use /api/v1/past/strike/page instead"
+    :> Get '[JSON] (PagingResult BlockTimeStrikePastPublic)
+
+  :<|> "past"
+    :> "strike"
+    :> "page"
+    :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
+    :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter" ] "filter" (FilterRequest BlockTimeStrikePast BlockTimeStrikePastFilter)
+    :> Description "returns list of past strikes, that have been already processed. Results are ordered by block mediantime in descending order. Time strike becomes \"past\" when it becomes confirmed and you can think about it as archived strike, that had been processed and now being kept as history"
+    :> Get '[JSON] (PagingResult BlockTimeStrikePastPublic)
+
+  :<|> "past"
     :> "strike"
     :> "guess"
     :> ReqBody '[JSON] AccountToken -- require authentication
@@ -98,6 +132,15 @@ type BlockTimeV1API
     :> Capture "nLockTime" (Natural Int)
     :> Description "returns results for the given blocktime strike in the past. Requires authentication. Time strike becomes \"past\" when it becomes confirmed and you can think about it as archived strike, that had been processed and now being kept as history. 'Guess' becomes a 'result' when blocktime strike becomes confirmed and processed."
     :> Post '[JSON] [BlockTimeStrikeGuessResultPublic]
+
+  :<|> "past"
+    :> "strike"
+    :> "guess"
+    :> "page"
+    :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
+    :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter" ] "filter" (FilterRequest BlockTimeStrikePastGuess BlockTimeStrikeGuessResultPublicFilter)
+    :> Description "returns results for the given blocktime strike in the past. Time strike becomes \"past\" when it becomes confirmed and you can think about it as archived strike, that had been processed and now being kept as history. 'Guess' becomes a 'result' when blocktime strike becomes confirmed and processed."
+    :> Get '[JSON] (PagingResult BlockTimeStrikeGuessResultPublic)
 
   :<|> "git-hash"
     :> Description "returns short hash of commit of the op-energy git repo that had been used to build backend"

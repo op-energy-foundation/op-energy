@@ -9,18 +9,22 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Short as BS (fromShort, toShort)
 import           GHC.Generics
 import           Data.Typeable              (Typeable)
-import           Data.Aeson
 import           Data.Char (isAlphaNum)
-import           Crypto.Hash.SHA256
-import qualified Data.ByteString.Base16 as Base16
 import           Data.Text(Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import           Data.Word
 import           Control.Monad (replicateM)
 import           System.Random(getStdRandom, randomR)
+
+import qualified Data.ByteString.Base16 as Base16
+import           Crypto.Hash.SHA256
+import           Data.Aeson
 import           Database.Persist
 import           Database.Persist.Sql
+import           Data.Swagger
+import           Control.Lens
+import           Data.Proxy(Proxy(..))
 
 newtype UUID a = UUID ShortByteString
   deriving (Eq, Show, Generic, Typeable)
@@ -29,6 +33,14 @@ instance ToJSON (UUID a) where
   toJSON (UUID s) = toJSON $! TE.decodeUtf8 $! BS.fromShort s
 instance FromJSON (UUID a) where
   parseJSON = withText "UUID" $ pure . verifyUUID
+instance Show a => ToSchema (UUID a) where
+  declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
+    & mapped.schema.description ?~ (T.unlines
+      [ "This is the example of the UUID"
+      ])
+    & mapped.schema.example ?~ toJSON defaultUUID
+instance ToSchema ShortByteString where
+  declareNamedSchema _ = declareNamedSchema (Proxy :: Proxy Text)
 
 
 generateRandomUUID :: IO (UUID a)
