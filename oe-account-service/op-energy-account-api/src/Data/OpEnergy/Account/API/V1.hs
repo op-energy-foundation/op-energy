@@ -56,7 +56,7 @@ type BlockTimeV1API
 
   :<|> "future"
     :> "strike"
-    :> ReqBody '[JSON] AccountToken -- require authentication
+    :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "AccountToken" AccountToken -- require authentication
     :> Description "returns list of the future time strikes. Requires authentication."
     :> Post '[JSON] [BlockTimeStrikeFuture]
 
@@ -70,7 +70,7 @@ type BlockTimeV1API
 
   :<|> "future"
     :> "strike"
-    :> ReqBody '[JSON] AccountToken -- require authentication
+    :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "AccountToken" AccountToken -- require authentication
     :> Capture "BlockHeight" BlockHeight
     :> Capture "nLockTime" (Natural Int)
     :> Description "Creates new future time strike by given BlockHeight and nLockTime. Requires authentication. Where: BlockHeight - height of the block in the future. It is expected, that it should be at least at 12 block in the future than current confirmed tip. nLockTime is a POSIX time in the future."
@@ -79,7 +79,7 @@ type BlockTimeV1API
   :<|> "future"
     :> "strike"
     :> "guess"
-    :> ReqBody '[JSON] AccountToken -- require authentication
+    :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "AccountToken" AccountToken -- require authentication
     :> Capture "BlockHeight" BlockHeight
     :> Capture "nLockTime" (Natural Int)
     :> Description "returns list of the guesses for a given future time strike. Requires authentication."
@@ -97,7 +97,7 @@ type BlockTimeV1API
   :<|> "future"
     :> "strike"
     :> "guess"
-    :> ReqBody '[JSON] AccountToken -- require authentication
+    :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "AccountToken" AccountToken -- require authentication
     :> Capture "BlockHeight" BlockHeight
     :> Capture "nLockTime" (Natural Int)
     :> Capture "guess" SlowFast
@@ -106,7 +106,7 @@ type BlockTimeV1API
 
   :<|> "past"
     :> "strike"
-    :> ReqBody '[JSON] AccountToken -- require authentication
+    :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "AccountToken" AccountToken -- require authentication
     :> Description "returns list of past strikes, that have been already processed. Requires authentication. Time strike becomes \"past\" when it becomes confirmed and you can think about it as archived strike, that had been processed and now being kept as history"
     :> Post '[JSON] [BlockTimeStrikePast]
 
@@ -127,7 +127,7 @@ type BlockTimeV1API
   :<|> "past"
     :> "strike"
     :> "guess"
-    :> ReqBody '[JSON] AccountToken -- require authentication
+    :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "AccountToken" AccountToken -- require authentication
     :> Capture "BlockHeight" BlockHeight
     :> Capture "nLockTime" (Natural Int)
     :> Description "returns results for the given blocktime strike in the past. Requires authentication. Time strike becomes \"past\" when it becomes confirmed and you can think about it as archived strike, that had been processed and now being kept as history. 'Guess' becomes a 'result' when blocktime strike becomes confirmed and processed."

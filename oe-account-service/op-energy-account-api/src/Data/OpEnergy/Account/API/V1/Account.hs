@@ -39,6 +39,7 @@ import qualified Data.ByteString as BS (pack)
 import           Database.Persist.TH
 import           Database.Persist
 import           Database.Persist.Sql
+import           Servant.API
 
 import           Data.OpEnergy.Account.API.V1.UUID
 import           Data.OpEnergy.Account.API.V1.Hash
@@ -80,6 +81,8 @@ instance ToParamSchema AccountToken where
   toParamSchema _ = mempty
     & type_ ?~ SwaggerString
     & format ?~ unAccountToken defaultAccountToken
+instance FromHttpApiData AccountToken where
+  parseUrlPiece = everifyAccountToken
 
 defaultAccountToken :: AccountToken
 defaultAccountToken = verifyAccountToken "h+3b0A7XIfbmjg=="
