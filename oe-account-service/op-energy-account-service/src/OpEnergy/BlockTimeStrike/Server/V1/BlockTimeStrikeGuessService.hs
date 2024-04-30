@@ -5,23 +5,20 @@
 {-# LANGUAGE RecordWildCards          #-}
 {-# LANGUAGE FlexibleContexts          #-}
 module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
-  ( getBlockTimeStrikeFutureGuesses
-  , createBlockTimeStrikeFutureGuess
-  , getBlockTimeStrikeGuessResults
+  ( createBlockTimeStrikeFutureGuess
   , getBlockTimeStrikeGuessResultsPage
   , calculateResultsLoop
   , getBlockTimeStrikeFutureGuessesPage
   ) where
 
-import           Servant (err400, err404, err500, throwError, errBody)
+import           Servant (err400, err500, throwError, errBody)
 import           Control.Monad.Trans.Reader (ask)
-import           Control.Monad.Trans.Maybe (MaybeT(..), runMaybeT)
 import           Control.Monad.Logger(logDebug, logError)
 import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
 import           Data.Maybe(fromJust)
 import qualified Control.Concurrent.STM.TVar as TVar
-import           Control.Monad(forM, forM_, forever, void)
+import           Control.Monad( forM_, forever, void)
 import           Control.Concurrent(threadDelay)
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Text.Encoding as Text
@@ -51,43 +48,6 @@ import           OpEnergy.Account.Server.V1.Class (runAppT, AppT, AppM, State(..
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
 import           OpEnergy.PagingResult
-
--- | O(ln users) + O(strike future)
--- returns list BlockTimeStrikeFuture records. requires authenticated user
-getBlockTimeStrikeFutureGuesses :: AccountToken-> BlockHeight-> Natural Int-> AppM [BlockTimeStrikeGuessPublic ]
-getBlockTimeStrikeFutureGuesses token blockHeight nlocktime = profile "getBlockTimeStrikeFutureGuesses" $ do
-  mperson <- mgetPersonByAccountToken token
-  case mperson of
-    Nothing -> do
-      let err = "ERROR: getBlockTimeStrikeFutureGuesses: failed to authenticate user"
-      runLogging $ $(logError) err
-      throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
-    Just person -> do
-      mret <- getBlockTimeStrikeFutureGuesses person
-      case mret of
-        Nothing -> throwError err500 { errBody = "something went wrong"}
-        Just Nothing -> do
-          let err = "ERROR: getBlockTimeStrikeFutureGuesses: failed to get future strike for a given user"
-          runLogging $ $(logError) err
-          throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
-        Just (Just ret)-> return ret
-  where
-    getBlockTimeStrikeFutureGuesses :: (MonadIO m, MonadMonitor m) => Entity Person -> AppT m (Maybe (Maybe [BlockTimeStrikeGuessPublic]))
-    getBlockTimeStrikeFutureGuesses (Entity _ _) = profile "getBlockTimeStrikeFutureGuesses" $ do
-      withDBTransaction "" $ runMaybeT $ do
-        Entity strikeKey strike <- MaybeT $ selectFirst [ BlockTimeStrikeFutureBlock ==. blockHeight
-                               , BlockTimeStrikeFutureNlocktime ==. fromIntegral nlocktime
-                               ] []
-        ret <- MaybeT $ Just <$> selectList [ BlockTimeStrikeFutureGuessStrike ==. strikeKey] []
-        MaybeT $ Just <$> mapM (\(Entity _ guess) -> do
-                 person <- get (blockTimeStrikeFutureGuessPerson guess) >>= return . fromJust
-                 return $! BlockTimeStrikeGuessPublic
-                   { person = personUuid person
-                   , strike = strike
-                   , creationTime = blockTimeStrikeFutureGuessCreationTime guess
-                   , guess = blockTimeStrikeFutureGuessGuess guess
-                   }
-             ) ret
 
 -- | O(ln users) + O(strike future)
 -- returns list BlockTimeStrikeFuture records
@@ -149,16 +109,6 @@ mgetBlockTimeStrikeFuture blockHeight nlocktime = profile "mgetBlockTimeStrikeFu
     Just some -> return some
     _ -> return Nothing
 
-mgetBlockTimeStrikePast :: (MonadIO m, MonadMonitor m) => BlockHeight-> Natural Int-> AppT m (Maybe (Entity BlockTimeStrikePast))
-mgetBlockTimeStrikePast blockHeight nlocktime = profile "mgetBlockTimeStrikePast" $ do
-  mret <- withDBTransaction "" $ do
-    selectFirst [ BlockTimeStrikePastBlock ==. blockHeight
-                , BlockTimeStrikePastNlocktime ==. fromIntegral nlocktime
-                ] []
-  case mret of
-    Just ret -> return ret
-    Nothing -> return Nothing
-
 -- | O(ln accounts).
 -- Tries to create future block time strike. Requires authenticated user and blockheight should be in the future
 createBlockTimeStrikeFutureGuess :: AccountToken-> BlockHeight-> Natural Int-> SlowFast-> AppM ()
@@ -215,44 +165,6 @@ createBlockTimeStrikeFutureGuess token blockHeight nlocktime guess = profile "cr
           , blockTimeStrikeFutureGuessStrike = strikeKey
           }
         return ()
-
--- | O(ln accounts) + O(BlockTimeStrikePast).
--- returns list BlockTimeStrikePast records. requires authenticated user
-getBlockTimeStrikeGuessResults :: AccountToken-> BlockHeight-> Natural Int-> AppM [ BlockTimeStrikeGuessResultPublic]
-getBlockTimeStrikeGuessResults token blockHeight nlocktime = profile "getBlockTimeStrikeGuessResults" $ do
-  mperson <- mgetPersonByAccountToken token
-  case mperson of
-    Just person -> do
-      mstrike <- mgetBlockTimeStrikePast blockHeight nlocktime
-      case mstrike of
-        Just strike-> do
-          mret <- getBlockTimeStrikeGuessResult person strike
-          case mret of
-            Nothing -> throwError err500 { errBody = "something went wrong"}
-            Just ret -> return ret
-        Nothing-> do
-          let err = "ERROR: getBlockTimeStrikeGuessResults: there is no past blocktime strike with given block height and nlocktime"
-          runLogging $ $(logError) err
-          throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
-    Nothing -> do
-      let msg = "ERROR: getBlockTimeStrikeGuessResults: person was not able to authenticate itself"
-      runLogging $ $(logError) msg
-      throwError err404
-  where
-    getBlockTimeStrikeGuessResult :: (MonadIO m, MonadMonitor m) => (Entity Person) -> Entity BlockTimeStrikePast-> AppT m (Maybe [ BlockTimeStrikeGuessResultPublic])
-    getBlockTimeStrikeGuessResult _ (Entity _ strike) = do
-      withDBTransaction "" $ do
-        (guessResults :: [Entity BlockTimeStrikePastGuess]) <- selectList [] []
-        forM guessResults $ \(Entity _ guessResult)-> do
-          person <- get (blockTimeStrikePastGuessPerson guessResult) >>= return . fromJust -- persistent ensures that person with appropriate PersonId exist
-          return $ BlockTimeStrikeGuessResultPublic
-            { person = personUuid person
-            , strike = strike
-            , creationTime = blockTimeStrikePastGuessFutureGuessCreationTime guessResult
-            , archiveTime = blockTimeStrikePastGuessCreationTime guessResult
-            , guess = blockTimeStrikePastGuessGuess guessResult
-            , observedResult = blockTimeStrikePastGuessObservedResult guessResult
-            }
 
 -- | O(ln accounts) + O(BlockTimeStrikePast).
 -- returns list BlockTimeStrikePast records

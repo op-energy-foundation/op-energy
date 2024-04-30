@@ -4,19 +4,16 @@
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE RecordWildCards          #-}
 module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
-  ( getBlockTimeStrikeFuture
-  , getBlockTimeStrikeFuturePage
+  ( getBlockTimeStrikeFuturePage
   , createBlockTimeStrikeFuture
-  , getBlockTimeStrikePast
   , newTipHandlerLoop
   , archiveFutureStrikesLoop
   , getBlockTimeStrikePastPage
   , getBlockTimeStrikePastExt
   ) where
 
-import           Servant (err400, err404, err500, throwError, errBody)
+import           Servant (err400, err500, throwError, errBody)
 import           Control.Monad.Trans.Reader (ask)
-import qualified Data.List as List
 import           Control.Monad.Logger(logDebug, logError, logInfo)
 import           Control.Monad(forever, forM_)
 import           Data.Time.Clock(getCurrentTime)
@@ -54,26 +51,6 @@ import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledFutureStrikeCreation as BlockTimeScheduledFutureStrikeCreation
 import           OpEnergy.PagingResult
-
--- | O(ln users) + O(strike future)
--- returns list BlockTimeStrikeFuture records. requires authenticated user
-getBlockTimeStrikeFuture :: AccountToken-> AppM [BlockTimeStrikeFuture ]
-getBlockTimeStrikeFuture token = profile "getBlockTimeStrikeFuture" $ do
-  mperson <- mgetPersonByAccountToken token
-  case mperson of
-    Nothing -> do
-      let err = "ERROR: getBlockTimeStrikeFuture: authentication failure"
-      runLogging $ $(logError) err
-      throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
-    Just person -> do
-      mret <- getBlockTimeStrikeFuture person
-      case mret of
-        Just ret -> return ret
-        Nothing -> throwError err500 {errBody = "something went wrong"}
-  where
-    getBlockTimeStrikeFuture :: (MonadIO m, MonadMonitor m) => Entity Person -> AppT m (Maybe [BlockTimeStrikeFuture])
-    getBlockTimeStrikeFuture (Entity _ _) = do
-      withDBTransaction "" $ selectList [] [] >>= return . List.map (\(Entity _ blocktimeStrikeFuture) -> blocktimeStrikeFuture)
 
 -- | O(ln users) + O(strike future)
 -- returns list BlockTimeStrikeFuture records
@@ -143,31 +120,11 @@ createBlockTimeStrikeFuture token blockHeight nlocktime = profile "createBlockTi
         }
 
 -- | O(ln accounts) + O(BlockTimeStrikePast).
--- returns list BlockTimeStrikePast records. requires authenticated user
-getBlockTimeStrikePast :: AccountToken-> AppM [ BlockTimeStrikePast]
-getBlockTimeStrikePast token = do
-  mperson <- mgetPersonByAccountToken token
-  case mperson of
-    Nothing -> do
-      let err = "ERROR: getBlockTimeStrikePast: person was not able to authenticate itself"
-      runLogging $ $(logError) err
-      throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
-    Just person -> do
-      mret <- getBlockTimeStrikePast person
-      case mret of
-        Nothing -> throwError err500 { errBody = "something went wrong"}
-        Just ret -> return ret
-  where
-    getBlockTimeStrikePast :: (MonadIO m, MonadMonitor m) => (Entity Person) -> AppT m (Maybe [ BlockTimeStrikePast])
-    getBlockTimeStrikePast _ = do
-      withDBTransaction "" $ selectList [] [] >>= return . List.map (\(Entity _ blocktimeStrikeFuture) -> blocktimeStrikeFuture)
-
--- | O(ln accounts) + O(BlockTimeStrikePast).
 -- returns list of BlockTimeStrikePastPublic records. Do not require authentication.
 getBlockTimeStrikePastExt
   :: Maybe (Natural Int)
   -> AppM (PagingResult BlockTimeStrikePastPublic)
-getBlockTimeStrikePastExt mpage = getBlockTimeStrikePastPage mpage Nothing
+getBlockTimeStrikePastExt mpage = profile "getBlockTimeStrikePastExt" $ getBlockTimeStrikePastPage mpage Nothing
 
 -- | O(ln accounts) + O(BlockTimeStrikePast).
 -- returns list of BlockTimeStrikePastPublic records. Do not require authentication.

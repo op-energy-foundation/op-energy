@@ -56,12 +56,6 @@ type BlockTimeV1API
 
   :<|> "future"
     :> "strike"
-    :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "AccountToken" AccountToken -- require authentication
-    :> Description "returns list of the future time strikes. Requires authentication."
-    :> Post '[JSON] [BlockTimeStrikeFuture]
-
-  :<|> "future"
-    :> "strike"
     :> "page"
     :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
     :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter" ] "filter" (FilterRequest BlockTimeStrikeFuture BlockTimeStrikeFutureFilter)
@@ -75,15 +69,6 @@ type BlockTimeV1API
     :> Capture "nLockTime" (Natural Int)
     :> Description "Creates new future time strike by given BlockHeight and nLockTime. Requires authentication. Where: BlockHeight - height of the block in the future. It is expected, that it should be at least at 12 block in the future than current confirmed tip. nLockTime is a POSIX time in the future."
     :> Post '[JSON] ()
-
-  :<|> "future"
-    :> "strike"
-    :> "guess"
-    :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "AccountToken" AccountToken -- require authentication
-    :> Capture "BlockHeight" BlockHeight
-    :> Capture "nLockTime" (Natural Int)
-    :> Description "returns list of the guesses for a given future time strike. Requires authentication."
-    :> Post '[JSON] [BlockTimeStrikeGuessPublic]
 
   :<|> "future"
     :> "strike"
@@ -106,32 +91,11 @@ type BlockTimeV1API
 
   :<|> "past"
     :> "strike"
-    :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "AccountToken" AccountToken -- require authentication
-    :> Description "returns list of past strikes, that have been already processed. Requires authentication. Time strike becomes \"past\" when it becomes confirmed and you can think about it as archived strike, that had been processed and now being kept as history"
-    :> Post '[JSON] [BlockTimeStrikePast]
-
-  :<|> "past"
-    :> "strikeExt"
-    :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
-    :> Description "DEPRECATED: use /api/v1/past/strike/page instead"
-    :> Get '[JSON] (PagingResult BlockTimeStrikePastPublic)
-
-  :<|> "past"
-    :> "strike"
     :> "page"
     :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
     :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter" ] "filter" (FilterRequest BlockTimeStrikePast BlockTimeStrikePastFilter)
     :> Description "returns list of past strikes, that have been already processed. Results are ordered by block mediantime in descending order. Time strike becomes \"past\" when it becomes confirmed and you can think about it as archived strike, that had been processed and now being kept as history"
     :> Get '[JSON] (PagingResult BlockTimeStrikePastPublic)
-
-  :<|> "past"
-    :> "strike"
-    :> "guess"
-    :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "AccountToken" AccountToken -- require authentication
-    :> Capture "BlockHeight" BlockHeight
-    :> Capture "nLockTime" (Natural Int)
-    :> Description "returns results for the given blocktime strike in the past. Requires authentication. Time strike becomes \"past\" when it becomes confirmed and you can think about it as archived strike, that had been processed and now being kept as history. 'Guess' becomes a 'result' when blocktime strike becomes confirmed and processed."
-    :> Post '[JSON] [BlockTimeStrikeGuessResultPublic]
 
   :<|> "past"
     :> "strike"
