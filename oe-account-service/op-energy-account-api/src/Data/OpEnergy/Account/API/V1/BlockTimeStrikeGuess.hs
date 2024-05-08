@@ -45,36 +45,24 @@ import           Data.OpEnergy.Account.API.V1.FilterRequest
 import           Data.OpEnergy.API.V1.Block(BlockHeight)
 
 share [mkPersist sqlSettings, mkMigrate "migrateBlockTimeStrikeGuess"] [persistLowerCase|
-BlockTimeStrikeFutureGuess
+BlockTimeStrikeGuess
   -- data
   guess SlowFast
+  observedResult SlowFast Maybe -- when Nothing - guess, when Just _ - result
+  blockHeight BlockHeight -- this field is for optimization purpose: it will be used as a loop termitation metric as there will be N -> inf guesses and we need to check only M of them, where blockHeight <= currentTip each scheduler check. Effectively, this is a copy strike.blockHeight
   -- metadata
   creationTime POSIXTime
   -- reflinks
-  person PersonId
-  strike BlockTimeStrikeFutureId
-  -- constraints
-  UniquePersonStrikeGuess person strike -- only 1 guess per strike is allowed for person
-  deriving Eq Show Generic
-
-BlockTimeStrikePastGuess
-  -- data
-  guess SlowFast
-  observedResult SlowFast
-  -- metadata
-  creationTime POSIXTime
-  futureGuessCreationTime POSIXTime
-  -- reflinks
-  strike BlockTimeStrikePastId
+  strike BlockTimeStrikeId
   person PersonId
   -- constraints
-  UniquePersonStrikeGuessResult person strike -- only 1 guess per strike is allowed for person
+  UniqueBlockTimeStrikeGuessPersonStrike person strike -- only 1 guess per strike is allowed for person
   deriving Eq Show Generic
 |]
 
 data BlockTimeStrikeGuessPublic = BlockTimeStrikeGuessPublic
   { person :: UUID Person
-  , strike ::  BlockTimeStrikeFuture
+  , strike ::  BlockTimeStrike
   , creationTime :: POSIXTime
   , guess :: SlowFast
   }
@@ -88,8 +76,8 @@ instance Default BlockTimeStrikeGuessPublic where
   def = defaultBlockTimeStrikeGuessPublic
 
 data BlockTimeStrikeGuessPublicFilter = BlockTimeStrikeGuessPublicFilter
-  { blockTimeStrikeGuessPublicFilterStrikeFutureCreationTimeGTE :: Maybe POSIXTime
-  , blockTimeStrikeGuessPublicFilterStrikeFutureCreationTimeLTE   :: Maybe POSIXTime
+  { blockTimeStrikeGuessPublicFilterStrikeCreationTimeGTE :: Maybe POSIXTime
+  , blockTimeStrikeGuessPublicFilterStrikeCreationTimeLTE   :: Maybe POSIXTime
   , blockTimeStrikeGuessPublicFilterCreationTimeGTE :: Maybe POSIXTime
   , blockTimeStrikeGuessPublicFilterCreationTimeLTE :: Maybe POSIXTime
   , blockTimeStrikeGuessPublicFilterGuessEQ :: Maybe SlowFast
@@ -138,16 +126,16 @@ instance FromHttpApiData BlockTimeStrikeGuessPublicFilter where
   parseQueryParam v = case Aeson.eitherDecodeStrict (Text.encodeUtf8 v) of
     Left some -> Left (Text.pack some)
     Right some -> Right some
-instance BuildFilter BlockTimeStrikeFutureGuess BlockTimeStrikeGuessPublicFilter where
+instance BuildFilter BlockTimeStrikeGuess BlockTimeStrikeGuessPublicFilter where
   sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessPublicFilterSort filter)
   buildFilter (v, _) = List.concat
-    [ maybe [] (\time-> [ BlockTimeStrikeFutureGuessCreationTime >=. time ])
+    [ maybe [] (\time-> [ BlockTimeStrikeGuessCreationTime >=. time ])
       $ blockTimeStrikeGuessPublicFilterCreationTimeGTE v
-    , maybe [] (\time-> [ BlockTimeStrikeFutureGuessCreationTime <=. time ])
+    , maybe [] (\time-> [ BlockTimeStrikeGuessCreationTime <=. time ])
       $  blockTimeStrikeGuessPublicFilterCreationTimeLTE v
-    , maybe [] (\v-> [ BlockTimeStrikeFutureGuessGuess ==. v ])
+    , maybe [] (\v-> [ BlockTimeStrikeGuessGuess ==. v ])
       $  blockTimeStrikeGuessPublicFilterGuessEQ v
-    , maybe [] (\v-> [ BlockTimeStrikeFutureGuessGuess !=. v ])
+    , maybe [] (\v-> [ BlockTimeStrikeGuessGuess !=. v ])
       $  blockTimeStrikeGuessPublicFilterGuessNEQ v
     ]
 instance BuildFilter Person BlockTimeStrikeGuessPublicFilter where
@@ -158,23 +146,23 @@ instance BuildFilter Person BlockTimeStrikeGuessPublicFilter where
     , maybe [] (\v-> [ PersonUuid !=. v ])
       $ blockTimeStrikeGuessPublicFilterPersonNEQ v
     ]
-instance BuildFilter BlockTimeStrikeFuture BlockTimeStrikeGuessPublicFilter where
+instance BuildFilter BlockTimeStrike BlockTimeStrikeGuessPublicFilter where
   sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessPublicFilterSort filter)
   buildFilter (v, _) = List.concat
-    [ maybe [] (\v-> [ BlockTimeStrikeFutureBlock >=. v ])
+    [ maybe [] (\v-> [ BlockTimeStrikeBlock >=. v ])
       $  blockTimeStrikeGuessPublicFilterBlockHeightGTE v
-    , maybe [] (\v-> [ BlockTimeStrikeFutureBlock <=. v ])
+    , maybe [] (\v-> [ BlockTimeStrikeBlock <=. v ])
       $  blockTimeStrikeGuessPublicFilterBlockHeightLTE v
-    , maybe [] (\v-> [ BlockTimeStrikeFutureNlocktime >=. v ])
+    , maybe [] (\v-> [ BlockTimeStrikeNlocktime >=. v ])
       $  blockTimeStrikeGuessPublicFilterNlocktimeGTE v
-    , maybe [] (\v-> [ BlockTimeStrikeFutureNlocktime <=. v ])
+    , maybe [] (\v-> [ BlockTimeStrikeNlocktime <=. v ])
       $  blockTimeStrikeGuessPublicFilterNlocktimeLTE v
     ]
 
 defaultBlockTimeStrikeGuessPublicFilter :: BlockTimeStrikeGuessPublicFilter
 defaultBlockTimeStrikeGuessPublicFilter = BlockTimeStrikeGuessPublicFilter
-  { blockTimeStrikeGuessPublicFilterStrikeFutureCreationTimeGTE = Just 1
-  , blockTimeStrikeGuessPublicFilterStrikeFutureCreationTimeLTE = Just 1
+  { blockTimeStrikeGuessPublicFilterStrikeCreationTimeGTE = Just 1
+  , blockTimeStrikeGuessPublicFilterStrikeCreationTimeLTE = Just 1
   , blockTimeStrikeGuessPublicFilterCreationTimeGTE = Just 1
   , blockTimeStrikeGuessPublicFilterCreationTimeLTE = Just 1
   , blockTimeStrikeGuessPublicFilterGuessEQ = Just Slow
@@ -192,16 +180,15 @@ defaultBlockTimeStrikeGuessPublicFilter = BlockTimeStrikeGuessPublicFilter
 defaultBlockTimeStrikeGuessPublic :: BlockTimeStrikeGuessPublic
 defaultBlockTimeStrikeGuessPublic = BlockTimeStrikeGuessPublic
   { person = defaultUUID
-  , strike = defaultBlockTimeStrikeFuture
+  , strike = defaultBlockTimeStrike
   , creationTime = defaultPOSIXTime
   , guess = defaultSlowFast
   }
 
 data BlockTimeStrikeGuessResultPublic = BlockTimeStrikeGuessResultPublic
   { person :: UUID Person
-  , strike :: BlockTimeStrikePast
+  , strike :: BlockTimeStrike
   , creationTime :: POSIXTime
-  , archiveTime :: POSIXTime
   , guess :: SlowFast
   , observedResult :: SlowFast
   }
@@ -216,9 +203,8 @@ instance Default BlockTimeStrikeGuessResultPublic where
 defaultBlockTimeStrikeGuessResultPublic :: BlockTimeStrikeGuessResultPublic
 defaultBlockTimeStrikeGuessResultPublic = BlockTimeStrikeGuessResultPublic
   { person = defaultUUID
-  , strike = defaultBlockTimeStrikePast
+  , strike = defaultBlockTimeStrike
   , creationTime = defaultPOSIXTime
-  , archiveTime = defaultPOSIXTime
   , guess = defaultSlowFast
   , observedResult = defaultSlowFast
   }
@@ -282,24 +268,24 @@ instance FromHttpApiData BlockTimeStrikeGuessResultPublicFilter where
   parseQueryParam v = case Aeson.eitherDecodeStrict (Text.encodeUtf8 v) of
     Left some -> Left (Text.pack some)
     Right some -> Right some
-instance BuildFilter BlockTimeStrikePastGuess BlockTimeStrikeGuessResultPublicFilter where
+instance BuildFilter BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter where
   sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultPublicFilterSort filter)
   buildFilter (v, _) = List.concat
-    [ maybe [] (\v-> [BlockTimeStrikePastGuessFutureGuessCreationTime >=. v])
+    [ maybe [] (\v-> [BlockTimeStrikeGuessCreationTime >=. v])
       $ blockTimeStrikeGuessResultPublicFilterCreationTimeGTE v
-    , maybe [] (\v-> [BlockTimeStrikePastGuessFutureGuessCreationTime <=. v])
+    , maybe [] (\v-> [BlockTimeStrikeGuessCreationTime <=. v])
       $ blockTimeStrikeGuessResultPublicFilterCreationTimeLTE v
-    , maybe [] (\v-> [BlockTimeStrikePastGuessCreationTime >=. v])
+    , maybe [] (\v-> [BlockTimeStrikeGuessCreationTime >=. v])
       $ blockTimeStrikeGuessResultPublicFilterArchiveTimeGTE v
-    , maybe [] (\v-> [BlockTimeStrikePastGuessCreationTime <=. v])
+    , maybe [] (\v-> [BlockTimeStrikeGuessCreationTime <=. v])
       $ blockTimeStrikeGuessResultPublicFilterArchiveTimeLTE v
-    , maybe [] (\v-> [BlockTimeStrikePastGuessGuess ==. v])
+    , maybe [] (\v-> [BlockTimeStrikeGuessGuess ==. v])
       $ blockTimeStrikeGuessResultPublicFilterGuessEQ v
-    , maybe [] (\v-> [BlockTimeStrikePastGuessGuess !=. v])
+    , maybe [] (\v-> [BlockTimeStrikeGuessGuess !=. v])
       $ blockTimeStrikeGuessResultPublicFilterGuessNEQ v
-    , maybe [] (\v-> [BlockTimeStrikePastGuessObservedResult ==. v])
+    , maybe [] (\v-> [BlockTimeStrikeGuessObservedResult ==. Just v])
       $ blockTimeStrikeGuessResultPublicFilterObservedResultEQ v
-    , maybe [] (\v-> [BlockTimeStrikePastGuessObservedResult !=. v])
+    , maybe [] (\v-> [BlockTimeStrikeGuessObservedResult !=. Just v])
       $ blockTimeStrikeGuessResultPublicFilterObservedResultNEQ v
     ]
 instance BuildFilter Person BlockTimeStrikeGuessResultPublicFilter where
@@ -310,18 +296,18 @@ instance BuildFilter Person BlockTimeStrikeGuessResultPublicFilter where
     , maybe [] (\v-> [ PersonUuid !=. v ])
       $ blockTimeStrikeGuessResultPublicFilterPersonNEQ v
     ]
-instance BuildFilter BlockTimeStrikePast BlockTimeStrikeGuessResultPublicFilter where
+instance BuildFilter BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter where
   sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultPublicFilterSort filter)
   buildFilter (v, _) = List.concat
         -- strike block height
-    [ maybe [] (\v -> [ BlockTimeStrikePastBlock >=. v])
+    [ maybe [] (\v -> [ BlockTimeStrikeBlock >=. v])
       $ blockTimeStrikeGuessResultPublicFilterObservedBlockHeightGTE v
-    , maybe [] (\v -> [ BlockTimeStrikePastBlock <=. v])
+    , maybe [] (\v -> [ BlockTimeStrikeBlock <=. v])
       $ blockTimeStrikeGuessResultPublicFilterObservedBlockHeightLTE v
         -- strike nlocktime
-    , maybe [] (\v -> [ BlockTimeStrikePastNlocktime >=. v])
+    , maybe [] (\v -> [ BlockTimeStrikeNlocktime >=. v])
       $ blockTimeStrikeGuessResultPublicFilterObservedNlocktimeGTE v
-    , maybe [] (\v -> [ BlockTimeStrikePastNlocktime <=. v])
+    , maybe [] (\v -> [ BlockTimeStrikeNlocktime <=. v])
       $ blockTimeStrikeGuessResultPublicFilterObservedNlocktimeLTE v
     ]
 

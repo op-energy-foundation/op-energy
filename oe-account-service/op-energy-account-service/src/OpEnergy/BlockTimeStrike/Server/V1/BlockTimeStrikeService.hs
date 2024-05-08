@@ -7,9 +7,7 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
   ( getBlockTimeStrikeFuturePage
   , createBlockTimeStrikeFuture
   , newTipHandlerLoop
-  , archiveFutureStrikesLoop
   , getBlockTimeStrikePastPage
-  , getBlockTimeStrikePastExt
   ) where
 
 import           Servant (err400, err500, throwError, errBody)
@@ -20,7 +18,6 @@ import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
 import qualified Control.Concurrent.STM.TVar as TVar
 import qualified Control.Concurrent.MVar as MVar
-import           Control.Concurrent(threadDelay)
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -49,15 +46,15 @@ import           OpEnergy.Account.Server.V1.Config (Config(..))
 import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging, profile, withDBTransaction)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
-import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledFutureStrikeCreation as BlockTimeScheduledFutureStrikeCreation
+import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledStrikeCreation as BlockTimeScheduledStrikeCreation
 import           OpEnergy.PagingResult
 
 -- | O(ln users) + O(strike future)
 -- returns list BlockTimeStrikeFuture records
 getBlockTimeStrikeFuturePage
   :: Maybe (Natural Int)
-  -> Maybe (FilterRequest BlockTimeStrikeFuture BlockTimeStrikeFutureFilter)
-  -> AppM (PagingResult BlockTimeStrikeFuture)
+  -> Maybe (FilterRequest BlockTimeStrike BlockTimeStrikeFilter)
+  -> AppM (PagingResult BlockTimeStrike)
 getBlockTimeStrikeFuturePage mpage mfilter = profile "getBlockTimeStrikeFuturePage" $ do
   mret <- getBlockTimeStrikeFuture
   runLogging $ $(logDebug) $ "filter: " <> (Text.pack $ show mfilter)
@@ -66,23 +63,23 @@ getBlockTimeStrikeFuturePage mpage mfilter = profile "getBlockTimeStrikeFuturePa
       throwError err500 {errBody = "something went wrong"}
     Just ret -> return ret
   where
-    filter = maybe [] (buildFilter . unFilterRequest) mfilter
+    filter = (BlockTimeStrikeObservedBlockHash ==. Nothing):(maybe [] (buildFilter . unFilterRequest) mfilter)
     sort = maybe Descend (sortOrder . unFilterRequest) mfilter
-    getBlockTimeStrikeFuture :: (MonadIO m, MonadMonitor m, MonadCatch m) => AppT m (Maybe (PagingResult BlockTimeStrikeFuture))
+    getBlockTimeStrikeFuture :: (MonadIO m, MonadMonitor m, MonadCatch m) => AppT m (Maybe (PagingResult BlockTimeStrike))
     getBlockTimeStrikeFuture = do
-      pagingResult mpage filter sort BlockTimeStrikeFutureCreationTime $ C.map $ \(Entity _ v) -> v
+      pagingResult mpage filter sort BlockTimeStrikeCreationTime $ C.map $ \(Entity _ v) -> v
 
 -- | O(ln accounts).
 -- Tries to create future block time strike. Requires authenticated user and blockheight should be in the future
 createBlockTimeStrikeFuture :: AccountToken-> BlockHeight-> Natural Int-> AppM ()
-createBlockTimeStrikeFuture token blockHeight nlocktime = profile "createBlockTimeStrikeFuture" $ do
+createBlockTimeStrikeFuture token blockHeight nlocktime = profile "createBlockTimeStrike" $ do
   State{ config = Config{ configBlockTimeStrikeMinimumBlockAheadCurrentTip = configBlockTimeStrikeMinimumBlockAheadCurrentTip}
        , blockTimeState = BlockTime.State{ latestConfirmedBlock = latestConfirmedBlockV }
        } <- ask
   mlatestConfirmedBlock <- liftIO $ TVar.readTVarIO latestConfirmedBlockV
   case mlatestConfirmedBlock of
     Nothing -> do
-      let err = "ERROR: createBlockTimeStrikeFuture: there is no current tip yet"
+      let err = "ERROR: createBlockTimeStrike: there is no current tip yet"
       runLogging $ $(logError) err
       throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
     Just tip
@@ -92,46 +89,42 @@ createBlockTimeStrikeFuture token blockHeight nlocktime = profile "createBlockTi
         throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
     Just tip
       | blockHeaderHeight tip + naturalFromPositive configBlockTimeStrikeMinimumBlockAheadCurrentTip > blockHeight -> do
-        let msg = "ERROR: createBlockTimeStrikeFuture: block height for new block time strike should be in the future + minimum configBlockTimeStrikeMinimumBlockAheadCurrentTip"
+        let msg = "ERROR: createBlockTimeStrike: block height for new block time strike should be in the future + minimum configBlockTimeStrikeMinimumBlockAheadCurrentTip"
         runLogging $ $(logError) msg
         throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 msg)}
     _ -> do
       mperson <- mgetPersonByAccountToken token
       case mperson of
         Nothing -> do
-          let err = "ERROR: createBlockTimeStrikeFuture: person was not able to authenticate itself"
+          let err = "ERROR: createBlockTimeStrike: person was not able to authenticate itself"
           runLogging $ $(logError) err
           throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
         Just person -> do
-          mret <- createBlockTimeStrikeFutureEsnuredConditions person
+          mret <- createBlockTimeStrikeEnsuredConditions person
           case mret of
             Just ret -> return ret
             Nothing -> do
               throwError err500 {errBody = "something went wrong"}
   where
-    createBlockTimeStrikeFutureEsnuredConditions :: (MonadIO m, MonadMonitor m) => (Entity Person) -> AppT m (Maybe ())
-    createBlockTimeStrikeFutureEsnuredConditions _ = do
+    createBlockTimeStrikeEnsuredConditions :: (MonadIO m, MonadMonitor m) => (Entity Person) -> AppT m (Maybe ())
+    createBlockTimeStrikeEnsuredConditions _ = do
       nowUTC <- liftIO getCurrentTime
       let now = utcTimeToPOSIXSeconds nowUTC
-      withDBTransaction "" $ insert_ $! BlockTimeStrikeFuture
-        { blockTimeStrikeFutureBlock = blockHeight
-        , blockTimeStrikeFutureNlocktime = fromIntegral nlocktime
-        , blockTimeStrikeFutureCreationTime = now
+      withDBTransaction "" $ insert_ $! BlockTimeStrike
+        { blockTimeStrikeBlock = blockHeight
+        , blockTimeStrikeNlocktime = fromIntegral nlocktime
+        , blockTimeStrikeCreationTime = now
+        , blockTimeStrikeObservedResult = Nothing
+        , blockTimeStrikeObservedBlockMediantime = Nothing
+        , blockTimeStrikeObservedBlockHash = Nothing
         }
-
--- | O(ln accounts) + O(BlockTimeStrikePast).
--- returns list of BlockTimeStrikePastPublic records. Do not require authentication.
-getBlockTimeStrikePastExt
-  :: Maybe (Natural Int)
-  -> AppM (PagingResult BlockTimeStrikePastPublic)
-getBlockTimeStrikePastExt mpage = profile "getBlockTimeStrikePastExt" $ getBlockTimeStrikePastPage mpage Nothing
 
 -- | O(ln accounts) + O(BlockTimeStrikePast).
 -- returns list of BlockTimeStrikePastPublic records. Do not require authentication.
 getBlockTimeStrikePastPage
   :: Maybe (Natural Int)
-  -> Maybe (FilterRequest BlockTimeStrikePast BlockTimeStrikePastFilter)
-  -> AppM (PagingResult BlockTimeStrikePastPublic)
+  -> Maybe (FilterRequest BlockTimeStrike BlockTimeStrikeFilter)
+  -> AppM (PagingResult BlockTimeStrikePublic)
 getBlockTimeStrikePastPage mpage mfilter = profile "getBlockTimeStrikePastPage" $ do
   mret <- getBlockTimeStrikePast
   case mret of
@@ -140,11 +133,12 @@ getBlockTimeStrikePastPage mpage mfilter = profile "getBlockTimeStrikePastPage" 
     Just ret -> return ret
   where
     sort = maybe Descend (sortOrder . unFilterRequest) mfilter
+    filter = (BlockTimeStrikeObservedBlockHash !=. Nothing):(maybe [] (buildFilter . unFilterRequest) mfilter)
     getBlockTimeStrikePast = do
-      pagingResult mpage (maybe [] (buildFilter . unFilterRequest) mfilter) sort BlockTimeStrikePastObservedBlockMediantime
+      pagingResult mpage filter sort BlockTimeStrikeObservedBlockMediantime
         $ ( C.awaitForever $ \(Entity strikeId strike) -> do
-            resultsCnt <- lift $ count [ BlockTimeStrikePastGuessStrike ==. strikeId ]
-            C.yield (BlockTimeStrikePastPublic {blockTimeStrikePastPublicPastStrike = strike, blockTimeStrikePastPublicGuessesCount = fromIntegral resultsCnt})
+            resultsCnt <- lift $ count [ BlockTimeStrikeGuessStrike ==. strikeId ]
+            C.yield (BlockTimeStrikePublic {blockTimeStrikePublicStrike = strike, blockTimeStrikePublicGuessesCount = fromIntegral resultsCnt})
           )
 
 -- | this function is an entry point for a process, that creates blocktime past strikes when such block is being
@@ -163,68 +157,31 @@ newTipHandlerLoop = forever $ do
   runLogging $ $(logInfo) $ "BlockTimeStrikeService: tipHandler: received new current tip height: " <> (tshow $ blockHeaderHeight currentTip)
   -- find out any future strikes <= new current tip
   profile "newTipHandlerIteration" $ do
-    _ <- moveFutureStrikesToPastStrikes currentTip
-    BlockTimeScheduledFutureStrikeCreation.maybeCreateFutureStrikes currentTip
+    _ <- observeStrikes currentTip
+    BlockTimeScheduledStrikeCreation.maybeCreateStrikes currentTip
   where
-    moveFutureStrikesToPastStrikes currentTip = profile "moveFutureStrikesToPastStrikes" $ do
+    observeStrikes currentTip = profile "moveFutureStrikesToPastStrikes" $ do
       State{ config = Config { configBlockspanURL = configBlockspanURL }
            } <- ask
       withDBTransaction "" $ do
-        futureBlocks <- selectList [ BlockTimeStrikeFutureBlock <=. blockHeaderHeight currentTip] []
+        futureBlocks <- selectList [ BlockTimeStrikeBlock <=. blockHeaderHeight currentTip
+                                   , BlockTimeStrikeObservedBlockHash ==. Nothing
+                                   ] []
         forM_ futureBlocks $ \(Entity futureStrikeKey futureStrike) -> do
-          nowUTC <- liftIO getCurrentTime
-          let now = utcTimeToPOSIXSeconds nowUTC
           -- create past block
           blockHeader <-
-            if blockHeaderHeight currentTip == blockTimeStrikeFutureBlock futureStrike
+            if blockHeaderHeight currentTip == blockTimeStrikeBlock futureStrike
             then return currentTip -- if we already have this block header
-            else liftIO $! Blockspan.withClient configBlockspanURL $ getBlockByHeight (blockTimeStrikeFutureBlock futureStrike)
+            else liftIO $! Blockspan.withClient configBlockspanURL $ getBlockByHeight (blockTimeStrikeBlock futureStrike)
           -- it is possible, that BlockTimeStrikePast already had been created, so we need to check if such strike exists and ignore it
-          mexist <- selectFirst
-            [ BlockTimeStrikePastBlock ==. blockTimeStrikeFutureBlock futureStrike
-            , BlockTimeStrikePastNlocktime ==. blockTimeStrikeFutureNlocktime futureStrike
+          update futureStrikeKey
+            [ BlockTimeStrikeObservedResult =.
+              ( Just $!
+                  if fromIntegral (blockHeaderMediantime blockHeader) <= blockTimeStrikeNlocktime futureStrike
+                  then Fast
+                  else Slow
+              )
+            , BlockTimeStrikeObservedBlockMediantime =. ( Just $! fromIntegral $ blockHeaderMediantime blockHeader)
+            , BlockTimeStrikeObservedBlockHash =. (Just $! blockHeaderHash blockHeader)
             ]
-            []
-          case mexist of
-            Nothing -> do
-              let pastStrike = BlockTimeStrikePast
-                    { blockTimeStrikePastBlock = blockTimeStrikeFutureBlock futureStrike
-                    , blockTimeStrikePastNlocktime = blockTimeStrikeFutureNlocktime futureStrike
-                    , blockTimeStrikePastFutureStrikeCreationTime = blockTimeStrikeFutureCreationTime futureStrike
-                    , blockTimeStrikePastObservedBlockMediantime = fromIntegral $ blockHeaderMediantime blockHeader
-                    , blockTimeStrikePastObservedBlockHash = blockHeaderHash blockHeader
-                    , blockTimeStrikePastCreationTime = now
-                    , blockTimeStrikePastObservedResult =
-                      if fromIntegral (blockHeaderMediantime blockHeader) <= blockTimeStrikeFutureNlocktime futureStrike
-                      then Fast
-                      else Slow
-                    }
-              pastStrikeKey <- insert pastStrike
-              let observedBlock = BlockTimeStrikeFutureObservedBlock
-                    { blockTimeStrikeFutureObservedBlockFutureStrike = futureStrikeKey
-                    , blockTimeStrikeFutureObservedBlockPastStrike = pastStrikeKey
-                    , blockTimeStrikeFutureObservedBlockFutureStrikeBlock = blockTimeStrikeFutureBlock futureStrike
-                    , blockTimeStrikeFutureObservedBlockFutureStrikeNlocktime = blockTimeStrikeFutureNlocktime futureStrike
-                    }
-              -- if there were no past strike yet, then observed is not exist as well
-              _ <- insert observedBlock -- we are sure, that no observed block exist yet
-              return ()
-            Just _ -> -- past strike exists, ignore it
-              return ()
 
--- | this function is an entry point of thread, that removes BlockTimeStrikeFuture record when all the guesses had been
--- already moved into results and thus there are no more references to the current record
-archiveFutureStrikesLoop :: (MonadIO m, MonadMonitor m) => AppT m ()
-archiveFutureStrikesLoop = forever $ do
-  State{ config = Config {configSchedulerPollRateSecs = configSchedulerPollRateSecs}} <- ask
-  runLogging $ $(logDebug) $ "archiveFutureStrikesLoop: iteration"
-  _ <- archiveFutureStrikesIteration
-  liftIO $ threadDelay $ 1000000 * (fromIntegral configSchedulerPollRateSecs) -- sleep for poll rate secs
-  where
-    archiveFutureStrikesIteration :: (MonadIO m, MonadMonitor m) => AppT m (Maybe ())
-    archiveFutureStrikesIteration = profile "archiveFutureStrikesIteration" $ do
-      withDBTransaction "" $ do
-        (futureStrikesToRemove :: [Entity BlockTimeStrikeFutureReadyToRemove]) <- selectList [] []
-        forM_ futureStrikesToRemove $ \(Entity futureStrikeToRemoveKey futureStrikeToRemove) -> do
-          delete futureStrikeToRemoveKey -- clean BlockTimeStrikeFutureReadyToRemove record as well
-          delete (blockTimeStrikeFutureReadyToRemoveFutureStrike futureStrikeToRemove) -- clean blocktime strike future

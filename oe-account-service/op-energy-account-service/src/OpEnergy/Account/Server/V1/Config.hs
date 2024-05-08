@@ -57,12 +57,12 @@ data Config = Config
     -- ^ this value defines the minimum amount of blocks that block time strike should be ahead of current tip to be accepted to be created
   , configBlockTimeStrikeBlockSpanWebsocketAPIURL :: BaseUrl
     -- ^ defines URL of blockspan API service
-  , configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip :: Positive Int
-    -- ^ this value defines the minimum ahead of future strike guess to require. It should be at least 6, as confirmed current tip is 6 blocks behind unconfirmed tip
+  , configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip :: Positive Int
+    -- ^ this value defines the minimum ahead of  strike guess to require. It should be at least 6, as confirmed current tip is 6 blocks behind unconfirmed tip
   , configBlockspanURL :: BaseUrl
     -- ^ defines URL to blockspan api instance. Used to get block header info at block discovery
-  , configBlockTimeFutureStrikeShouldExistsAheadCurrentTip :: Positive Int
-    -- ^ defines how many blocks ahead of current tip there should exist a future strike. Effectively, this means, that there should exist future strikes for a range [ currentTip + configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip; currentTip + configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip + configBlockTimeFutureStrikeShouldExistsAheadCurrentTip ]
+  , configBlockTimeStrikeShouldExistsAheadCurrentTip :: Positive Int
+    -- ^ defines how many blocks ahead of current tip there should exist a  strike. Effectively, this means, that there should exist  strikes for a range [ currentTip + configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip; currentTip + configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip + configBlockTimeStrikeShouldExistsAheadCurrentTip ]
   , configRecordsPerReply :: Positive Int
     -- ^ defines how much records should be returned in one page
   }
@@ -84,9 +84,9 @@ instance FromJSON Config where
     <*> ( v .:? "ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY" .!= (configAccountTokenEncryptionPrivateKey defaultConfig))
     <*> ( v .:? "BLOCKTIME_STRIKE_MINIMUM_BLOCKS_AHEAD_CURRENT_TIP" .!= (configBlockTimeStrikeMinimumBlockAheadCurrentTip defaultConfig))
     <*> ((v .:? "BLOCKTIME_STRIKE_BLOCKSPAN_WEBSOCKET_API_URL" .!= (showBaseUrl $ configBlockTimeStrikeBlockSpanWebsocketAPIURL defaultConfig)) >>= parseBaseUrl)
-    <*> ( v .:? "BLOCKTIME_STRIKE_FUTURE_GUESS_MINIMUM_BLOCKS_AHEAD_CURRENT_TIP" .!= (configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip defaultConfig))
+    <*> ( v .:? "BLOCKTIME_STRIKE_GUESS_MINIMUM_BLOCKS_AHEAD_CURRENT_TIP" .!= (configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip defaultConfig))
     <*> ((v .:? "BLOCKSPAN_API_URL" .!= (showBaseUrl $ configBlockspanURL defaultConfig)) >>= parseBaseUrl)
-    <*> ( v .:? "BLOCKTIME_FUTURE_STRIKE_SHOULD_EXISTS_AHEAD_CURRENT_TIP" .!= (configBlockTimeFutureStrikeShouldExistsAheadCurrentTip defaultConfig))
+    <*> ( v .:? "BLOCKTIME_STRIKE_SHOULD_EXISTS_AHEAD_CURRENT_TIP" .!= (configBlockTimeStrikeShouldExistsAheadCurrentTip defaultConfig))
     <*> ( v .:? "BLOCKTIME_RECORDS_PER_REPLY" .!= (configRecordsPerReply defaultConfig))
 
 -- need to get Key from json, which represented as base64-encoded string
@@ -114,9 +114,9 @@ defaultConfig = Config
   , configAccountTokenEncryptionPrivateKey = error "defaultConfig: you are missing ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY from config. Please generate it with \"dd if=/dev/urandom bs=1 count=96 2>/dev/null | base64 -w 0\" command"
   , configBlockTimeStrikeMinimumBlockAheadCurrentTip = 12 -- 6 blocks gives us the unconfirmed tip and 6 more gives minimum barrier ahead
   , configBlockTimeStrikeBlockSpanWebsocketAPIURL = BaseUrl Http "127.0.0.1" 8999 "/api/v1/ws"
-  , configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip = 6
+  , configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip = 6
   , configBlockspanURL = BaseUrl Http "127.0.0.1" 8999 ""
-  , configBlockTimeFutureStrikeShouldExistsAheadCurrentTip = 12
+  , configBlockTimeStrikeShouldExistsAheadCurrentTip = 12
   , configRecordsPerReply = 100
   }
 
