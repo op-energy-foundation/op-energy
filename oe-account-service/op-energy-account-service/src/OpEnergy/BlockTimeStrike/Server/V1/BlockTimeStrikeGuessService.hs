@@ -57,8 +57,6 @@ getBlockTimeStrikeFutureGuessesPage
   -> Maybe (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessPublicFilter)
   -> AppM (PagingResult BlockTimeStrikeGuessPublic)
 getBlockTimeStrikeFutureGuessesPage mpage mfilter = profile "getBlockTimeStrikeFutureGuessesPage" $ do
-  State{  config = Config{ configRecordsPerReply = recordsPerReply}
-        } <- ask
   confirmedBlockV <- asks (BlockTime.latestConfirmedBlock . blockTimeState )
   mconfirmedBlock <- liftIO $ TVar.readTVarIO confirmedBlockV
   case mconfirmedBlock of
@@ -68,46 +66,27 @@ getBlockTimeStrikeFutureGuessesPage mpage mfilter = profile "getBlockTimeStrikeF
       throwError err500 { errBody = BS.fromStrict $ Text.encodeUtf8 err}
     Just confirmedBlock -> do
       let
-          filter = (BlockTimeStrikeBlock >. blockHeaderHeight confirmedBlock):(maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter )
-      mret <- pagingResult mpage filter sort BlockTimeStrikeCreationTime
-        $ ( C.awaitForever $ \v@(Entity futureId _) -> do
-            C.toProducer $ C.zipSources
-              ( repeatC v
-              )
-              ( streamEntities
-                ( (BlockTimeStrikeGuessStrike ==. futureId) : (maybe [] (buildFilter . unFilterRequest) mfilter))
-                BlockTimeStrikeGuessCreationTime
-                (PageSize ((fromPositive recordsPerReply) + 1))
-                Descend
-                (Range Nothing Nothing)
-              )
-          )
-        .| ( C.awaitForever $ \(futureE, guessE@(Entity _ guessResult)) -> do
-            C.toProducer $ C.zipSources
-              ( repeatC (futureE, guessE)
-              )
-              ( streamEntities
-                ( (PersonId ==. blockTimeStrikeGuessPerson guessResult) : (maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter))
-                PersonCreationTime
-                (PageSize ((fromPositive recordsPerReply) + 1))
-                Descend
-                (Range Nothing Nothing)
-              )
-            )
-        .| ( C.awaitForever $ \((Entity _ strike, Entity _ guess), Entity _ person )-> do
-            C.yield $ BlockTimeStrikeGuessPublic
-                      { person = personUuid person
-                      , strike = strike
-                      , creationTime = blockTimeStrikeGuessCreationTime guess
-                      , guess = blockTimeStrikeGuessGuess guess
-                      }
+          filter = (BlockTimeStrikeGuessBlockHeight >. blockHeaderHeight confirmedBlock):(maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter )
+      mret <- pagingResult mpage filter sort BlockTimeStrikeGuessId
+        $ ( C.awaitForever $ \(Entity _ guess)-> do
+              mstrike <- lift $ get (blockTimeStrikeGuessStrike guess)
+              mperson <- lift $ get (blockTimeStrikeGuessPerson guess)
+              case (mstrike, mperson) of
+                (Nothing, _ ) -> return ()
+                ( _, Nothing) -> return ()
+                (Just strike, Just person) -> do
+                  C.yield $ BlockTimeStrikeGuessPublic
+                            { person = personUuid person
+                            , strike = strike
+                            , creationTime = blockTimeStrikeGuessCreationTime guess
+                            , guess = blockTimeStrikeGuessGuess guess
+                            }
           )
       case mret of
         Nothing -> do
           throwError err500 {errBody = "something went wrong, check logs for details"}
         Just ret-> return ret
   where
-    repeatC v = C.yield v >> repeatC v
     sort = maybe Descend (sortOrder . unFilterRequest) mfilter
 
 mgetBlockTimeStrikeFuture :: (MonadIO m, MonadMonitor m) => BlockHeight-> Natural Int-> AppT m (Maybe (Entity BlockTimeStrike))
