@@ -8,6 +8,7 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
   , createBlockTimeStrikeFuture
   , newTipHandlerLoop
   , getBlockTimeStrikePastPage
+  , getBlockTimeStrikePage
   ) where
 
 import           Servant (err400, err500, throwError, errBody)
@@ -185,3 +186,24 @@ newTipHandlerLoop = forever $ do
             , BlockTimeStrikeObservedBlockHash =. (Just $! blockHeaderHash blockHeader)
             ]
 
+
+-- | returns list of BlockTimeStrikePublic records
+getBlockTimeStrikePage
+  :: Maybe (Natural Int)
+  -> Maybe (FilterRequest BlockTimeStrike BlockTimeStrikeFilter)
+  -> AppM (PagingResult BlockTimeStrikePublic)
+getBlockTimeStrikePage mpage mfilter = profile "getBlockTimeStrikePage" $ do
+  mret <- getBlockTimeStrikePast
+  case mret of
+    Nothing -> do
+      throwError err500 {errBody = "something went wrong"}
+    Just ret -> return ret
+  where
+    sort = maybe Descend (sortOrder . unFilterRequest) mfilter
+    filter = (maybe [] (buildFilter . unFilterRequest) mfilter)
+    getBlockTimeStrikePast = do
+      pagingResult mpage filter sort BlockTimeStrikeId
+        $ ( C.awaitForever $ \(Entity strikeId strike) -> do
+            resultsCnt <- lift $ count [ BlockTimeStrikeGuessStrike ==. strikeId ]
+            C.yield (BlockTimeStrikePublic {blockTimeStrikePublicStrike = strike, blockTimeStrikePublicGuessesCount = fromIntegral resultsCnt})
+          )

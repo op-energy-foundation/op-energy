@@ -106,6 +106,21 @@ type BlockTimeV1API
     :> Description "returns results for the given blocktime strike in the past. Time strike becomes \"past\" when it becomes confirmed and you can think about it as archived strike, that had been processed and now being kept as history. 'Guess' becomes a 'result' when blocktime strike becomes confirmed and processed."
     :> Get '[JSON] (PagingResult BlockTimeStrikeGuessResultPublic)
 
+  :<|> "strike"
+    :> "page"
+    :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
+    :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter" ] "filter" (FilterRequest BlockTimeStrike BlockTimeStrikeFilter)
+    :> Description "returns list of strikes. By default, results are ordered by strike id in descending order. (ie, from newer to older)"
+    :> Get '[JSON] (PagingResult BlockTimeStrikePublic)
+
+  :<|> "strike"
+    :> "guess"
+    :> "page"
+    :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
+    :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter" ] "filter" (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessPublicFilter)
+    :> Description "returns guesses for the given blocktime strike. By default, results are order by id in decending order (from new to old)"
+    :> Get '[JSON] (PagingResult BlockTimeStrikeGuessPublic)
+
   :<|> "git-hash"
     :> Description "returns short hash of commit of the op-energy git repo that had been used to build backend"
     :> Get '[JSON] GitHashResponse

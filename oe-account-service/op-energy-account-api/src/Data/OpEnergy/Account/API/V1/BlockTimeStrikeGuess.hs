@@ -65,6 +65,7 @@ data BlockTimeStrikeGuessPublic = BlockTimeStrikeGuessPublic
   , strike ::  BlockTimeStrike
   , creationTime :: POSIXTime
   , guess :: SlowFast
+  , observedResult :: Maybe SlowFast
   }
   deriving (Eq, Show, Generic)
 instance ToJSON BlockTimeStrikeGuessPublic
@@ -88,6 +89,9 @@ data BlockTimeStrikeGuessPublicFilter = BlockTimeStrikeGuessPublicFilter
   , blockTimeStrikeGuessPublicFilterBlockHeightLTE :: Maybe BlockHeight
   , blockTimeStrikeGuessPublicFilterNlocktimeGTE             :: Maybe POSIXTime
   , blockTimeStrikeGuessPublicFilterNlocktimeLTE             :: Maybe POSIXTime
+    -- observedResult
+  , blockTimeStrikeGuessPublicFilterObservedResultEQ            :: Maybe SlowFast
+  , blockTimeStrikeGuessPublicFilterObservedResultNEQ           :: Maybe SlowFast
   , blockTimeStrikeGuessPublicFilterSort                     :: Maybe SortOrder
   }
   deriving (Eq, Show, Generic)
@@ -137,6 +141,10 @@ instance BuildFilter BlockTimeStrikeGuess BlockTimeStrikeGuessPublicFilter where
       $  blockTimeStrikeGuessPublicFilterGuessEQ v
     , maybe [] (\v-> [ BlockTimeStrikeGuessGuess !=. v ])
       $  blockTimeStrikeGuessPublicFilterGuessNEQ v
+    , maybe [] (\v-> [BlockTimeStrikeGuessObservedResult ==. Just v])
+      $ blockTimeStrikeGuessPublicFilterObservedResultEQ v
+    , maybe [] (\v-> [BlockTimeStrikeGuessObservedResult !=. Just v])
+      $ blockTimeStrikeGuessPublicFilterObservedResultNEQ v
     ]
 instance BuildFilter Person BlockTimeStrikeGuessPublicFilter where
   sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessPublicFilterSort filter)
@@ -173,6 +181,9 @@ defaultBlockTimeStrikeGuessPublicFilter = BlockTimeStrikeGuessPublicFilter
   , blockTimeStrikeGuessPublicFilterBlockHeightLTE = Just 1
   , blockTimeStrikeGuessPublicFilterNlocktimeGTE = Just 1
   , blockTimeStrikeGuessPublicFilterNlocktimeLTE = Just 1
+    -- observedResult
+  , blockTimeStrikeGuessPublicFilterObservedResultEQ  = Just Slow
+  , blockTimeStrikeGuessPublicFilterObservedResultNEQ = Just Fast
   , blockTimeStrikeGuessPublicFilterSort         = Just Descend
   }
 
@@ -183,6 +194,7 @@ defaultBlockTimeStrikeGuessPublic = BlockTimeStrikeGuessPublic
   , strike = defaultBlockTimeStrike
   , creationTime = defaultPOSIXTime
   , guess = defaultSlowFast
+  , observedResult = Just Slow
   }
 
 data BlockTimeStrikeGuessResultPublic = BlockTimeStrikeGuessResultPublic

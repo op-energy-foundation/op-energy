@@ -56,6 +56,8 @@ blockTimeServer = websocketHandler
   :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.createBlockTimeStrikeFutureGuess
   :<|> getBlockTimeStrikePastPage
   :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessResultsPage
+  :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.getBlockTimeStrikePage
+  :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessPage
   :<|> oeGitHashGet
   where
     websocketHandler :: MonadIO m => Connection-> AppT m ()

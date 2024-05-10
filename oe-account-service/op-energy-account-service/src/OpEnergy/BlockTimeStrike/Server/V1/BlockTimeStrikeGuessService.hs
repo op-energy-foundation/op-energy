@@ -10,6 +10,7 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
   , getBlockTimeStrikeGuessResultsPage
   , calculateResultsLoop
   , getBlockTimeStrikeFutureGuessesPage
+  , getBlockTimeStrikeGuessPage
   ) where
 
 import           Servant (err400, err500, throwError, errBody)
@@ -79,6 +80,7 @@ getBlockTimeStrikeFutureGuessesPage mpage mfilter = profile "getBlockTimeStrikeF
                             , strike = strike
                             , creationTime = blockTimeStrikeGuessCreationTime guess
                             , guess = blockTimeStrikeGuessGuess guess
+                            , observedResult = blockTimeStrikeGuessObservedResult guess
                             }
           )
       case mret of
@@ -251,3 +253,37 @@ calculateResultsLoop = calculateResultsLoop1 Nothing
                              loop $! (cnt + 1)
                loop 0
              )
+
+-- | returns list BlockTimeStrike records
+getBlockTimeStrikeGuessPage
+  :: Maybe (Natural Int)
+  -> Maybe (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessPublicFilter)
+  -> AppM (PagingResult BlockTimeStrikeGuessPublic)
+getBlockTimeStrikeGuessPage mpage mfilter = profile "getBlockTimeStrikeGuessPage" $ do
+  let
+      filter = (maybe [] (buildFilter . unFilterRequest . mapFilter ) mfilter)
+  mret <- pagingResult mpage filter sort BlockTimeStrikeGuessId
+    $ ( C.awaitForever $ \(Entity _ guess)-> do
+          mstrike <- lift $ get (blockTimeStrikeGuessStrike guess)
+          mperson <- lift $ get (blockTimeStrikeGuessPerson guess)
+          case (mstrike, mperson) of
+            (Nothing, _ ) -> return ()
+            ( _, Nothing) -> return ()
+            (Just strike, Just person) -> do
+              C.yield $ BlockTimeStrikeGuessPublic
+                { person = personUuid person
+                , strike = strike
+                , creationTime = blockTimeStrikeGuessCreationTime guess
+                , guess = blockTimeStrikeGuessGuess guess
+                , observedResult = blockTimeStrikeGuessObservedResult guess
+                }
+      )
+  case mret of
+    Nothing -> do
+      throwError err500 {errBody = "something went wrong"}
+    Just ret -> return ret
+  where
+    sort = maybe Descend (sortOrder . unFilterRequest . id1 . mapFilter) mfilter
+      where
+        id1 :: FilterRequest BlockTimeStrike BlockTimeStrikeGuessPublicFilter -> FilterRequest BlockTimeStrike BlockTimeStrikeGuessPublicFilter
+        id1 = id -- helping typechecker
