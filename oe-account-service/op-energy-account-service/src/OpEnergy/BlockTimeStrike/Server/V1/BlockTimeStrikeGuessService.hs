@@ -27,7 +27,6 @@ import qualified Data.Text.Encoding as Text
 import           Data.Text.Show(tshow)
 import           Data.Conduit ((.|))
 import qualified Data.Conduit as C
-import qualified Data.Conduit.Internal as C(zipSources)
 import           Control.Monad.Trans
 import           Database.Persist.Postgresql
 import           Database.Persist.Pagination
@@ -171,52 +170,29 @@ getBlockTimeStrikeGuessResultsPage mpage mfilter = profile "getBlockTimeStrikeGu
       runLogging $ $(logError) err
       throwError err500 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
     Just confirmedBlock -> do
-      recordsPerReply <- asks ( configRecordsPerReply . config )
       let
-          filter = (BlockTimeStrikeBlock <=. blockHeaderHeight confirmedBlock):(maybe [] (buildFilter . unFilterRequest . mapFilter ) mfilter)
-      mret <- pagingResult mpage filter sort BlockTimeStrikeId
-        $ ( C.awaitForever $ \v@(Entity pastId _)-> do
-            C.toProducer $ C.zipSources
-              ( repeatC v
-              )
-              ( streamEntities
-                ( (BlockTimeStrikeGuessStrike ==. pastId) : (maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter))
-                BlockTimeStrikeGuessCreationTime
-                (PageSize ((fromPositive recordsPerReply) + 1))
-                Descend
-                (Range Nothing Nothing)
-              )
-          )
-        .| ( C.awaitForever $ \(pastE, guessE@(Entity _ guessResult)) -> do
-            case blockTimeStrikeGuessObservedResult guessResult of
-              Nothing -> return ()
-              Just _ -> do
-                C.toProducer $ C.zipSources
-                  ( repeatC (pastE, guessE)
-                  )
-                  ( streamEntities
-                    ( (PersonId ==. blockTimeStrikeGuessPerson guessResult) : (maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter))
-                    PersonCreationTime
-                    (PageSize ((fromPositive recordsPerReply) + 1))
-                    Descend
-                    (Range Nothing Nothing)
-                  )
-          )
-        .| ( C.awaitForever $ \((Entity _ past, Entity _ guessResult), Entity _ person )-> do
-            C.yield $ BlockTimeStrikeGuessResultPublic
-              { person = personUuid person
-              , strike = past
-              , creationTime = blockTimeStrikeGuessCreationTime guessResult
-              , guess = blockTimeStrikeGuessGuess guessResult
-              , observedResult = fromJust $ blockTimeStrikeGuessObservedResult guessResult
-              }
+          filter = (BlockTimeStrikeGuessBlockHeight <=. blockHeaderHeight confirmedBlock):(maybe [] (buildFilter . unFilterRequest . mapFilter ) mfilter)
+      mret <- pagingResult mpage filter sort BlockTimeStrikeGuessId
+        $ ( C.awaitForever $ \(Entity _ guess)-> do
+              mstrike <- lift $ get (blockTimeStrikeGuessStrike guess)
+              mperson <- lift $ get (blockTimeStrikeGuessPerson guess)
+              case (mstrike, mperson) of
+                (Nothing, _ ) -> return ()
+                ( _, Nothing) -> return ()
+                (Just strike, Just person) -> do
+                  C.yield $ BlockTimeStrikeGuessResultPublic
+                    { person = personUuid person
+                    , strike = strike
+                    , creationTime = blockTimeStrikeGuessCreationTime guess
+                    , guess = blockTimeStrikeGuessGuess guess
+                    , observedResult = fromJust $ blockTimeStrikeGuessObservedResult guess
+                    }
           )
       case mret of
         Nothing -> do
           throwError err500 {errBody = "something went wrong"}
         Just ret -> return ret
   where
-    repeatC v = C.yield v >> repeatC v
     sort = maybe Descend (sortOrder . unFilterRequest . id1 . mapFilter) mfilter
       where
         id1 :: FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter -> FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter
