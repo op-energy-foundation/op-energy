@@ -14,7 +14,6 @@ module OpEnergy.BlockTimeStrike.Server
   , schedulerMainLoop
   , OpEnergy.BlockTimeStrike.Server.V1.runBlockSpanClient
   , OpEnergy.BlockTimeStrike.Server.V1.newTipHandlerLoop
-  , OpEnergy.BlockTimeStrike.Server.V1.calculateResultsLoop
   ) where
 
 import           System.IO as IO

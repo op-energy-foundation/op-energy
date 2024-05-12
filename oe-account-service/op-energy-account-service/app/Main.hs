@@ -50,9 +50,6 @@ main = withSocketsDo {- needed for websocket client -} $ runStdoutLoggingT $ do
   blockTimeStrikeNewTipHandlerA <- liftIO $ asyncBound $ runAppT state $ do
     runLogging $ $(logInfo) "starting newTipHandler"
     BlockTimeStrike.newTipHandlerLoop
-  calculateResultsLoopA <- liftIO $ asyncBound $ runAppT state $ do
-    runLogging $ $(logInfo) "starting calculateResultsLoop"
-    BlockTimeStrike.calculateResultsLoop
   liftIO $ waitAnyCancel $ -- waits for any of threads to shutdown in order to shutdown the rest
     [ serverA
     , schedulerA
@@ -60,6 +57,5 @@ main = withSocketsDo {- needed for websocket client -} $ runStdoutLoggingT $ do
     , schedulerBlockTimeStrikeA
     , blockTimeStrikeWebsocketClientA
     , blockTimeStrikeNewTipHandlerA
-    , calculateResultsLoopA
     ]
   return ()

@@ -15,7 +15,7 @@ import           Control.Monad.Trans(lift)
 import           Control.Monad.Logger (runLoggingT, filterLogger, LoggingT, MonadLoggerIO, Loc, LogSource, LogLevel, LogStr, logError, NoLoggingT)
 import           Servant (Handler)
 import           Data.Pool(Pool)
-import           Database.Persist.Postgresql (SqlBackend, runSqlPersistMPool)
+import           Database.Persist.Postgresql (SqlBackend, runSqlPersistMPool, runSqlPoolNoTransaction)
 import           Control.Monad.Trans.Resource
 
 import           Prometheus(MonadMonitor(..))
@@ -140,3 +140,30 @@ withDBTransaction name next = profile name $ do
   header <- asks callStack
   state <- ask
   liftIO $ withDBTransactionIO state header next
+
+withDBNOTransactionROIO
+  :: State
+  -> Text
+  -> (ReaderT SqlBackend IO) r
+  -> IO (Maybe r)
+withDBNOTransactionROIO state header next = profileM newHeader metricsV $ do
+  E.handle (\(err::SomeException) -> do
+               runLoggingIO state $ $(logError) (newHeader <> ": " <> Text.pack (show err))
+               return Nothing
+           ) $ runSqlPoolNoTransaction (Just <$> next) pool Nothing
+  where
+    newHeader = header <> ".DBT"
+    metricsV = dynamicHistograms (metrics state)
+    pool = accountDBPool state
+
+withDBNOTransactionRO
+  :: ( MonadIO m
+     , MonadMonitor m
+     )
+  => Text
+  -> (ReaderT SqlBackend IO) r
+  -> AppT m (Maybe r)
+withDBNOTransactionRO name next = profile name $ do
+  header <- asks callStack
+  state <- ask
+  liftIO $ withDBNOTransactionROIO state header next

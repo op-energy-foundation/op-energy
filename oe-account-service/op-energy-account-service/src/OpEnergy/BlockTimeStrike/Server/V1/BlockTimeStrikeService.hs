@@ -3,6 +3,7 @@
 {-# LANGUAGE TemplateHaskell          #-}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE RecordWildCards          #-}
+{-# LANGUAGE GADTs                     #-}
 module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
   ( getBlockTimeStrikeFuturePage
   , createBlockTimeStrikeFuture
@@ -12,16 +13,17 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
   ) where
 
 import           Servant (err400, err500, throwError, errBody)
-import           Control.Monad.Trans.Reader (ask)
+import           Control.Monad.Trans.Reader (ask, asks)
 import           Control.Monad.Logger(logDebug, logError, logInfo)
-import           Control.Monad(forever, forM_)
+import           Control.Monad(forever, when)
 import           Data.Time.Clock(getCurrentTime)
-import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
+import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds, getPOSIXTime)
 import qualified Control.Concurrent.STM.TVar as TVar
 import qualified Control.Concurrent.MVar as MVar
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
+import           Data.Conduit( (.|) )
 import qualified Data.Conduit as C
 import qualified Data.Conduit.List as C
 import           Control.Monad.Trans
@@ -37,14 +39,14 @@ import           Data.OpEnergy.Account.API.V1.Account
 import           Data.OpEnergy.Client as Blockspan
 import           Data.OpEnergy.API.V1.Block
 import           Data.OpEnergy.API.V1.Natural
-import           Data.OpEnergy.API.V1.Positive( naturalFromPositive)
+import           Data.OpEnergy.API.V1.Positive( naturalFromPositive, fromPositive)
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic
 import           Data.OpEnergy.Account.API.V1.PagingResult
 import           Data.OpEnergy.Account.API.V1.FilterRequest
 import           OpEnergy.Account.Server.V1.Config (Config(..))
-import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging, profile, withDBTransaction)
+import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging, profile, withDBTransaction, runLoggingIO )
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledStrikeCreation as BlockTimeScheduledStrikeCreation
@@ -161,31 +163,74 @@ newTipHandlerLoop = forever $ do
     _ <- observeStrikes currentTip
     BlockTimeScheduledStrikeCreation.maybeCreateStrikes currentTip
   where
-    observeStrikes currentTip = profile "moveFutureStrikesToPastStrikes" $ do
-      State{ config = Config { configBlockspanURL = configBlockspanURL }
-           } <- ask
-      withDBTransaction "" $ do
-        futureBlocks <- selectList [ BlockTimeStrikeBlock <=. blockHeaderHeight currentTip
-                                   , BlockTimeStrikeObservedBlockHash ==. Nothing
-                                   ] []
-        forM_ futureBlocks $ \(Entity futureStrikeKey futureStrike) -> do
-          -- create past block
-          blockHeader <-
-            if blockHeaderHeight currentTip == blockTimeStrikeBlock futureStrike
-            then return currentTip -- if we already have this block header
-            else liftIO $! Blockspan.withClient configBlockspanURL $ getBlockByHeight (blockTimeStrikeBlock futureStrike)
-          -- it is possible, that BlockTimeStrikePast already had been created, so we need to check if such strike exists and ignore it
-          update futureStrikeKey
-            [ BlockTimeStrikeObservedResult =.
-              ( Just $!
-                  if fromIntegral (blockHeaderMediantime blockHeader) <= blockTimeStrikeNlocktime futureStrike
-                  then Fast
-                  else Slow
-              )
-            , BlockTimeStrikeObservedBlockMediantime =. ( Just $! fromIntegral $ blockHeaderMediantime blockHeader)
-            , BlockTimeStrikeObservedBlockHash =. (Just $! blockHeaderHash blockHeader)
+    observeStrikes confirmedBlock = profile "moveFutureStrikesToPastStrikes" $ do
+      configBlockspanURL <- asks (configBlockspanURL . config)
+      recordsPerReply <- asks (configRecordsPerReply . config)
+      state <- ask
+      _ <- withDBTransaction "byBlock" $ do
+        C.runConduit
+          $ streamEntities
+            [ BlockTimeStrikeBlock <=. blockHeaderHeight confirmedBlock
+            , BlockTimeStrikeObservedBlockHash ==. Nothing
             ]
-
+            BlockTimeStrikeId
+            (PageSize (fromPositive recordsPerReply))
+            Descend
+            (Range Nothing Nothing)
+          .| ( do
+              let
+                  loop (cnt::Int) = do
+                    mv <- C.await
+                    case mv of
+                      Nothing -> do
+                        liftIO $ runLoggingIO state $ $(logDebug) ("calculated results for " <> tshow cnt <> " strikes by observing block")
+                      Just (Entity strikeId strike) -> do
+                        blockHeader <-
+                          if blockHeaderHeight confirmedBlock == blockTimeStrikeBlock strike
+                          then return confirmedBlock -- if we already have this block header
+                          else liftIO $! Blockspan.withClient configBlockspanURL $ getBlockByHeight (blockTimeStrikeBlock strike)
+                        when (blockTimeStrikeObservedResult strike == Nothing) $ do -- when haven't been calculated yet
+                          lift $ update strikeId
+                            [ BlockTimeStrikeObservedResult =.
+                              ( Just $!
+                                  if fromIntegral (blockHeaderMediantime blockHeader) <= blockTimeStrikeNlocktime strike
+                                  then Fast
+                                  else Slow
+                              )
+                            ]
+                        lift $ update strikeId
+                          [ BlockTimeStrikeObservedBlockMediantime =. (Just $! fromIntegral $ blockHeaderMediantime blockHeader)
+                          , BlockTimeStrikeObservedBlockHash =. (Just $! blockHeaderHash blockHeader)
+                          ]
+                        loop $! (cnt + 1)
+              loop 0
+            )
+      now <- liftIO getPOSIXTime
+      _ <- withDBTransaction "byTime" $ do
+        C.runConduit
+          $ streamEntities
+            [ BlockTimeStrikeNlocktime <=. now
+            , BlockTimeStrikeObservedResult ==. Nothing
+            ]
+            BlockTimeStrikeId
+            (PageSize (fromPositive recordsPerReply))
+            Descend
+            (Range Nothing Nothing)
+          .| ( do
+              let
+                  loop (cnt::Int) = do
+                    mv <- C.await
+                    case mv of
+                      Nothing -> do
+                        liftIO $ runLoggingIO state $ $(logDebug) ("calculated results for " <> tshow cnt <> " strikes by reaching time")
+                      Just (Entity strikeId _) -> do
+                        lift $ update strikeId -- we only get result, as no block had been observed yet
+                          [ BlockTimeStrikeObservedResult =. Just Slow
+                          ]
+                        loop $! (cnt + 1)
+              loop 0
+            )
+      return ()
 
 -- | returns list of BlockTimeStrikePublic records
 getBlockTimeStrikePage

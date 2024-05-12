@@ -48,8 +48,6 @@ share [mkPersist sqlSettings, mkMigrate "migrateBlockTimeStrikeGuess"] [persistL
 BlockTimeStrikeGuess
   -- data
   guess SlowFast
-  observedResult SlowFast Maybe -- when Nothing - guess, when Just _ - result
-  blockHeight BlockHeight -- this field is for optimization purpose: it will be used as a loop termitation metric as there will be N -> inf guesses and we need to check only M of them, where blockHeight <= currentTip each scheduler check. Effectively, this is a copy strike.blockHeight
   -- metadata
   creationTime POSIXTime
   -- reflinks
@@ -65,7 +63,6 @@ data BlockTimeStrikeGuessPublic = BlockTimeStrikeGuessPublic
   , strike ::  BlockTimeStrike
   , creationTime :: POSIXTime
   , guess :: SlowFast
-  , observedResult :: Maybe SlowFast
   }
   deriving (Eq, Show, Generic)
 instance ToJSON BlockTimeStrikeGuessPublic
@@ -141,10 +138,6 @@ instance BuildFilter BlockTimeStrikeGuess BlockTimeStrikeGuessPublicFilter where
       $  blockTimeStrikeGuessPublicFilterGuessEQ v
     , maybe [] (\v-> [ BlockTimeStrikeGuessGuess !=. v ])
       $  blockTimeStrikeGuessPublicFilterGuessNEQ v
-    , maybe [] (\v-> [BlockTimeStrikeGuessObservedResult ==. Just v])
-      $ blockTimeStrikeGuessPublicFilterObservedResultEQ v
-    , maybe [] (\v-> [BlockTimeStrikeGuessObservedResult !=. Just v])
-      $ blockTimeStrikeGuessPublicFilterObservedResultNEQ v
     ]
 instance BuildFilter Person BlockTimeStrikeGuessPublicFilter where
   sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessPublicFilterSort filter)
@@ -194,7 +187,6 @@ defaultBlockTimeStrikeGuessPublic = BlockTimeStrikeGuessPublic
   , strike = defaultBlockTimeStrike
   , creationTime = defaultPOSIXTime
   , guess = defaultSlowFast
-  , observedResult = Just Slow
   }
 
 data BlockTimeStrikeGuessResultPublic = BlockTimeStrikeGuessResultPublic
@@ -295,10 +287,6 @@ instance BuildFilter BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter
       $ blockTimeStrikeGuessResultPublicFilterGuessEQ v
     , maybe [] (\v-> [BlockTimeStrikeGuessGuess !=. v])
       $ blockTimeStrikeGuessResultPublicFilterGuessNEQ v
-    , maybe [] (\v-> [BlockTimeStrikeGuessObservedResult ==. Just v])
-      $ blockTimeStrikeGuessResultPublicFilterObservedResultEQ v
-    , maybe [] (\v-> [BlockTimeStrikeGuessObservedResult !=. Just v])
-      $ blockTimeStrikeGuessResultPublicFilterObservedResultNEQ v
     ]
 instance BuildFilter Person BlockTimeStrikeGuessResultPublicFilter where
   sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultPublicFilterSort filter)

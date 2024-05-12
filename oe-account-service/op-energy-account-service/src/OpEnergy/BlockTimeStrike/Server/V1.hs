@@ -15,7 +15,6 @@ module OpEnergy.BlockTimeStrike.Server.V1
   , schedulerIteration
   , runBlockSpanClient
   , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.newTipHandlerLoop
-  , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.calculateResultsLoop
   )where
 
 import           Servant
