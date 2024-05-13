@@ -206,10 +206,12 @@ newTipHandlerLoop = forever $ do
               loop 0
             )
       now <- liftIO getPOSIXTime
+      blockTimeStrikeMinimumBlockAheadCurrentTip <- asks (configBlockTimeStrikeMinimumBlockAheadCurrentTip . config)
       _ <- withDBTransaction "byTime" $ do
         C.runConduit
           $ streamEntities
             [ BlockTimeStrikeNlocktime <=. now
+            , BlockTimeStrikeBlock >. blockHeaderHeight confirmedBlock + naturalFromPositive blockTimeStrikeMinimumBlockAheadCurrentTip -- don't resolve blocks, that area already discovered, but haven't been confirmed yet. It which will be observed soon and the result will be calculated by it's mediantime
             , BlockTimeStrikeObservedResult ==. Nothing
             ]
             BlockTimeStrikeId
