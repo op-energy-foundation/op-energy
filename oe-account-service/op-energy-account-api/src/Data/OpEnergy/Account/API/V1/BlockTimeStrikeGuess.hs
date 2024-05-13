@@ -220,9 +220,6 @@ data BlockTimeStrikeGuessResultPublicFilter = BlockTimeStrikeGuessResultPublicFi
     -- creationTime
   , blockTimeStrikeGuessResultPublicFilterCreationTimeGTE             :: Maybe POSIXTime
   , blockTimeStrikeGuessResultPublicFilterCreationTimeLTE             :: Maybe POSIXTime
-    -- archive time
-  , blockTimeStrikeGuessResultPublicFilterArchiveTimeGTE              :: Maybe POSIXTime
-  , blockTimeStrikeGuessResultPublicFilterArchiveTimeLTE              :: Maybe POSIXTime
     -- guess
   , blockTimeStrikeGuessResultPublicFilterGuessEQ                     :: Maybe SlowFast
   , blockTimeStrikeGuessResultPublicFilterGuessNEQ                    :: Maybe SlowFast
@@ -230,11 +227,15 @@ data BlockTimeStrikeGuessResultPublicFilter = BlockTimeStrikeGuessResultPublicFi
   , blockTimeStrikeGuessResultPublicFilterObservedResultEQ            :: Maybe SlowFast
   , blockTimeStrikeGuessResultPublicFilterObservedResultNEQ           :: Maybe SlowFast
     -- strike block height
-  , blockTimeStrikeGuessResultPublicFilterObservedBlockHeightGTE      :: Maybe BlockHeight
-  , blockTimeStrikeGuessResultPublicFilterObservedBlockHeightLTE      :: Maybe BlockHeight
+  , blockTimeStrikeGuessResultPublicFilterBlockHeightGTE      :: Maybe BlockHeight
+  , blockTimeStrikeGuessResultPublicFilterBlockHeightLTE      :: Maybe BlockHeight
+    -- observed strike mediantime
+  , blockTimeStrikeGuessResultPublicFilterObservedMediantimeGTE        :: Maybe POSIXTime
+  , blockTimeStrikeGuessResultPublicFilterObservedMediantimeLTE        :: Maybe POSIXTime
     -- strike nlocktime
-  , blockTimeStrikeGuessResultPublicFilterObservedNlocktimeGTE        :: Maybe POSIXTime
-  , blockTimeStrikeGuessResultPublicFilterObservedNlocktimeLTE        :: Maybe POSIXTime
+  , blockTimeStrikeGuessResultPublicFilterNlocktimeGTE                :: Maybe POSIXTime
+  , blockTimeStrikeGuessResultPublicFilterNlocktimeLTE                :: Maybe POSIXTime
+    -- sort
   , blockTimeStrikeGuessResultPublicFilterSort                        :: Maybe SortOrder
   }
   deriving (Eq, Show, Generic)
@@ -279,10 +280,6 @@ instance BuildFilter BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter
       $ blockTimeStrikeGuessResultPublicFilterCreationTimeGTE v
     , maybe [] (\v-> [BlockTimeStrikeGuessCreationTime <=. v])
       $ blockTimeStrikeGuessResultPublicFilterCreationTimeLTE v
-    , maybe [] (\v-> [BlockTimeStrikeGuessCreationTime >=. v])
-      $ blockTimeStrikeGuessResultPublicFilterArchiveTimeGTE v
-    , maybe [] (\v-> [BlockTimeStrikeGuessCreationTime <=. v])
-      $ blockTimeStrikeGuessResultPublicFilterArchiveTimeLTE v
     , maybe [] (\v-> [BlockTimeStrikeGuessGuess ==. v])
       $ blockTimeStrikeGuessResultPublicFilterGuessEQ v
     , maybe [] (\v-> [BlockTimeStrikeGuessGuess !=. v])
@@ -301,14 +298,24 @@ instance BuildFilter BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter wher
   buildFilter (v, _) = List.concat
         -- strike block height
     [ maybe [] (\v -> [ BlockTimeStrikeBlock >=. v])
-      $ blockTimeStrikeGuessResultPublicFilterObservedBlockHeightGTE v
+      $ blockTimeStrikeGuessResultPublicFilterBlockHeightGTE v
     , maybe [] (\v -> [ BlockTimeStrikeBlock <=. v])
-      $ blockTimeStrikeGuessResultPublicFilterObservedBlockHeightLTE v
+      $ blockTimeStrikeGuessResultPublicFilterBlockHeightLTE v
         -- strike nlocktime
     , maybe [] (\v -> [ BlockTimeStrikeNlocktime >=. v])
-      $ blockTimeStrikeGuessResultPublicFilterObservedNlocktimeGTE v
+      $ blockTimeStrikeGuessResultPublicFilterNlocktimeGTE v
     , maybe [] (\v -> [ BlockTimeStrikeNlocktime <=. v])
-      $ blockTimeStrikeGuessResultPublicFilterObservedNlocktimeLTE v
+      $ blockTimeStrikeGuessResultPublicFilterNlocktimeLTE v
+        -- strike observed mediantime
+    , maybe [] (\v -> [ BlockTimeStrikeObservedBlockMediantime >=. Just v])
+      $ blockTimeStrikeGuessResultPublicFilterObservedMediantimeGTE v
+    , maybe [] (\v -> [ BlockTimeStrikeObservedBlockMediantime <=. Just v])
+      $ blockTimeStrikeGuessResultPublicFilterObservedMediantimeLTE v
+        -- strike observed result
+    , maybe [] (\v -> [ BlockTimeStrikeObservedResult ==. Just v])
+      $ blockTimeStrikeGuessResultPublicFilterObservedResultEQ v
+    , maybe [] (\v -> [ BlockTimeStrikeObservedResult !=. Just v])
+      $ blockTimeStrikeGuessResultPublicFilterObservedResultNEQ v
     ]
 
 defaultBlockTimeStrikeGuessResultPublicFilter :: BlockTimeStrikeGuessResultPublicFilter
@@ -317,16 +324,16 @@ defaultBlockTimeStrikeGuessResultPublicFilter =  BlockTimeStrikeGuessResultPubli
   , blockTimeStrikeGuessResultPublicFilterPersonNEQ                   = Just defaultUUID
   , blockTimeStrikeGuessResultPublicFilterCreationTimeGTE             = Just 1
   , blockTimeStrikeGuessResultPublicFilterCreationTimeLTE             = Just 1
-  , blockTimeStrikeGuessResultPublicFilterArchiveTimeGTE              = Just 1
-  , blockTimeStrikeGuessResultPublicFilterArchiveTimeLTE              = Just 1
   , blockTimeStrikeGuessResultPublicFilterGuessEQ                     = Just Slow
   , blockTimeStrikeGuessResultPublicFilterGuessNEQ                    = Just Fast
   , blockTimeStrikeGuessResultPublicFilterObservedResultEQ            = Just Slow
   , blockTimeStrikeGuessResultPublicFilterObservedResultNEQ           = Just Fast
-  , blockTimeStrikeGuessResultPublicFilterObservedBlockHeightGTE      = Just 1
-  , blockTimeStrikeGuessResultPublicFilterObservedBlockHeightLTE      = Just 1
+  , blockTimeStrikeGuessResultPublicFilterBlockHeightGTE      = Just 1
+  , blockTimeStrikeGuessResultPublicFilterBlockHeightLTE      = Just 1
+  , blockTimeStrikeGuessResultPublicFilterNlocktimeGTE      = Just 1
+  , blockTimeStrikeGuessResultPublicFilterNlocktimeLTE      = Just 1
     -- strike nlocktime
-  , blockTimeStrikeGuessResultPublicFilterObservedNlocktimeGTE        = Just 1
-  , blockTimeStrikeGuessResultPublicFilterObservedNlocktimeLTE        = Just 1
+  , blockTimeStrikeGuessResultPublicFilterObservedMediantimeGTE        = Just 1
+  , blockTimeStrikeGuessResultPublicFilterObservedMediantimeLTE        = Just 1
   , blockTimeStrikeGuessResultPublicFilterSort                        = Just Descend
   }
