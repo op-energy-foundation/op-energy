@@ -49,14 +49,14 @@ share [mkPersist sqlSettings, mkMigrate "migrateBlockTimeStrike"] [persistLowerC
 BlockTimeStrike
   -- data
   block BlockHeight
-  nlocktime POSIXTime
+  strikeMediantime POSIXTime
   observedResult SlowFast Maybe
   observedBlockMediantime POSIXTime Maybe
   observedBlockHash BlockHash Maybe
   -- metadata
   creationTime POSIXTime
   -- constraints
-  UniqueBlockTimeStrikeBlockNLockTime block nlocktime -- for now it is forbidden to have multiple strikes of the same (block,nlocktime) values
+  UniqueBlockTimeStrikeBlockStrikeMediantime block strikeMediantime -- for now it is forbidden to have multiple strikes of the same (block,strikeMediantime) values
   deriving Eq Show Generic
 
 |]
@@ -64,8 +64,8 @@ BlockTimeStrike
 data BlockTimeStrikeFilter = BlockTimeStrikeFilter
   { blockTimeStrikeFilterCreationTimeGTE            :: Maybe POSIXTime
   , blockTimeStrikeFilterCreationTimeLTE            :: Maybe POSIXTime
-  , blockTimeStrikeFilterNlocktimeGTE               :: Maybe POSIXTime
-  , blockTimeStrikeFilterNlocktimeLTE               :: Maybe POSIXTime
+  , blockTimeStrikeFilterStrikeMediantimeGTE        :: Maybe POSIXTime
+  , blockTimeStrikeFilterStrikeMediantimeLTE        :: Maybe POSIXTime
   , blockTimeStrikeFilterBlockHeightGTE             :: Maybe BlockHeight
   , blockTimeStrikeFilterBlockHeightLTE             :: Maybe BlockHeight
   , blockTimeStrikeFilterObservedResultEQ           :: Maybe SlowFast
@@ -94,25 +94,25 @@ instance Default BlockTimeStrikeFilter where
 
 defaultBlockTimeStrikeFilter :: BlockTimeStrikeFilter
 defaultBlockTimeStrikeFilter = BlockTimeStrikeFilter
-  { blockTimeStrikeFilterCreationTimeGTE = Just 1
-  , blockTimeStrikeFilterCreationTimeLTE = Just 1
-  , blockTimeStrikeFilterNlocktimeGTE    = Just 1
-  , blockTimeStrikeFilterNlocktimeLTE    = Just 1
-  , blockTimeStrikeFilterBlockHeightGTE  = Just 1
-  , blockTimeStrikeFilterBlockHeightLTE  = Just 1
-  , blockTimeStrikeFilterObservedResultEQ           = Just Fast
-  , blockTimeStrikeFilterObservedResultNEQ          = Just Fast
-  , blockTimeStrikeFilterObservedMediantimeGTE      = Just 1
-  , blockTimeStrikeFilterObservedMediantimeLTE      = Just 1
-  , blockTimeStrikeFilterObservedBlockHashEQ        = Just BlockHash.defaultHash
-  , blockTimeStrikeFilterObservedBlockHashNEQ       = Just BlockHash.defaultHash
-  , blockTimeStrikeFilterSort            = Just Descend
+  { blockTimeStrikeFilterCreationTimeGTE       = Just 1
+  , blockTimeStrikeFilterCreationTimeLTE       = Just 1
+  , blockTimeStrikeFilterStrikeMediantimeGTE   = Just 1
+  , blockTimeStrikeFilterStrikeMediantimeLTE   = Just 1
+  , blockTimeStrikeFilterBlockHeightGTE        = Just 1
+  , blockTimeStrikeFilterBlockHeightLTE        = Just 1
+  , blockTimeStrikeFilterObservedResultEQ      = Just Fast
+  , blockTimeStrikeFilterObservedResultNEQ     = Just Fast
+  , blockTimeStrikeFilterObservedMediantimeGTE = Just 1
+  , blockTimeStrikeFilterObservedMediantimeLTE = Just 1
+  , blockTimeStrikeFilterObservedBlockHashEQ   = Just BlockHash.defaultHash
+  , blockTimeStrikeFilterObservedBlockHashNEQ  = Just BlockHash.defaultHash
+  , blockTimeStrikeFilterSort                  = Just Descend
   }
 
 defaultBlockTimeStrike :: BlockTimeStrike
 defaultBlockTimeStrike = BlockTimeStrike
   { blockTimeStrikeBlock = defaultBlockHeight
-  , blockTimeStrikeNlocktime = defaultPOSIXTime
+  , blockTimeStrikeStrikeMediantime = defaultPOSIXTime
   , blockTimeStrikeCreationTime = defaultPOSIXTime
   , blockTimeStrikeObservedResult = Just Slow
   , blockTimeStrikeObservedBlockMediantime = Just 1
@@ -208,10 +208,10 @@ instance BuildFilter BlockTimeStrike BlockTimeStrikeFilter where
       $ blockTimeStrikeFilterCreationTimeGTE v
     , maybe [] (\v-> [BlockTimeStrikeCreationTime <=. v])
       $ blockTimeStrikeFilterCreationTimeLTE v
-    , maybe [] (\v-> [BlockTimeStrikeNlocktime >=. v])
-      $ blockTimeStrikeFilterNlocktimeGTE v
-    , maybe [] (\v-> [BlockTimeStrikeNlocktime <=. v])
-      $ blockTimeStrikeFilterNlocktimeLTE v
+    , maybe [] (\v-> [BlockTimeStrikeStrikeMediantime >=. v])
+      $ blockTimeStrikeFilterStrikeMediantimeGTE v
+    , maybe [] (\v-> [BlockTimeStrikeStrikeMediantime <=. v])
+      $ blockTimeStrikeFilterStrikeMediantimeLTE v
     , maybe [] (\v-> [BlockTimeStrikeBlock >=. v])
       $ blockTimeStrikeFilterBlockHeightGTE v
     , maybe [] (\v-> [BlockTimeStrikeBlock <=. v])

@@ -63,10 +63,10 @@ ensureStrikeExistsAhead currentTip = profile "ensureStrikeExistsAhead" $ do
             [ minimumStrikeHeight .. maximumStrikeHeight ]
       forM_ nonExistentStrikeHeights $ \height-> do
         insert (BlockTimeStrike { blockTimeStrikeBlock = height
-                                , blockTimeStrikeNlocktime =
+                                , blockTimeStrikeStrikeMediantime =
                                   fromIntegral
                                   $ blockHeaderMediantime currentTip
-                                  + fromIntegral ((fromNatural (height - blockHeaderHeight currentTip)) * 600) -- assume 10 minutes time slices for nlocktime
+                                  + fromIntegral ((fromNatural (height - blockHeaderHeight currentTip)) * 600) -- assume 10 minutes time slices for strike mediantime
                                 , blockTimeStrikeCreationTime = utcTimeToPOSIXSeconds now
                                 , blockTimeStrikeObservedResult = Nothing
                                 , blockTimeStrikeObservedBlockMediantime = Nothing

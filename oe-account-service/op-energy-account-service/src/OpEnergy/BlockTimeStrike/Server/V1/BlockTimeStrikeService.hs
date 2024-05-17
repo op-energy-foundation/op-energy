@@ -17,7 +17,7 @@ import           Control.Monad.Trans.Reader (ask, asks)
 import           Control.Monad.Logger(logDebug, logError, logInfo)
 import           Control.Monad(forever, when)
 import           Data.Time.Clock(getCurrentTime)
-import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds, getPOSIXTime)
+import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
 import qualified Control.Concurrent.STM.TVar as TVar
 import qualified Control.Concurrent.MVar as MVar
 import qualified Data.ByteString.Lazy as BS
@@ -75,7 +75,7 @@ getBlockTimeStrikeFuturePage mpage mfilter = profile "getBlockTimeStrikeFuturePa
 -- | O(ln accounts).
 -- Tries to create future block time strike. Requires authenticated user and blockheight should be in the future
 createBlockTimeStrikeFuture :: AccountToken-> BlockHeight-> Natural Int-> AppM ()
-createBlockTimeStrikeFuture token blockHeight nlocktime = profile "createBlockTimeStrike" $ do
+createBlockTimeStrikeFuture token blockHeight strikeMediantime = profile "createBlockTimeStrike" $ do
   State{ config = Config{ configBlockTimeStrikeMinimumBlockAheadCurrentTip = configBlockTimeStrikeMinimumBlockAheadCurrentTip}
        , blockTimeState = BlockTime.State{ latestConfirmedBlock = latestConfirmedBlockV }
        } <- ask
@@ -86,8 +86,8 @@ createBlockTimeStrikeFuture token blockHeight nlocktime = profile "createBlockTi
       runLogging $ $(logError) err
       throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
     Just tip
-      | blockHeaderMediantime tip > fromIntegral nlocktime -> do
-        let err = "ERROR: nlocktime is in the past, which is not expected"
+      | blockHeaderMediantime tip > fromIntegral strikeMediantime -> do
+        let err = "ERROR: strikeMediantime is in the past, which is not expected"
         runLogging $ $(logError) err
         throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
     Just tip
@@ -115,7 +115,7 @@ createBlockTimeStrikeFuture token blockHeight nlocktime = profile "createBlockTi
       let now = utcTimeToPOSIXSeconds nowUTC
       withDBTransaction "" $ insert_ $! BlockTimeStrike
         { blockTimeStrikeBlock = blockHeight
-        , blockTimeStrikeNlocktime = fromIntegral nlocktime
+        , blockTimeStrikeStrikeMediantime = fromIntegral strikeMediantime
         , blockTimeStrikeCreationTime = now
         , blockTimeStrikeObservedResult = Nothing
         , blockTimeStrikeObservedBlockMediantime = Nothing
@@ -193,7 +193,7 @@ newTipHandlerLoop = forever $ do
                           lift $ update strikeId
                             [ BlockTimeStrikeObservedResult =.
                               ( Just $!
-                                  if fromIntegral (blockHeaderMediantime blockHeader) <= blockTimeStrikeNlocktime strike
+                                  if fromIntegral (blockHeaderMediantime blockHeader) <= blockTimeStrikeStrikeMediantime strike
                                   then Fast
                                   else Slow
                               )
@@ -205,12 +205,11 @@ newTipHandlerLoop = forever $ do
                         loop $! (cnt + 1)
               loop 0
             )
-      now <- liftIO getPOSIXTime
       blockTimeStrikeMinimumBlockAheadCurrentTip <- asks (configBlockTimeStrikeMinimumBlockAheadCurrentTip . config)
       _ <- withDBTransaction "byTime" $ do
         C.runConduit
           $ streamEntities
-            [ BlockTimeStrikeNlocktime <=. now
+            [ BlockTimeStrikeStrikeMediantime <=. (fromIntegral $ blockHeaderMediantime confirmedBlock)
             , BlockTimeStrikeBlock >. blockHeaderHeight confirmedBlock + naturalFromPositive blockTimeStrikeMinimumBlockAheadCurrentTip -- don't resolve blocks, that had already discovered, but haven't been confirmed yet. It which will be observed soon and the result will be calculated by it's mediantime
             , BlockTimeStrikeObservedResult ==. Nothing
             ]

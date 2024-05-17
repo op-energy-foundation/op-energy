@@ -138,10 +138,10 @@ getBlockTimeStrikeFutureGuessesPage mpage mfilter = profile "getBlockTimeStrikeF
          )
 
 mgetBlockTimeStrikeFuture :: (MonadIO m, MonadMonitor m) => BlockHeight-> Natural Int-> AppT m (Maybe (Entity BlockTimeStrike))
-mgetBlockTimeStrikeFuture blockHeight nlocktime = profile "mgetBlockTimeStrikeFuture" $ do
+mgetBlockTimeStrikeFuture blockHeight strikeMediantime = profile "mgetBlockTimeStrikeFuture" $ do
   mret <- withDBTransaction "" $ do
     selectFirst [ BlockTimeStrikeBlock ==. blockHeight
-                , BlockTimeStrikeNlocktime ==. fromIntegral nlocktime
+                , BlockTimeStrikeStrikeMediantime ==. fromIntegral strikeMediantime
                 ] []
   case mret of
     Just some -> return some
@@ -150,7 +150,7 @@ mgetBlockTimeStrikeFuture blockHeight nlocktime = profile "mgetBlockTimeStrikeFu
 -- | O(ln accounts).
 -- Tries to create future block time strike. Requires authenticated user and blockheight should be in the future
 createBlockTimeStrikeFutureGuess :: AccountToken-> BlockHeight-> Natural Int-> SlowFast-> AppM ()
-createBlockTimeStrikeFutureGuess token blockHeight nlocktime guess = profile "createBlockTimeStrikeFutureGuess" $ do
+createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess = profile "createBlockTimeStrikeFutureGuess" $ do
   configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip <- asks (configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip . config)
   latestConfirmedBlockV <- asks (BlockTime.latestConfirmedBlock . blockTimeState)
   mlatestConfirmedBlock <- liftIO $ TVar.readTVarIO latestConfirmedBlockV
@@ -160,8 +160,8 @@ createBlockTimeStrikeFutureGuess token blockHeight nlocktime guess = profile "cr
       runLogging $ $(logError) err
       throwError err500 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
     Just tip
-        | blockHeaderMediantime tip > fromIntegral nlocktime -> do
-        let err = "ERROR: createBlockTimeStrikeFutureGuess: nlocktime is in the past, which is not expected"
+        | blockHeaderMediantime tip > fromIntegral strikeMediantime -> do
+        let err = "ERROR: createBlockTimeStrikeFutureGuess: strikeMediantime is in the past, which is not expected"
         runLogging $ $(logError) err
         throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
     Just tip
@@ -177,7 +177,7 @@ createBlockTimeStrikeFutureGuess token blockHeight nlocktime guess = profile "cr
           runLogging $ $(logError) err
           throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
         Just (Entity personKey _) -> do
-          mstrike <- mgetBlockTimeStrikeFuture blockHeight nlocktime
+          mstrike <- mgetBlockTimeStrikeFuture blockHeight strikeMediantime
           case mstrike of
             Nothing-> do
               let err = "ERROR: createBlockTimeStrikeFutureGuess: future strike was not able to authenticate itself"

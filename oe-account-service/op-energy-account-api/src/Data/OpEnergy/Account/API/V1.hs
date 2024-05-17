@@ -66,8 +66,8 @@ type BlockTimeV1API
     :> "strike"
     :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "AccountToken" AccountToken -- require authentication
     :> Capture "BlockHeight" BlockHeight
-    :> Capture "nLockTime" (Natural Int)
-    :> Description "Creates new future time strike by given BlockHeight and nLockTime. Requires authentication. Where: BlockHeight - height of the block in the future. It is expected, that it should be at least at 12 block in the future than current confirmed tip. nLockTime is a POSIX time in the future."
+    :> Capture "StrikeMediantime" (Natural Int)
+    :> Description "Creates new future time strike by given BlockHeight and strike mediantime. Requires authentication. Where: BlockHeight - height of the block in the future. It is expected, that it should be at least at 12 block in the future than current confirmed tip. StrikeMediantime is a POSIX time in the future."
     :> Post '[JSON] ()
 
   :<|> "future"
@@ -84,7 +84,7 @@ type BlockTimeV1API
     :> "guess"
     :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "AccountToken" AccountToken -- require authentication
     :> Capture "BlockHeight" BlockHeight
-    :> Capture "nLockTime" (Natural Int)
+    :> Capture "StrikeMediantime" (Natural Int)
     :> Capture "guess" SlowFast
     :> Description "creates a guess for the given future time strike. Requires authentication."
     :> Post '[JSON] ()
