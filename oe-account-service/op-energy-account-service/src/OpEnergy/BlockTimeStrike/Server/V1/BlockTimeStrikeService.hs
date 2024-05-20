@@ -9,7 +9,8 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
   , createBlockTimeStrikeFuture
   , newTipHandlerLoop
   , getBlockTimeStrikePastPage
-  , getBlockTimeStrikePage
+  , getBlockTimeStrikesPage
+  , getBlockTimeStrike
   ) where
 
 import           Servant (err400, err500, throwError, errBody)
@@ -46,7 +47,7 @@ import           Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic
 import           Data.OpEnergy.Account.API.V1.PagingResult
 import           Data.OpEnergy.Account.API.V1.FilterRequest
 import           OpEnergy.Account.Server.V1.Config (Config(..))
-import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging, profile, withDBTransaction, runLoggingIO )
+import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging, profile, withDBTransaction, runLoggingIO, withDBNOTransactionRO )
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledStrikeCreation as BlockTimeScheduledStrikeCreation
@@ -234,11 +235,11 @@ newTipHandlerLoop = forever $ do
       return ()
 
 -- | returns list of BlockTimeStrikePublic records
-getBlockTimeStrikePage
+getBlockTimeStrikesPage
   :: Maybe (Natural Int)
   -> Maybe (FilterRequest BlockTimeStrike BlockTimeStrikeFilter)
   -> AppM (PagingResult BlockTimeStrikePublic)
-getBlockTimeStrikePage mpage mfilter = profile "getBlockTimeStrikePage" $ do
+getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
   mret <- getBlockTimeStrikePast
   case mret of
     Nothing -> do
@@ -253,3 +254,37 @@ getBlockTimeStrikePage mpage mfilter = profile "getBlockTimeStrikePage" $ do
             resultsCnt <- lift $ count [ BlockTimeStrikeGuessStrike ==. strikeId ]
             C.yield (BlockTimeStrikePublic {blockTimeStrikePublicStrike = strike, blockTimeStrikePublicGuessesCount = fromIntegral resultsCnt})
           )
+
+-- | returns BlockTimeStrikePublic records
+getBlockTimeStrike
+  :: BlockHeight
+  -> Natural Int
+  -> AppM BlockTimeStrikePublic
+getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $ do
+  mret <- actualGetBlockTimeStrike
+  case mret of
+    Nothing -> do
+      throwError err500 {errBody = "something went wrong"}
+    Just Nothing -> do
+      throwError err400 {errBody = "strike not found"}
+    Just (Just ret) -> return ret
+  where
+    actualGetBlockTimeStrike = do
+      recordsPerReply <- asks (configRecordsPerReply . config)
+      withDBNOTransactionRO "" $ do
+        C.runConduit
+          $ streamEntities
+            [ BlockTimeStrikeBlock ==. blockHeight, BlockTimeStrikeStrikeMediantime ==. fromIntegral strikeMediantime ]
+            BlockTimeStrikeId
+            (PageSize ((fromPositive recordsPerReply) + 1))
+            Descend
+            (Range Nothing Nothing)
+          .| ( let loop acc = do
+                     mv <- C.await
+                     case mv of
+                       Just (Entity strikeId strike) -> do
+                         resultsCnt <- lift $ count [ BlockTimeStrikeGuessStrike ==. strikeId ]
+                         return ( Just (BlockTimeStrikePublic {blockTimeStrikePublicStrike = strike, blockTimeStrikePublicGuessesCount = fromIntegral resultsCnt}))
+                       Nothing -> return acc
+               in loop Nothing
+             )

@@ -25,8 +25,9 @@ import           Database.Persist.Sql
 import           Data.Swagger
 import           Control.Lens
 import           Data.Proxy(Proxy(..))
+import           Servant.API
 
-newtype UUID a = UUID ShortByteString
+newtype UUID a = UUID { unUUID:: ShortByteString}
   deriving (Eq, Show, Generic, Typeable)
 
 instance ToJSON (UUID a) where
@@ -41,6 +42,13 @@ instance Show a => ToSchema (UUID a) where
     & mapped.schema.example ?~ toJSON defaultUUID
 instance ToSchema ShortByteString where
   declareNamedSchema _ = declareNamedSchema (Proxy :: Proxy Text)
+instance ToParamSchema (UUID a) where
+  toParamSchema _ = mempty
+    & type_ ?~ SwaggerString
+    & format ?~ (TE.decodeUtf8 $ BS.fromShort $ unUUID defaultUUID)
+instance FromHttpApiData (UUID a) where
+  parseUrlPiece t = Right (verifyUUID t)
+  parseQueryParam t = Right (verifyUUID t)
 
 
 generateRandomUUID :: IO (UUID a)

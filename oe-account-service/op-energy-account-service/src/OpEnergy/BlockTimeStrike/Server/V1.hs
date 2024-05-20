@@ -49,14 +49,15 @@ import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime(State(..)
 
 blockTimeServer :: ServerT BlockTimeV1API (AppT Handler)
 blockTimeServer = websocketHandler
-  :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.getBlockTimeStrikeFuturePage
   :<|> createBlockTimeStrikeFuture
-  :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeFutureGuessesPage
   :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.createBlockTimeStrikeFutureGuess
-  :<|> getBlockTimeStrikePastPage
-  :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessResultsPage
-  :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.getBlockTimeStrikePage
-  :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessPage
+  :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.getBlockTimeStrikesPage
+  :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikesGuessesPage
+  :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessesPage
+
+  :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.getBlockTimeStrike
+  :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuess
+  :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessPerson
   :<|> oeGitHashGet
   where
     websocketHandler :: MonadIO m => Connection-> AppT m ()

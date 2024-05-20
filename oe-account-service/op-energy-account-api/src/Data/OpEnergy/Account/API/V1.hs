@@ -27,6 +27,7 @@ import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
 import           Data.OpEnergy.Account.API.V1.PagingResult
 import           Data.OpEnergy.Account.API.V1.FilterRequest
+import           Data.OpEnergy.Account.API.V1.UUID
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic
 
 -- | API specifications of a backend service for Swagger
@@ -54,72 +55,69 @@ type BlockTimeV1API
     :> Description "websockets handler. The goal is to be able to recieve notifications about newly created blocktime strikes and/or guesses"
     :> WebSocket
 
-  :<|> "future"
-    :> "strike"
-    :> "page"
-    :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
-    :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter" ] "filter" (FilterRequest BlockTimeStrike BlockTimeStrikeFilter)
-    :> Description "returns list of the future time strikes"
-    :> Get '[JSON] (PagingResult BlockTimeStrike)
-
-  :<|> "future"
-    :> "strike"
+  :<|> "strike"
     :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "AccountToken" AccountToken -- require authentication
     :> Capture "BlockHeight" BlockHeight
     :> Capture "StrikeMediantime" (Natural Int)
-    :> Description "Creates new future time strike by given BlockHeight and strike mediantime. Requires authentication. Where: BlockHeight - height of the block in the future. It is expected, that it should be at least at 12 block in the future than current confirmed tip. StrikeMediantime is a POSIX time in the future."
+    :> Description "Creates new time strike by given BlockHeight and strike mediantime. Requires authentication. Where: BlockHeight - height of the block in the future. It is expected, that it should be at least at 12 block in the future than current confirmed tip. StrikeMediantime is a POSIX time in the future."
     :> Post '[JSON] ()
 
-  :<|> "future"
-    :> "strike"
-    :> "guess"
-    :> "page"
-    :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
-    :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter" ] "filter" (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessPublicFilter)
-    :> Description "returns list of the guesses for a given future time strike."
-    :> Get '[JSON] (PagingResult BlockTimeStrikeGuessPublic)
-
-  :<|> "future"
-    :> "strike"
+  :<|> "strike"
     :> "guess"
     :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "AccountToken" AccountToken -- require authentication
     :> Capture "BlockHeight" BlockHeight
     :> Capture "StrikeMediantime" (Natural Int)
     :> Capture "guess" SlowFast
     :> Description "creates a guess for the given future time strike. Requires authentication."
-    :> Post '[JSON] ()
+    :> Post '[JSON] BlockTimeStrikeGuessPublic
 
-  :<|> "past"
-    :> "strike"
-    :> "page"
-    :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
-    :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter" ] "filter" (FilterRequest BlockTimeStrike BlockTimeStrikeFilter)
-    :> Description "returns list of past strikes, that have been already processed. Results are ordered by block mediantime in descending order. Time strike becomes \"past\" when it becomes confirmed and you can think about it as archived strike, that had been processed and now being kept as history"
-    :> Get '[JSON] (PagingResult BlockTimeStrikePublic)
-
-  :<|> "past"
-    :> "strike"
-    :> "guess"
-    :> "page"
-    :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
-    :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter" ] "filter" (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
-    :> Description "returns results for the given blocktime strike in the past. Time strike becomes \"past\" when it becomes confirmed and you can think about it as archived strike, that had been processed and now being kept as history. 'Guess' becomes a 'result' when blocktime strike becomes confirmed and processed."
-    :> Get '[JSON] (PagingResult BlockTimeStrikeGuessPublic)
-
-  :<|> "strike"
+  :<|> "strikes"
     :> "page"
     :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
     :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter" ] "filter" (FilterRequest BlockTimeStrike BlockTimeStrikeFilter)
     :> Description "returns list of strikes. By default, results are ordered by strike id in descending order. (ie, from newer to older)"
     :> Get '[JSON] (PagingResult BlockTimeStrikePublic)
 
-  :<|> "strike"
-    :> "guess"
+  :<|> "strikes"
+    :> "guesses"
     :> "page"
     :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
     :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter" ] "filter" (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
     :> Description "returns guesses for the given blocktime strike. By default, results are order by id in decending order (from new to old)"
     :> Get '[JSON] (PagingResult BlockTimeStrikeGuessPublic)
+
+  :<|> "strike"
+    :> "guesses"
+    :> "page"
+    :> Capture "BlockHeight" BlockHeight
+    :> Capture "StrikeMediantime" (Natural Int)
+    :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
+    :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter" ] "filter" (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
+    :> Description "returns guesses for the given blocktime strike. By default, results are order by id in decending order (from new to old)"
+    :> Get '[JSON] (PagingResult BlockTimeStrikeGuessPublic)
+
+  :<|> "strike"
+    :> Capture "BlockHeight" BlockHeight
+    :> Capture "StrikeMediantime" (Natural Int)
+    :> Description "returns strikes"
+    :> Get '[JSON] BlockTimeStrikePublic
+
+  :<|> "strike"
+    :> "guess"
+    :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "AccountToken" AccountToken -- require authentication
+    :> Capture "BlockHeight" BlockHeight
+    :> Capture "StrikeMediantime" (Natural Int)
+    :> Description "returns user's guess for the given blocktime strike."
+    :> Get '[JSON] BlockTimeStrikeGuessPublic
+
+  :<|> "strike"
+    :> "guess"
+    :> "person"
+    :> Capture "PersonUUID" (UUID Person)
+    :> Capture "BlockHeight" BlockHeight
+    :> Capture "StrikeMediantime" (Natural Int)
+    :> Description "returns user's guess for the given blocktime strike."
+    :> Get '[JSON] BlockTimeStrikeGuessPublic
 
   :<|> "git-hash"
     :> Description "returns short hash of commit of the op-energy git repo that had been used to build backend"

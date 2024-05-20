@@ -9,7 +9,10 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
   ( createBlockTimeStrikeFutureGuess
   , getBlockTimeStrikeGuessResultsPage
   , getBlockTimeStrikeFutureGuessesPage
-  , getBlockTimeStrikeGuessPage
+  , getBlockTimeStrikesGuessesPage
+  , getBlockTimeStrikeGuessesPage
+  , getBlockTimeStrikeGuess
+  , getBlockTimeStrikeGuessPerson
   ) where
 
 import           Servant (err400, err500, throwError, errBody)
@@ -41,6 +44,7 @@ import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
 import           Data.OpEnergy.Account.API.V1.PagingResult
 import           Data.OpEnergy.Account.API.V1.FilterRequest
+import           Data.OpEnergy.Account.API.V1.UUID
 import           OpEnergy.Account.Server.V1.Config (Config(..))
 import           OpEnergy.Account.Server.V1.Class ( AppT, AppM, State(..), runLogging, profile, withDBTransaction, withDBNOTransactionRO)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
@@ -149,7 +153,7 @@ mgetBlockTimeStrikeFuture blockHeight strikeMediantime = profile "mgetBlockTimeS
 
 -- | O(ln accounts).
 -- Tries to create future block time strike. Requires authenticated user and blockheight should be in the future
-createBlockTimeStrikeFutureGuess :: AccountToken-> BlockHeight-> Natural Int-> SlowFast-> AppM ()
+createBlockTimeStrikeFutureGuess :: AccountToken-> BlockHeight-> Natural Int-> SlowFast-> AppM BlockTimeStrikeGuessPublic
 createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess = profile "createBlockTimeStrikeFutureGuess" $ do
   configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip <- asks (configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip . config)
   latestConfirmedBlockV <- asks (BlockTime.latestConfirmedBlock . blockTimeState)
@@ -176,31 +180,37 @@ createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess = prof
           let err = "ERROR: createBlockTimeStrikeFutureGuess: person was not able to authenticate itself"
           runLogging $ $(logError) err
           throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
-        Just (Entity personKey _) -> do
+        Just (Entity personKey person) -> do
           mstrike <- mgetBlockTimeStrikeFuture blockHeight strikeMediantime
           case mstrike of
             Nothing-> do
               let err = "ERROR: createBlockTimeStrikeFutureGuess: future strike was not able to authenticate itself"
               runLogging $ $(logError) err
               throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
-            Just (Entity strikeKey _) -> do
+            Just (Entity strikeKey strike) -> do
               mret <- createBlockTimeStrikeFutureGuess personKey strikeKey guess
               case mret of
                 Nothing -> throwError err500 {errBody = "something went wrong"}
-                Just _ -> return ()
+                Just v -> return $ BlockTimeStrikeGuessPublic
+                  { person = personUuid person
+                  , strike = strike
+                  , creationTime = blockTimeStrikeGuessCreationTime v
+                  , guess = guess
+                  }
   where
-    createBlockTimeStrikeFutureGuess :: (MonadMonitor m, MonadIO m) => Key Person-> Key BlockTimeStrike-> SlowFast-> AppT m (Maybe ())
+    createBlockTimeStrikeFutureGuess :: (MonadMonitor m, MonadIO m) => Key Person-> Key BlockTimeStrike-> SlowFast-> AppT m (Maybe BlockTimeStrikeGuess)
     createBlockTimeStrikeFutureGuess personKey strikeKey guess = profile "createBlockTimeStrikeFutureGuess" $ do
       nowUTC <- liftIO getCurrentTime
       let now = utcTimeToPOSIXSeconds nowUTC
       withDBTransaction "" $ do
-        _ <- insert $ BlockTimeStrikeGuess
-          { blockTimeStrikeGuessGuess = guess
-          , blockTimeStrikeGuessCreationTime = now
-          , blockTimeStrikeGuessPerson = personKey
-          , blockTimeStrikeGuessStrike = strikeKey
-          }
-        return ()
+        let value = BlockTimeStrikeGuess
+              { blockTimeStrikeGuessGuess = guess
+              , blockTimeStrikeGuessCreationTime = now
+              , blockTimeStrikeGuessPerson = personKey
+              , blockTimeStrikeGuessStrike = strikeKey
+              }
+        _ <- insert value
+        return value
 
 -- | O(ln accounts) + O(BlockTimeStrikePast).
 -- returns list BlockTimeStrikePast records
@@ -297,11 +307,11 @@ getBlockTimeStrikeGuessResultsPage mpage mfilter = profile "getBlockTimeStrikeGu
          )
 
 -- | returns list BlockTimeStrikeGuess records
-getBlockTimeStrikeGuessPage
+getBlockTimeStrikesGuessesPage
   :: Maybe (Natural Int)
   -> Maybe (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
   -> AppM (PagingResult BlockTimeStrikeGuessPublic)
-getBlockTimeStrikeGuessPage mpage mfilter = profile "getBlockTimeStrikeGuessPage" $ do
+getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuessesPage" $ do
   recordsPerReply <- asks (configRecordsPerReply . config)
   mret <- withDBNOTransactionRO "" $ do
     count <- C.runConduit
@@ -379,3 +389,219 @@ getBlockTimeStrikeGuessPage mpage mfilter = profile "getBlockTimeStrikeGuessPage
               (Range Nothing Nothing)
             )
          )
+
+-- | returns list BlockTimeStrikeGuesses records
+getBlockTimeStrikeGuessesPage
+  :: BlockHeight
+  -> Natural Int
+  -> Maybe (Natural Int)
+  -> Maybe (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
+  -> AppM (PagingResult BlockTimeStrikeGuessPublic)
+getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilter = profile "getBlockTimeStrikesGuessesPage" $ do
+  recordsPerReply <- asks (configRecordsPerReply . config)
+  mret <- withDBNOTransactionRO "" $ do
+    count <- C.runConduit
+      $ filters recordsPerReply
+      .| ( do
+             let
+                 loop (acc::Int) = do
+                   mv <- C.await
+                   case mv of
+                     Nothing -> return acc
+                     Just _-> do
+                       loop (acc + 1)
+             loop 0
+         )
+    res <- C.runConduit
+      $ filters recordsPerReply
+      .| (C.drop (fromNatural page * fromPositive recordsPerReply) >> C.awaitForever C.yield) -- navigate to page
+      .| ( C.awaitForever $ \((Entity _ strike, Entity _ guess), Entity _ person) -> do
+           C.yield $ BlockTimeStrikeGuessPublic
+                     { person = personUuid person
+                     , strike = strike
+                     , creationTime = blockTimeStrikeGuessCreationTime guess
+                     , guess = blockTimeStrikeGuessGuess guess
+                     }
+         )
+      .| C.take (fromPositive recordsPerReply + 1) -- we take +1 to understand if there is a next page available
+    return (count, res)
+  case mret of
+      Nothing -> do
+        throwError err500 {errBody = "something went wrong, check logs for details"}
+      Just (count, guessesTail) -> do
+        let newPage =
+              if List.length guessesTail > fromPositive recordsPerReply
+              then Just (fromIntegral (fromNatural page + 1))
+              else Nothing
+            results = List.take (fromPositive recordsPerReply) guessesTail
+        return $ PagingResult
+          { pagingResultNextPage = newPage
+          , pagingResultCount = fromIntegral count
+          , pagingResultResults = results
+          }
+  where
+    page = maybe 0 id mpage
+    repeatC v = C.yield v >> repeatC v
+    sort = maybe Descend (sortOrder . unFilterRequest . id1 . mapFilter) mfilter
+      where
+        id1 :: FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter -> FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter
+        id1 = id -- helping typechecker
+    filters recordsPerReply =
+      streamEntities
+          [ BlockTimeStrikeBlock ==. blockHeight, BlockTimeStrikeStrikeMediantime ==. fromIntegral strikeMediantime ]
+          BlockTimeStrikeId
+          (PageSize ((fromPositive recordsPerReply) + 1))
+          sort
+          (Range Nothing Nothing)
+      .| ( C.awaitForever $ \v@(Entity strikeId _)-> do
+          C.toProducer $ C.zipSources
+            (repeatC v)
+            (streamEntities
+              (( BlockTimeStrikeGuessStrike ==. strikeId ):(maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter ))
+              BlockTimeStrikeGuessId
+              (PageSize ((fromPositive recordsPerReply) + 1))
+              sort
+              (Range Nothing Nothing)
+            )
+         )
+      .| ( C.awaitForever $ \v@(_, Entity _ guess )-> do
+          C.toProducer $ C.zipSources
+            (repeatC v)
+            ( streamEntities
+              (( PersonId ==. blockTimeStrikeGuessPerson guess ):(maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter ))
+              PersonId
+              (PageSize ((fromPositive recordsPerReply) + 1))
+              sort
+              (Range Nothing Nothing)
+            )
+         )
+
+-- | returns BlockTimeStrikeGuessPublic by strike and person, taken from account token
+getBlockTimeStrikeGuess
+  :: AccountToken
+  -> BlockHeight
+  -> Natural Int
+  -> AppM BlockTimeStrikeGuessPublic
+getBlockTimeStrikeGuess token blockHeight strikeMediantime = profile "getBlockTimeStrikeGuess" $ do
+  mperson <- mgetPersonByAccountToken token
+  case mperson of
+    Nothing-> do
+      let err = "ERROR: getBlockTimeStrikeGuess: person was not able to authenticate itself"
+      runLogging $ $(logError) err
+      throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+    Just personE -> do
+      mstrike <- actualGetStrikeGuess personE blockHeight (fromIntegral strikeMediantime)
+      case mstrike of
+        Nothing-> do
+          let err = "ERROR: getBlockTimeStrikeGuess: something went wrong, see logs for details"
+          runLogging $ $(logError) err
+          throwError err500 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+        Just Nothing -> do
+          let err = "ERROR: getBlockTimeStrikeGuess: no strike or guess found"
+          runLogging $ $(logError) err
+          throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+        Just (Just ret)-> return ret
+
+  where
+    repeatC v = C.yield v >> repeatC v
+    actualGetStrikeGuess (Entity personKey person) blockHeight strikeMediantime = do
+      recordsPerReply <- asks (configRecordsPerReply . config)
+      withDBNOTransactionRO "" $ do
+        C.runConduit
+          $ streamEntities
+            [BlockTimeStrikeBlock ==. blockHeight, BlockTimeStrikeStrikeMediantime ==. strikeMediantime]
+            BlockTimeStrikeId
+            (PageSize ((fromPositive recordsPerReply) + 1))
+            Descend
+            (Range Nothing Nothing)
+          .| ( C.awaitForever $ \v@(Entity strikeId _)-> do
+              C.toProducer $ C.zipSources
+                (repeatC v)
+                (streamEntities
+                  [ BlockTimeStrikeGuessStrike ==. strikeId, BlockTimeStrikeGuessPerson ==. personKey ]
+                  BlockTimeStrikeGuessId
+                  (PageSize ((fromPositive recordsPerReply) + 1))
+                  Descend
+                  (Range Nothing Nothing)
+                )
+             )
+          .| ( let loop = do
+                     mv <- C.await
+                     case mv of
+                       Nothing -> return Nothing
+                       Just (Entity _ strike, Entity _ guess) -> return $ Just $ BlockTimeStrikeGuessPublic
+                         { person = personUuid person
+                         , strike = strike
+                         , creationTime = blockTimeStrikeGuessCreationTime guess
+                         , guess = blockTimeStrikeGuessGuess guess
+                         }
+               in loop
+             )
+
+getBlockTimeStrikeGuessPerson
+  :: UUID Person
+  -> BlockHeight
+  -> Natural Int
+  -> AppM BlockTimeStrikeGuessPublic
+getBlockTimeStrikeGuessPerson uuid blockHeight strikeMediantime = profile "getBlockTimeStrikeGuessPerson" $ do
+  mperson <- mgetPersonByUUID uuid
+  case mperson of
+    Nothing -> do
+      let err = "ERROR: getBlockTimeStrikeGuessPerson: something went wrong, check logs"
+      runLogging $ $(logError) err
+      throwError err500 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+    Just Nothing-> do
+      let err = "ERROR: getBlockTimeStrikeGuessPerson: person was not able to authenticate itself"
+      runLogging $ $(logError) err
+      throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+    Just (Just personE) -> do
+      mstrike <- actualGetStrikeGuess personE blockHeight (fromIntegral strikeMediantime)
+      case mstrike of
+        Nothing-> do
+          let err = "ERROR: getBlockTimeStrikeGuess: something went wrong, see logs for details"
+          runLogging $ $(logError) err
+          throwError err500 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+        Just Nothing -> do
+          let err = "ERROR: getBlockTimeStrikeGuess: no strike or guess found"
+          runLogging $ $(logError) err
+          throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+        Just (Just ret)-> return ret
+
+  where
+    repeatC v = C.yield v >> repeatC v
+    mgetPersonByUUID uuid = do
+      withDBNOTransactionRO "" $ do
+        selectFirst [ PersonUuid ==. uuid ][]
+    actualGetStrikeGuess (Entity personKey person) blockHeight strikeMediantime = do
+      recordsPerReply <- asks (configRecordsPerReply . config)
+      withDBNOTransactionRO "" $ do
+        C.runConduit
+          $ streamEntities
+            [BlockTimeStrikeBlock ==. blockHeight, BlockTimeStrikeStrikeMediantime ==. strikeMediantime]
+            BlockTimeStrikeId
+            (PageSize ((fromPositive recordsPerReply) + 1))
+            Descend
+            (Range Nothing Nothing)
+          .| ( C.awaitForever $ \v@(Entity strikeId _)-> do
+              C.toProducer $ C.zipSources
+                (repeatC v)
+                (streamEntities
+                  [ BlockTimeStrikeGuessStrike ==. strikeId, BlockTimeStrikeGuessPerson ==. personKey ]
+                  BlockTimeStrikeGuessId
+                  (PageSize ((fromPositive recordsPerReply) + 1))
+                  Descend
+                  (Range Nothing Nothing)
+                )
+             )
+          .| ( let loop = do
+                     mv <- C.await
+                     case mv of
+                       Nothing -> return Nothing
+                       Just (Entity _ strike, Entity _ guess) -> return $ Just $ BlockTimeStrikeGuessPublic
+                         { person = personUuid person
+                         , strike = strike
+                         , creationTime = blockTimeStrikeGuessCreationTime guess
+                         , guess = blockTimeStrikeGuessGuess guess
+                         }
+               in loop
+             )
