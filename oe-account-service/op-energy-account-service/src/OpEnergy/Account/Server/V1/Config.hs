@@ -65,6 +65,8 @@ data Config = Config
     -- ^ defines how many blocks ahead of current tip there should exist a  strike. Effectively, this means, that there should exist  strikes for a range [ currentTip + configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip; currentTip + configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip + configBlockTimeStrikeShouldExistsAheadCurrentTip ]
   , configRecordsPerReply :: Positive Int
     -- ^ defines how much records should be returned in one page
+  , configAverageBlockDiscoverSecs :: Positive Int
+    -- ^ defines how much seconds takes to discover in average
   }
   deriving Show
 instance FromJSON Config where
@@ -88,6 +90,7 @@ instance FromJSON Config where
     <*> ((v .:? "BLOCKSPAN_API_URL" .!= (showBaseUrl $ configBlockspanURL defaultConfig)) >>= parseBaseUrl)
     <*> ( v .:? "BLOCKTIME_STRIKE_SHOULD_EXISTS_AHEAD_CURRENT_TIP" .!= (configBlockTimeStrikeShouldExistsAheadCurrentTip defaultConfig))
     <*> ( v .:? "BLOCKTIME_RECORDS_PER_REPLY" .!= (configRecordsPerReply defaultConfig))
+    <*> ( v .:? "AVERAGE_BLOCK_DISCOVER_SECS" .!= (configAverageBlockDiscoverSecs defaultConfig))
 
 -- need to get Key from json, which represented as base64-encoded string
 instance FromJSON Key where
@@ -118,6 +121,7 @@ defaultConfig = Config
   , configBlockspanURL = BaseUrl Http "127.0.0.1" 8999 ""
   , configBlockTimeStrikeShouldExistsAheadCurrentTip = 12
   , configRecordsPerReply = 100
+  , configAverageBlockDiscoverSecs = 600
   }
 
 getConfigFromEnvironment :: IO Config

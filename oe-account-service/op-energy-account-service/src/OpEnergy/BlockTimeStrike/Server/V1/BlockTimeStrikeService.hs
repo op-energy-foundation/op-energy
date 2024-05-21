@@ -240,16 +240,42 @@ getBlockTimeStrikesPage
   -> Maybe (FilterRequest BlockTimeStrike BlockTimeStrikeFilter)
   -> AppM (PagingResult BlockTimeStrikePublic)
 getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
-  mret <- getBlockTimeStrikePast
-  case mret of
+  latestConfirmedBlockV <- asks (BlockTime.latestConfirmedBlock . blockTimeState)
+  mlatestConfirmedBlock <- liftIO $ TVar.readTVarIO latestConfirmedBlockV
+  averageBlockDiscoverSecs <- asks (configAverageBlockDiscoverSecs . config)
+  minimumBlocksAhead <- asks (configBlockTimeStrikeMinimumBlockAheadCurrentTip . config)
+  case mlatestConfirmedBlock of
     Nothing -> do
-      throwError err500 {errBody = "something went wrong"}
-    Just ret -> return ret
+      let msg = "getBlockTimeStrikesPage: no confirmed block found yet"
+      runLogging $  $(logError) msg
+      throwError err500 { errBody = BS.fromStrict $ Text.encodeUtf8 msg}
+    Just confirmedBlock -> do
+      let finalFilter =
+            case maybe Nothing (blockTimeStrikeFilterClass . fst . unFilterRequest) mfilter of
+              Nothing -> filter
+              Just BlockTimeStrikeFilterClassGuessable ->
+                ( (BlockTimeStrikeBlock >=. blockHeaderHeight confirmedBlock + naturalFromPositive minimumBlocksAhead)
+                 :(BlockTimeStrikeStrikeMediantime >=. (fromIntegral (blockHeaderMediantime confirmedBlock) + (fromIntegral $ minimumBlocksAhead * averageBlockDiscoverSecs)))
+                 :filter
+                )
+              Just BlockTimeStrikeFilterClassOutcomeKnown ->
+                ( (BlockTimeStrikeObservedResult !=. Nothing)
+                 :filter
+                )
+              Just BlockTimeStrikeFilterClassOutcomeUnknown ->
+                ( (BlockTimeStrikeObservedResult ==. Nothing)
+                 :filter
+                )
+      mret <- getBlockTimeStrikePast finalFilter
+      case mret of
+        Nothing -> do
+          throwError err500 {errBody = "something went wrong"}
+        Just ret -> return ret
   where
     sort = maybe Descend (sortOrder . unFilterRequest) mfilter
     filter = (maybe [] (buildFilter . unFilterRequest) mfilter)
-    getBlockTimeStrikePast = do
-      pagingResult mpage filter sort BlockTimeStrikeId
+    getBlockTimeStrikePast finalFilter = do
+      pagingResult mpage finalFilter sort BlockTimeStrikeId
         $ ( C.awaitForever $ \(Entity strikeId strike) -> do
             resultsCnt <- lift $ count [ BlockTimeStrikeGuessStrike ==. strikeId ]
             C.yield (BlockTimeStrikePublic {blockTimeStrikePublicStrike = strike, blockTimeStrikePublicGuessesCount = fromIntegral resultsCnt})
