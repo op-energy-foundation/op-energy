@@ -19,13 +19,16 @@ import           Data.Default
 import           GHC.Generics
 
 jsonCommonOptions :: Show a => a-> Options
-jsonCommonOptions v = defaultOptions
+jsonCommonOptions singleton = defaultOptions
     { fieldLabelModifier =
       (\s -> case s of
           [] -> []
           (first:rest)-> (Char.toLower first):rest
-      ) . (List.drop $ List.length $ List.takeWhile (not . Char.isSpace) $ show v)
-    , constructorTagModifier = List.map Char.toLower
+      ) . (List.drop $ List.length $ List.takeWhile (not . Char.isSpace) $ show singleton)
+    , constructorTagModifier = \v ->
+      case (List.drop $ List.length $ List.takeWhile (not . Char.isSpace) $ show singleton) v of
+        [] -> List.map Char.toLower v
+        (first:rest)-> (Char.toLower first):rest
     }
 
 commonParseJSON :: (Show a, Default a, Generic a, GFromJSON Zero (Rep a)) => Value -> Parser a
