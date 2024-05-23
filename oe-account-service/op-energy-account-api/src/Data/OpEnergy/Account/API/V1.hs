@@ -82,7 +82,7 @@ type BlockTimeV1API
     :> "guesses"
     :> "page"
     :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
-    :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter. Available filter options are listed in the format of current field. Meaning of fields' suffixes: 'GTE' - 'great-than-or-equal', 'LTE'- 'less-than-or-equal', 'EQ' - equal, 'NEQ' - 'not equal'. 'sort' field can have those values: 'descend', 'ascend'." ] "filter" (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
+    :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter. Available filter options are listed in the format of current field. Meaning of fields' suffixes: 'GTE' - 'great-than-or-equal', 'LTE'- 'less-than-or-equal', 'EQ' - equal, 'NEQ' - 'not equal'. 'sort' field can have those values: 'descend', 'ascend'. 'class' field can have those values: 'guessable', 'outcomeKnown', 'outcomeUnknown'" ] "filter" (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
     :> Description "returns guesses for the given blocktime strike. By default, results are order by id in decending order (from new to old)"
     :> Get '[JSON] (PagingResult BlockTimeStrikeGuessPublic)
 

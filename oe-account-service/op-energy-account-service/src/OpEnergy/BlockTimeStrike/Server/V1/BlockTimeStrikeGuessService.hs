@@ -45,6 +45,7 @@ import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
 import           Data.OpEnergy.Account.API.V1.PagingResult
 import           Data.OpEnergy.Account.API.V1.FilterRequest
 import           Data.OpEnergy.Account.API.V1.UUID
+import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
 import           OpEnergy.Account.Server.V1.Config (Config(..))
 import           OpEnergy.Account.Server.V1.Class ( AppT, AppM, State(..), runLogging, profile, withDBTransaction, withDBNOTransactionRO)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
@@ -313,56 +314,83 @@ getBlockTimeStrikesGuessesPage
   -> AppM (PagingResult BlockTimeStrikeGuessPublic)
 getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuessesPage" $ do
   recordsPerReply <- asks (configRecordsPerReply . config)
-  mret <- withDBNOTransactionRO "" $ do
-    count <- C.runConduit
-      $ filters recordsPerReply
-      .| ( do
-             let
-                 loop (acc::Int) = do
-                   mv <- C.await
-                   case mv of
-                     Nothing -> return acc
-                     Just _-> do
-                       loop (acc + 1)
-             loop 0
-         )
-    res <- C.runConduit
-      $ filters recordsPerReply
-      .| (C.drop (fromNatural page * fromPositive recordsPerReply) >> C.awaitForever C.yield) -- navigate to page
-      .| ( C.awaitForever $ \((Entity _ strike, Entity _ guess), Entity _ person) -> do
-           C.yield $ BlockTimeStrikeGuessPublic
-                     { person = personUuid person
-                     , strike = strike
-                     , creationTime = blockTimeStrikeGuessCreationTime guess
-                     , guess = blockTimeStrikeGuessGuess guess
-                     }
-         )
-      .| C.take (fromPositive recordsPerReply + 1) -- we take +1 to understand if there is a next page available
-    return (count, res)
-  case mret of
-      Nothing -> do
-        throwError err500 {errBody = "something went wrong, check logs for details"}
-      Just (count, guessesTail) -> do
-        let newPage =
-              if List.length guessesTail > fromPositive recordsPerReply
-              then Just (fromIntegral (fromNatural page + 1))
-              else Nothing
-            results = List.take (fromPositive recordsPerReply) guessesTail
-        return $ PagingResult
-          { pagingResultNextPage = newPage
-          , pagingResultCount = fromIntegral count
-          , pagingResultResults = results
-          }
+  latestConfirmedBlockV <- asks (BlockTime.latestConfirmedBlock . blockTimeState)
+  mlatestConfirmedBlock <- liftIO $ TVar.readTVarIO latestConfirmedBlockV
+  averageBlockDiscoverSecs <- asks (configAverageBlockDiscoverSecs . config)
+  minimumBlocksAhead <- asks (configBlockTimeStrikeMinimumBlockAheadCurrentTip . config)
+  case mlatestConfirmedBlock of
+    Nothing -> do
+      let msg = "getBlockTimeStrikesGuessesPage: no confirmed block found yet"
+      runLogging $  $(logError) msg
+      throwError err500 { errBody = BS.fromStrict $ Text.encodeUtf8 msg}
+    Just confirmedBlock -> do
+      let finalFilter =
+            case maybe Nothing (blockTimeStrikeGuessResultPublicFilterClass . fst . unFilterRequest) mfilter of
+              Nothing -> filter
+              Just BlockTimeStrikeFilterClassGuessable ->
+                ( (BlockTimeStrikeBlock >=. (blockHeaderHeight confirmedBlock + naturalFromPositive minimumBlocksAhead))
+                 :(BlockTimeStrikeStrikeMediantime >=. (fromIntegral (blockHeaderMediantime confirmedBlock) + (fromIntegral $ minimumBlocksAhead * averageBlockDiscoverSecs)))
+                 :filter
+                )
+              Just BlockTimeStrikeFilterClassOutcomeKnown ->
+                ( (BlockTimeStrikeObservedResult !=. Nothing)
+                 :filter
+                )
+              Just BlockTimeStrikeFilterClassOutcomeUnknown ->
+                ( (BlockTimeStrikeObservedResult ==. Nothing)
+                 :filter
+                )
+      mret <- withDBNOTransactionRO "" $ do
+        count <- C.runConduit
+          $ filters finalFilter recordsPerReply
+          .| ( do
+                let
+                    loop (acc::Int) = do
+                      mv <- C.await
+                      case mv of
+                        Nothing -> return acc
+                        Just _-> do
+                          loop (acc + 1)
+                loop 0
+            )
+        res <- C.runConduit
+          $ filters finalFilter recordsPerReply
+          .| (C.drop (fromNatural page * fromPositive recordsPerReply) >> C.awaitForever C.yield) -- navigate to page
+          .| ( C.awaitForever $ \((Entity _ strike, Entity _ guess), Entity _ person) -> do
+              C.yield $ BlockTimeStrikeGuessPublic
+                        { person = personUuid person
+                        , strike = strike
+                        , creationTime = blockTimeStrikeGuessCreationTime guess
+                        , guess = blockTimeStrikeGuessGuess guess
+                        }
+            )
+          .| C.take (fromPositive recordsPerReply + 1) -- we take +1 to understand if there is a next page available
+        return (count, res)
+      case mret of
+          Nothing -> do
+            throwError err500 {errBody = "something went wrong, check logs for details"}
+          Just (count, guessesTail) -> do
+            let newPage =
+                  if List.length guessesTail > fromPositive recordsPerReply
+                  then Just (fromIntegral (fromNatural page + 1))
+                  else Nothing
+                results = List.take (fromPositive recordsPerReply) guessesTail
+            return $ PagingResult
+              { pagingResultNextPage = newPage
+              , pagingResultCount = fromIntegral count
+              , pagingResultResults = results
+              }
   where
     page = maybe 0 id mpage
+    filter = maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter
     repeatC v = C.yield v >> repeatC v
     sort = maybe Descend (sortOrder . unFilterRequest . id1 . mapFilter) mfilter
       where
         id1 :: FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter -> FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter
         id1 = id -- helping typechecker
-    filters recordsPerReply =
+    filters finalFilter recordsPerReply =
       streamEntities
-          (maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter )
+          finalFilter
           BlockTimeStrikeId
           (PageSize ((fromPositive recordsPerReply) + 1))
           sort

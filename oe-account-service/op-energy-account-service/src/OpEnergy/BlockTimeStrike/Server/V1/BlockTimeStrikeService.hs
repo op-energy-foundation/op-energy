@@ -46,6 +46,7 @@ import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic
 import           Data.OpEnergy.Account.API.V1.PagingResult
 import           Data.OpEnergy.Account.API.V1.FilterRequest
+import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
 import           OpEnergy.Account.Server.V1.Config (Config(..))
 import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging, profile, withDBTransaction, runLoggingIO, withDBNOTransactionRO )
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime

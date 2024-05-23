@@ -43,6 +43,7 @@ import           Data.OpEnergy.Account.API.V1.UUID
 import           Data.OpEnergy.Account.API.V1.Common
 import           Data.OpEnergy.Account.API.V1.FilterRequest
 import           Data.OpEnergy.API.V1.Block(BlockHeight)
+import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
 
 share [mkPersist sqlSettings, mkMigrate "migrateBlockTimeStrikeGuess"] [persistLowerCase|
 BlockTimeStrikeGuess
@@ -237,6 +238,7 @@ data BlockTimeStrikeGuessResultPublicFilter = BlockTimeStrikeGuessResultPublicFi
   , blockTimeStrikeGuessResultPublicFilterStrikeMediantimeLTE   :: Maybe POSIXTime
     -- sort
   , blockTimeStrikeGuessResultPublicFilterSort                  :: Maybe SortOrder
+  , blockTimeStrikeGuessResultPublicFilterClass                 :: Maybe BlockTimeStrikeFilterClass
   }
   deriving (Eq, Show, Generic)
 instance Default BlockTimeStrikeGuessResultPublicFilter where
@@ -335,4 +337,5 @@ defaultBlockTimeStrikeGuessResultPublicFilter =  BlockTimeStrikeGuessResultPubli
   , blockTimeStrikeGuessResultPublicFilterObservedMediantimeGTE = Just 1
   , blockTimeStrikeGuessResultPublicFilterObservedMediantimeLTE = Just 1
   , blockTimeStrikeGuessResultPublicFilterSort                  = Just Descend
+  , blockTimeStrikeGuessResultPublicFilterClass                 = Just defaultBlockTimeStrikeFilterClass
   }
