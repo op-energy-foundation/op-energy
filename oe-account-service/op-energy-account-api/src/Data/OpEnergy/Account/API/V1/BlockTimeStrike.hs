@@ -63,16 +63,10 @@ BlockTimeStrike
 |]
 
 data BlockTimeStrikeFilter = BlockTimeStrikeFilter
-  { blockTimeStrikeFilterCreationTimeGTE            :: Maybe POSIXTime
-  , blockTimeStrikeFilterCreationTimeLTE            :: Maybe POSIXTime
-  , blockTimeStrikeFilterStrikeMediantimeGTE        :: Maybe POSIXTime
+  { blockTimeStrikeFilterStrikeMediantimeGTE        :: Maybe POSIXTime
   , blockTimeStrikeFilterStrikeMediantimeLTE        :: Maybe POSIXTime
-  , blockTimeStrikeFilterBlockHeightGTE             :: Maybe BlockHeight
-  , blockTimeStrikeFilterBlockHeightLTE             :: Maybe BlockHeight
-  , blockTimeStrikeFilterObservedResultEQ           :: Maybe SlowFast
-  , blockTimeStrikeFilterObservedResultNEQ          :: Maybe SlowFast
-  , blockTimeStrikeFilterObservedMediantimeGTE      :: Maybe POSIXTime
-  , blockTimeStrikeFilterObservedMediantimeLTE      :: Maybe POSIXTime
+  , blockTimeStrikeFilterStrikeBlockHeightGTE       :: Maybe BlockHeight
+  , blockTimeStrikeFilterStrikeBlockHeightLTE       :: Maybe BlockHeight
   , blockTimeStrikeFilterObservedBlockHashEQ        :: Maybe BlockHash
   , blockTimeStrikeFilterObservedBlockHashNEQ       :: Maybe BlockHash
   , blockTimeStrikeFilterSort                       :: Maybe SortOrder
@@ -96,16 +90,10 @@ instance Default BlockTimeStrikeFilter where
 
 defaultBlockTimeStrikeFilter :: BlockTimeStrikeFilter
 defaultBlockTimeStrikeFilter = BlockTimeStrikeFilter
-  { blockTimeStrikeFilterCreationTimeGTE       = Just 1
-  , blockTimeStrikeFilterCreationTimeLTE       = Just 1
-  , blockTimeStrikeFilterStrikeMediantimeGTE   = Just 1
+  { blockTimeStrikeFilterStrikeMediantimeGTE   = Just 1
   , blockTimeStrikeFilterStrikeMediantimeLTE   = Just 1
-  , blockTimeStrikeFilterBlockHeightGTE        = Just 1
-  , blockTimeStrikeFilterBlockHeightLTE        = Just 1
-  , blockTimeStrikeFilterObservedResultEQ      = Just Fast
-  , blockTimeStrikeFilterObservedResultNEQ     = Just Fast
-  , blockTimeStrikeFilterObservedMediantimeGTE = Just 1
-  , blockTimeStrikeFilterObservedMediantimeLTE = Just 1
+  , blockTimeStrikeFilterStrikeBlockHeightGTE  = Just 1
+  , blockTimeStrikeFilterStrikeBlockHeightLTE  = Just 1
   , blockTimeStrikeFilterObservedBlockHashEQ   = Just BlockHash.defaultHash
   , blockTimeStrikeFilterObservedBlockHashNEQ  = Just BlockHash.defaultHash
   , blockTimeStrikeFilterSort                  = Just Descend
@@ -207,26 +195,14 @@ instance FromHttpApiData BlockTimeStrikeFilter where
 instance BuildFilter BlockTimeStrike BlockTimeStrikeFilter where
   sortOrder (filter, _) = maybe Descend id (blockTimeStrikeFilterSort filter)
   buildFilter (v, _) = List.concat
-    [ maybe [] (\v-> [BlockTimeStrikeCreationTime >=. v])
-      $ blockTimeStrikeFilterCreationTimeGTE v
-    , maybe [] (\v-> [BlockTimeStrikeCreationTime <=. v])
-      $ blockTimeStrikeFilterCreationTimeLTE v
-    , maybe [] (\v-> [BlockTimeStrikeStrikeMediantime >=. v])
+    [ maybe [] (\v-> [BlockTimeStrikeStrikeMediantime >=. v])
       $ blockTimeStrikeFilterStrikeMediantimeGTE v
     , maybe [] (\v-> [BlockTimeStrikeStrikeMediantime <=. v])
       $ blockTimeStrikeFilterStrikeMediantimeLTE v
     , maybe [] (\v-> [BlockTimeStrikeBlock >=. v])
-      $ blockTimeStrikeFilterBlockHeightGTE v
+      $ blockTimeStrikeFilterStrikeBlockHeightGTE v
     , maybe [] (\v-> [BlockTimeStrikeBlock <=. v])
-      $ blockTimeStrikeFilterBlockHeightLTE v
-    , maybe [] (\v-> [BlockTimeStrikeObservedResult ==. Just v])
-      $ blockTimeStrikeFilterObservedResultEQ v
-    , maybe [] (\v-> [BlockTimeStrikeObservedResult !=. Just v])
-      $ blockTimeStrikeFilterObservedResultNEQ v
-    , maybe [] (\v-> [BlockTimeStrikeObservedBlockMediantime >=. Just v])
-      $ blockTimeStrikeFilterObservedMediantimeGTE v
-    , maybe [] (\v-> [BlockTimeStrikeObservedBlockMediantime <=. Just v])
-      $ blockTimeStrikeFilterObservedMediantimeLTE v
+      $ blockTimeStrikeFilterStrikeBlockHeightLTE v
     , maybe [] (\v-> [BlockTimeStrikeObservedBlockHash ==. Just v])
       $ blockTimeStrikeFilterObservedBlockHashEQ v
     , maybe [] (\v-> [BlockTimeStrikeObservedBlockHash !=. Just v])
