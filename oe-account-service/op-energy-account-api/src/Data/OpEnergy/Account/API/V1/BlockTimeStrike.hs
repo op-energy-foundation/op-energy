@@ -65,8 +65,12 @@ BlockTimeStrike
 data BlockTimeStrikeFilter = BlockTimeStrikeFilter
   { blockTimeStrikeFilterStrikeMediantimeGTE        :: Maybe POSIXTime
   , blockTimeStrikeFilterStrikeMediantimeLTE        :: Maybe POSIXTime
+  , blockTimeStrikeFilterStrikeMediantimeEQ         :: Maybe POSIXTime
+  , blockTimeStrikeFilterStrikeMediantimeNEQ        :: Maybe POSIXTime
   , blockTimeStrikeFilterStrikeBlockHeightGTE       :: Maybe BlockHeight
   , blockTimeStrikeFilterStrikeBlockHeightLTE       :: Maybe BlockHeight
+  , blockTimeStrikeFilterStrikeBlockHeightEQ        :: Maybe BlockHeight
+  , blockTimeStrikeFilterStrikeBlockHeightNEQ       :: Maybe BlockHeight
   , blockTimeStrikeFilterObservedBlockHashEQ        :: Maybe BlockHash
   , blockTimeStrikeFilterObservedBlockHashNEQ       :: Maybe BlockHash
   , blockTimeStrikeFilterSort                       :: Maybe SortOrder
@@ -92,8 +96,12 @@ defaultBlockTimeStrikeFilter :: BlockTimeStrikeFilter
 defaultBlockTimeStrikeFilter = BlockTimeStrikeFilter
   { blockTimeStrikeFilterStrikeMediantimeGTE   = Just 1
   , blockTimeStrikeFilterStrikeMediantimeLTE   = Just 1
+  , blockTimeStrikeFilterStrikeMediantimeEQ    = Just 1
+  , blockTimeStrikeFilterStrikeMediantimeNEQ   = Just 2
   , blockTimeStrikeFilterStrikeBlockHeightGTE  = Just 1
   , blockTimeStrikeFilterStrikeBlockHeightLTE  = Just 1
+  , blockTimeStrikeFilterStrikeBlockHeightEQ   = Just 1
+  , blockTimeStrikeFilterStrikeBlockHeightNEQ  = Just 1
   , blockTimeStrikeFilterObservedBlockHashEQ   = Just BlockHash.defaultHash
   , blockTimeStrikeFilterObservedBlockHashNEQ  = Just BlockHash.defaultHash
   , blockTimeStrikeFilterSort                  = Just Descend
@@ -194,17 +202,29 @@ instance FromHttpApiData BlockTimeStrikeFilter where
     Right some -> Right some
 instance BuildFilter BlockTimeStrike BlockTimeStrikeFilter where
   sortOrder (filter, _) = maybe Descend id (blockTimeStrikeFilterSort filter)
-  buildFilter (v, _) = List.concat
-    [ maybe [] (\v-> [BlockTimeStrikeStrikeMediantime >=. v])
-      $ blockTimeStrikeFilterStrikeMediantimeGTE v
-    , maybe [] (\v-> [BlockTimeStrikeStrikeMediantime <=. v])
-      $ blockTimeStrikeFilterStrikeMediantimeLTE v
-    , maybe [] (\v-> [BlockTimeStrikeBlock >=. v])
-      $ blockTimeStrikeFilterStrikeBlockHeightGTE v
-    , maybe [] (\v-> [BlockTimeStrikeBlock <=. v])
-      $ blockTimeStrikeFilterStrikeBlockHeightLTE v
-    , maybe [] (\v-> [BlockTimeStrikeObservedBlockHash ==. Just v])
-      $ blockTimeStrikeFilterObservedBlockHashEQ v
-    , maybe [] (\v-> [BlockTimeStrikeObservedBlockHash !=. Just v])
-      $ blockTimeStrikeFilterObservedBlockHashNEQ v
+  buildFilter ( BlockTimeStrikeFilter
+                mstrikeMediantimeGTE
+                mstrikeMediantimeLTE
+                mstrikeMediantimeEQ
+                mstrikeMediantimeNEQ
+                mstrikeBlockHeightGTE
+                mstrikeBlockHeightLTE
+                mstrikeBlockHeightEQ
+                mstrikeBlockHeightNEQ
+                mobservedBlockHashEQ
+                mobservedBlockHashNEQ
+                _ -- sort
+                _ -- class
+              , _
+              ) = List.concat
+    [ maybe [] (\v-> [BlockTimeStrikeStrikeMediantime >=. v]) mstrikeMediantimeGTE
+    , maybe [] (\v-> [BlockTimeStrikeStrikeMediantime <=. v]) mstrikeMediantimeLTE
+    , maybe [] (\v-> [BlockTimeStrikeStrikeMediantime ==. v]) mstrikeMediantimeEQ
+    , maybe [] (\v-> [BlockTimeStrikeStrikeMediantime !=. v]) mstrikeMediantimeNEQ
+    , maybe [] (\v-> [BlockTimeStrikeBlock >=. v]) mstrikeBlockHeightGTE
+    , maybe [] (\v-> [BlockTimeStrikeBlock <=. v]) mstrikeBlockHeightLTE
+    , maybe [] (\v-> [BlockTimeStrikeBlock ==. v]) mstrikeBlockHeightEQ
+    , maybe [] (\v-> [BlockTimeStrikeBlock !=. v]) mstrikeBlockHeightNEQ
+    , maybe [] (\v-> [BlockTimeStrikeObservedBlockHash ==. Just v]) mobservedBlockHashEQ
+    , maybe [] (\v-> [BlockTimeStrikeObservedBlockHash !=. Just v]) mobservedBlockHashNEQ
     ]

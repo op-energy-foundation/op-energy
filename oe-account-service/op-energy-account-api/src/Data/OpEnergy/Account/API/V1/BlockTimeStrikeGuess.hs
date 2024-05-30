@@ -117,11 +117,15 @@ data BlockTimeStrikeGuessResultPublicFilter = BlockTimeStrikeGuessResultPublicFi
   , blockTimeStrikeGuessResultPublicFilterObservedResultEQ      :: Maybe SlowFast
   , blockTimeStrikeGuessResultPublicFilterObservedResultNEQ     :: Maybe SlowFast
     -- strike block height
-  , blockTimeStrikeGuessResultPublicFilterStrikeBlockHeightGTE        :: Maybe BlockHeight
-  , blockTimeStrikeGuessResultPublicFilterStrikeBlockHeightLTE        :: Maybe BlockHeight
+  , blockTimeStrikeGuessResultPublicFilterStrikeBlockHeightGTE  :: Maybe BlockHeight
+  , blockTimeStrikeGuessResultPublicFilterStrikeBlockHeightLTE  :: Maybe BlockHeight
+  , blockTimeStrikeGuessResultPublicFilterStrikeBlockHeightEQ   :: Maybe BlockHeight
+  , blockTimeStrikeGuessResultPublicFilterStrikeBlockHeightNEQ  :: Maybe BlockHeight
     -- strike strikeMediantime
   , blockTimeStrikeGuessResultPublicFilterStrikeMediantimeGTE   :: Maybe POSIXTime
   , blockTimeStrikeGuessResultPublicFilterStrikeMediantimeLTE   :: Maybe POSIXTime
+  , blockTimeStrikeGuessResultPublicFilterStrikeMediantimeEQ    :: Maybe POSIXTime
+  , blockTimeStrikeGuessResultPublicFilterStrikeMediantimeNEQ   :: Maybe POSIXTime
     -- sort
   , blockTimeStrikeGuessResultPublicFilterSort                  :: Maybe SortOrder
   , blockTimeStrikeGuessResultPublicFilterClass                 :: Maybe BlockTimeStrikeFilterClass
@@ -163,38 +167,101 @@ instance FromHttpApiData BlockTimeStrikeGuessResultPublicFilter where
     Right some -> Right some
 instance BuildFilter BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter where
   sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultPublicFilterSort filter)
-  buildFilter (v, _) = List.concat
-    [ maybe [] (\v-> [BlockTimeStrikeGuessGuess ==. v])
-      $ blockTimeStrikeGuessResultPublicFilterGuessEQ v
-    , maybe [] (\v-> [BlockTimeStrikeGuessGuess !=. v])
-      $ blockTimeStrikeGuessResultPublicFilterGuessNEQ v
+  buildFilter ( BlockTimeStrikeGuessResultPublicFilter
+                _
+                _
+                -- guess
+                mGuessEQ
+                mGuessNEQ
+                -- observedResult
+                _
+                _
+                -- strike block height
+                _
+                _
+                _
+                _
+                -- strike strikeMediantime
+                _
+                _
+                _
+                _
+                -- sort
+                _
+                _
+              , _
+              ) = List.concat
+    [ maybe [] (\v-> [BlockTimeStrikeGuessGuess ==. v]) mGuessEQ
+    , maybe [] (\v-> [BlockTimeStrikeGuessGuess !=. v]) mGuessNEQ
     ]
 instance BuildFilter Person BlockTimeStrikeGuessResultPublicFilter where
   sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultPublicFilterSort filter)
-  buildFilter (v, _) = List.concat
-    [ maybe [] (\v-> [ PersonUuid ==. v ])
-      $ blockTimeStrikeGuessResultPublicFilterPersonEQ v
-    , maybe [] (\v-> [ PersonUuid !=. v ])
-      $ blockTimeStrikeGuessResultPublicFilterPersonNEQ v
+  buildFilter ( BlockTimeStrikeGuessResultPublicFilter
+                mPersonEQ
+                mPersonNEQ
+                -- guess
+                _
+                _
+                -- observedResult
+                _
+                _
+                -- strike block height
+                _
+                _
+                _
+                _
+                -- strike strikeMediantime
+                _
+                _
+                _
+                _
+                -- sort
+                _
+                _
+              , _
+              ) = List.concat
+    [ maybe [] (\v-> [ PersonUuid ==. v ]) mPersonEQ
+    , maybe [] (\v-> [ PersonUuid !=. v ]) mPersonNEQ
     ]
 instance BuildFilter BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter where
   sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultPublicFilterSort filter)
-  buildFilter (v, _) = List.concat
+  buildFilter ( BlockTimeStrikeGuessResultPublicFilter
+                -- person
+                _
+                _
+                -- guess
+                _
+                _
+                -- observedResult
+                mObservedResultEQ
+                mObservedResultNEQ
+                -- strike block height
+                mStrikeBlockHeightGTE
+                mStrikeBlockHeightLTE
+                mStrikeBlockHeightEQ
+                mStrikeBlockHeightNEQ
+                -- strike strikeMediantime
+                mStrikeMediantimeGTE
+                mStrikeMediantimeLTE
+                mStrikeMediantimeEQ
+                mStrikeMediantimeNEQ
+                -- sort
+                _
+                _
+              , _
+              ) = List.concat
         -- strike block height
-    [ maybe [] (\v -> [ BlockTimeStrikeBlock >=. v])
-      $ blockTimeStrikeGuessResultPublicFilterStrikeBlockHeightGTE v
-    , maybe [] (\v -> [ BlockTimeStrikeBlock <=. v])
-      $ blockTimeStrikeGuessResultPublicFilterStrikeBlockHeightLTE v
-        -- strike strike mediantime
-    , maybe [] (\v -> [ BlockTimeStrikeStrikeMediantime >=. v])
-      $ blockTimeStrikeGuessResultPublicFilterStrikeMediantimeGTE v
-    , maybe [] (\v -> [ BlockTimeStrikeStrikeMediantime <=. v])
-      $ blockTimeStrikeGuessResultPublicFilterStrikeMediantimeLTE v
+    [ maybe [] (\v -> [ BlockTimeStrikeBlock >=. v]) mStrikeBlockHeightGTE
+    , maybe [] (\v -> [ BlockTimeStrikeBlock <=. v]) mStrikeBlockHeightLTE
+    , maybe [] (\v -> [ BlockTimeStrikeBlock ==. v]) mStrikeBlockHeightEQ
+    , maybe [] (\v -> [ BlockTimeStrikeBlock !=. v]) mStrikeBlockHeightNEQ
+    , maybe [] (\v -> [ BlockTimeStrikeStrikeMediantime >=. v]) mStrikeMediantimeGTE
+    , maybe [] (\v -> [ BlockTimeStrikeStrikeMediantime <=. v]) mStrikeMediantimeLTE
+    , maybe [] (\v -> [ BlockTimeStrikeStrikeMediantime ==. v]) mStrikeMediantimeEQ
+    , maybe [] (\v -> [ BlockTimeStrikeStrikeMediantime !=. v]) mStrikeMediantimeNEQ
         -- strike observed result
-    , maybe [] (\v -> [ BlockTimeStrikeObservedResult ==. Just v])
-      $ blockTimeStrikeGuessResultPublicFilterObservedResultEQ v
-    , maybe [] (\v -> [ BlockTimeStrikeObservedResult !=. Just v])
-      $ blockTimeStrikeGuessResultPublicFilterObservedResultNEQ v
+    , maybe [] (\v -> [ BlockTimeStrikeObservedResult ==. Just v]) mObservedResultEQ
+    , maybe [] (\v -> [ BlockTimeStrikeObservedResult !=. Just v]) mObservedResultNEQ
     ]
 
 defaultBlockTimeStrikeGuessResultPublicFilter :: BlockTimeStrikeGuessResultPublicFilter
@@ -205,10 +272,14 @@ defaultBlockTimeStrikeGuessResultPublicFilter =  BlockTimeStrikeGuessResultPubli
   , blockTimeStrikeGuessResultPublicFilterGuessNEQ              = Just Fast
   , blockTimeStrikeGuessResultPublicFilterObservedResultEQ      = Just Slow
   , blockTimeStrikeGuessResultPublicFilterObservedResultNEQ     = Just Fast
-  , blockTimeStrikeGuessResultPublicFilterStrikeBlockHeightGTE        = Just 1
-  , blockTimeStrikeGuessResultPublicFilterStrikeBlockHeightLTE        = Just 1
+  , blockTimeStrikeGuessResultPublicFilterStrikeBlockHeightGTE  = Just 1
+  , blockTimeStrikeGuessResultPublicFilterStrikeBlockHeightLTE  = Just 1
+  , blockTimeStrikeGuessResultPublicFilterStrikeBlockHeightEQ   = Just 1
+  , blockTimeStrikeGuessResultPublicFilterStrikeBlockHeightNEQ  = Just 1
   , blockTimeStrikeGuessResultPublicFilterStrikeMediantimeGTE   = Just 1
   , blockTimeStrikeGuessResultPublicFilterStrikeMediantimeLTE   = Just 1
+  , blockTimeStrikeGuessResultPublicFilterStrikeMediantimeEQ    = Just 1
+  , blockTimeStrikeGuessResultPublicFilterStrikeMediantimeNEQ   = Just 1
   , blockTimeStrikeGuessResultPublicFilterSort                  = Just Descend
   , blockTimeStrikeGuessResultPublicFilterClass                 = Just defaultBlockTimeStrikeFilterClass
   }
