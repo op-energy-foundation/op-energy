@@ -48,7 +48,7 @@ import           Data.OpEnergy.Account.API.V1.PagingResult
 import           Data.OpEnergy.Account.API.V1.FilterRequest
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
 import           OpEnergy.Account.Server.V1.Config (Config(..))
-import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging, profile, withDBTransaction, runLoggingIO, withDBNOTransactionRO )
+import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging, profile, withDBTransaction, runLoggingIO, withDBNOTransactionROUnsafe )
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledStrikeCreation as BlockTimeScheduledStrikeCreation
@@ -298,7 +298,7 @@ getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $
   where
     actualGetBlockTimeStrike = do
       recordsPerReply <- asks (configRecordsPerReply . config)
-      withDBNOTransactionRO "" $ do
+      withDBNOTransactionROUnsafe "" $ do
         C.runConduit
           $ streamEntities
             [ BlockTimeStrikeBlock ==. blockHeight, BlockTimeStrikeStrikeMediantime ==. fromIntegral strikeMediantime ]

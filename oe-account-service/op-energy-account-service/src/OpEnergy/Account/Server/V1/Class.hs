@@ -141,29 +141,34 @@ withDBTransaction name next = profile name $ do
   state <- ask
   liftIO $ withDBTransactionIO state header next
 
-withDBNOTransactionROIO
+-- | this procedure runs DB action without wrapping it into transaction
+-- the goal is to be able to read data from DB without creating heavy journaling.
+-- WARNING: It should only be used to read data. Writing WILL break things, but it can't be forbidden on the type level, so please, be careful
+withDBNOTransactionROIOUnsafe
   :: State
   -> Text
   -> (ReaderT SqlBackend IO) r
   -> IO (Maybe r)
-withDBNOTransactionROIO state header next = profileM newHeader metricsV $ do
+withDBNOTransactionROIOUnsafe state header next = profileM newHeader metricsV $ do
   E.handle (\(err::SomeException) -> do
                runLoggingIO state $ $(logError) (newHeader <> ": " <> Text.pack (show err))
                return Nothing
            ) $ runSqlPoolNoTransaction (Just <$> next) pool Nothing
   where
-    newHeader = header <> ".DBT"
+    newHeader = header <> ".DBRO"
     metricsV = dynamicHistograms (metrics state)
     pool = accountDBPool state
 
-withDBNOTransactionRO
+
+-- | see @withDBNOTransactionROIOUnsafe@
+withDBNOTransactionROUnsafe
   :: ( MonadIO m
      , MonadMonitor m
      )
   => Text
   -> (ReaderT SqlBackend IO) r
   -> AppT m (Maybe r)
-withDBNOTransactionRO name next = profile name $ do
+withDBNOTransactionROUnsafe name next = profile name $ do
   header <- asks callStack
   state <- ask
-  liftIO $ withDBNOTransactionROIO state header next
+  liftIO $ withDBNOTransactionROIOUnsafe state header next

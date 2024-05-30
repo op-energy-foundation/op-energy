@@ -46,7 +46,7 @@ import           Data.OpEnergy.Account.API.V1.FilterRequest
 import           Data.OpEnergy.Account.API.V1.UUID
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
 import           OpEnergy.Account.Server.V1.Config (Config(..))
-import           OpEnergy.Account.Server.V1.Class ( AppT, AppM, State(..), runLogging, profile, withDBTransaction, withDBNOTransactionRO)
+import           OpEnergy.Account.Server.V1.Class ( AppT, AppM, State(..), runLogging, profile, withDBTransaction, withDBNOTransactionROUnsafe)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
 
@@ -139,7 +139,7 @@ getBlockTimeStrikeGuessResultsPage mpage mfilter = profile "getBlockTimeStrikeGu
       let
           page = maybe 0 id mpage
       recordsPerReply <- asks (configRecordsPerReply . config)
-      mret <- withDBNOTransactionRO "" $ do
+      mret <- withDBNOTransactionROUnsafe "" $ do
         count <- C.runConduit
           $ filters recordsPerReply confirmedBlock
           .| ( do
@@ -248,7 +248,7 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
                 ( (BlockTimeStrikeObservedResult ==. Nothing)
                  :filter
                 )
-      mret <- withDBNOTransactionRO "" $ do
+      mret <- withDBNOTransactionROUnsafe "" $ do
         count <- C.runConduit
           $ filters finalFilter recordsPerReply
           .| ( do
@@ -335,7 +335,7 @@ getBlockTimeStrikeGuessesPage
   -> AppM (PagingResult BlockTimeStrikeGuessPublic)
 getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilter = profile "getBlockTimeStrikesGuessesPage" $ do
   recordsPerReply <- asks (configRecordsPerReply . config)
-  mret <- withDBNOTransactionRO "" $ do
+  mret <- withDBNOTransactionROUnsafe "" $ do
     count <- C.runConduit
       $ filters recordsPerReply
       .| ( do
@@ -442,7 +442,7 @@ getBlockTimeStrikeGuess token blockHeight strikeMediantime = profile "getBlockTi
     repeatC v = C.yield v >> repeatC v
     actualGetStrikeGuess (Entity personKey person) blockHeight strikeMediantime = do
       recordsPerReply <- asks (configRecordsPerReply . config)
-      withDBNOTransactionRO "" $ do
+      withDBNOTransactionROUnsafe "" $ do
         C.runConduit
           $ streamEntities
             [BlockTimeStrikeBlock ==. blockHeight, BlockTimeStrikeStrikeMediantime ==. strikeMediantime]
@@ -506,11 +506,11 @@ getBlockTimeStrikeGuessPerson uuid blockHeight strikeMediantime = profile "getBl
   where
     repeatC v = C.yield v >> repeatC v
     mgetPersonByUUID uuid = do
-      withDBNOTransactionRO "" $ do
+      withDBNOTransactionROUnsafe "" $ do
         selectFirst [ PersonUuid ==. uuid ][]
     actualGetStrikeGuess (Entity personKey person) blockHeight strikeMediantime = do
       recordsPerReply <- asks (configRecordsPerReply . config)
-      withDBNOTransactionRO "" $ do
+      withDBNOTransactionROUnsafe "" $ do
         C.runConduit
           $ streamEntities
             [BlockTimeStrikeBlock ==. blockHeight, BlockTimeStrikeStrikeMediantime ==. strikeMediantime]
