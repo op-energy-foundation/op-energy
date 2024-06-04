@@ -37,14 +37,6 @@ data MetricsState = MetricsState
   , accountMgetPersonByHashedSecretUpdatingTokenCookie :: P.Histogram
   , accountMgetPersonByHashedSecretTokenCookie :: P.Histogram
   , accountMgetPersonByAccountToken :: P.Histogram
-  , getBlockTimeStrikeFuture :: P.Histogram
-  , createBlockTimeStrikeFuture :: P.Histogram
-  , getBlockTimeStrikePast :: P.Histogram
-  , getBlockTimeStrikeFutureGuesses :: P.Histogram
-  , mgetBlockTimeStrikeFuture :: P.Histogram
-  , createBlockTimeStrikeFutureGuess :: P.Histogram
-  , mgetBlockTimeStrikePast :: P.Histogram
-  , ensureFutureStrikeExistsAhead :: P.Histogram
   , dynamicHistograms :: TVar (Map Text P.Histogram)
   }
 
@@ -63,14 +55,6 @@ initMetrics _config = do
   accountMgetPersonByHashedSecretUpdatingTokenCookie <- P.register $ P.histogram (P.Info "accountMgetPersonByHashedSecretUpdatingTokenCookie" "") microBuckets
   accountMgetPersonByHashedSecretTokenCookie <- P.register $ P.histogram (P.Info "accountMgetPersonByHashedSecretTokenCookie" "") microBuckets
   accountMgetPersonByAccountToken <- P.register $ P.histogram (P.Info "accountMgetPersonByAccountToken" "") microBuckets
-  getBlockTimeStrikeFuture <- P.register $ P.histogram (P.Info "getBlockTimeStrikeFuture" "") microBuckets
-  createBlockTimeStrikeFuture <- P.register $ P.histogram (P.Info "createBlockTimeStrikeFuture" "") microBuckets
-  getBlockTimeStrikePast <- P.register $ P.histogram (P.Info "getBlockTimeStrikePast" "") microBuckets
-  getBlockTimeStrikeFutureGuesses <- P.register $ P.histogram (P.Info "getBlockTimeStrikeFutureGuesses" "") microBuckets
-  mgetBlockTimeStrikeFuture <- P.register $ P.histogram (P.Info "mgetBlockTimeStrikeFuture" "") microBuckets
-  createBlockTimeStrikeFutureGuess <- P.register $ P.histogram (P.Info "createBlockTimeStrikeFutureGuess" "") microBuckets
-  mgetBlockTimeStrikePast <- P.register $ P.histogram (P.Info "mgetBlockTimeStrikePast" "") microBuckets
-  ensureFutureStrikeExistsAhead <- P.register $ P.histogram (P.Info "ensureFutureStrikeExistsAhead" "") microBuckets
   _ <- P.register P.ghcMetrics
   _ <- P.register P.procMetrics
   tmap <- liftIO $ STM.newTVarIO (Map.empty)
@@ -87,14 +71,6 @@ initMetrics _config = do
     , accountMgetPersonByHashedSecretUpdatingTokenCookie = accountMgetPersonByHashedSecretUpdatingTokenCookie
     , accountMgetPersonByHashedSecretTokenCookie = accountMgetPersonByHashedSecretTokenCookie
     , accountMgetPersonByAccountToken = accountMgetPersonByAccountToken
-    , getBlockTimeStrikeFuture = getBlockTimeStrikeFuture
-    , createBlockTimeStrikeFuture = createBlockTimeStrikeFuture
-    , getBlockTimeStrikePast = getBlockTimeStrikePast
-    , getBlockTimeStrikeFutureGuesses = getBlockTimeStrikeFutureGuesses
-    , mgetBlockTimeStrikeFuture = mgetBlockTimeStrikeFuture
-    , createBlockTimeStrikeFutureGuess = createBlockTimeStrikeFutureGuess
-    , mgetBlockTimeStrikePast = mgetBlockTimeStrikePast
-    , ensureFutureStrikeExistsAhead = ensureFutureStrikeExistsAhead
     , dynamicHistograms = tmap
     }
 

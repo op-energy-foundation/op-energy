@@ -18,14 +18,27 @@ import qualified Data.List as List
 import           Data.Default
 import           GHC.Generics
 
+-- | the goal of this function is to provide common options for JSON
+-- generator and parser. This options rely on the Show instance of @a@
+-- which should have format of 'SomeDataName SomeDataEnum', like
+-- ```
+-- data MyCustomFigure = MyCustomFigureRoundedSphere
+-- instance Show MyCustomFigure where
+--   show MyCustomFigureSphere = "MyCustomFigure RoundedSphere"
+-- ```
+-- and thus, such common options provide a way to cut "MyCustomFigure " prefix
+-- from the JSON generator/parser and use only "roundedSphere" field
 jsonCommonOptions :: Show a => a-> Options
-jsonCommonOptions v = defaultOptions
+jsonCommonOptions singleton = defaultOptions
     { fieldLabelModifier =
       (\s -> case s of
           [] -> []
           (first:rest)-> (Char.toLower first):rest
-      ) . (List.drop $ List.length $ List.takeWhile (not . Char.isSpace) $ show v)
-    , constructorTagModifier = List.map Char.toLower
+      ) . (List.drop $ List.length $ List.takeWhile (not . Char.isSpace) $ show singleton)
+    , constructorTagModifier = \v ->
+      case (List.drop $ List.length $ List.takeWhile (not . Char.isSpace) $ show singleton) v of
+        [] -> List.map Char.toLower v
+        (first:rest)-> (Char.toLower first):rest
     }
 
 commonParseJSON :: (Show a, Default a, Generic a, GFromJSON Zero (Rep a)) => Value -> Parser a

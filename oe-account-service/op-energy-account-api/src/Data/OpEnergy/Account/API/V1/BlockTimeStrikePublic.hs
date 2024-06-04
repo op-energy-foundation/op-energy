@@ -1,4 +1,4 @@
-{-- | This module defines BlockTimeStrikePastPublic datatype
+{-- | This module defines BlockTimeStrikePublic datatype
  --}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE DeriveGeneric              #-}
@@ -13,27 +13,27 @@ import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
 import           Data.OpEnergy.Account.API.V1.Common
 import           Data.Default
 
-data BlockTimeStrikePastPublic = BlockTimeStrikePastPublic
-  { blockTimeStrikePastPublicPastStrike :: BlockTimeStrikePast
+data BlockTimeStrikePublic = BlockTimeStrikePublic
+  { blockTimeStrikePublicStrike :: BlockTimeStrike
     -- ^ past strike
-  , blockTimeStrikePastPublicGuessesCount :: Word32
+  , blockTimeStrikePublicGuessesCount :: Word32
     -- ^ amount of guesses
   }
   deriving (Show, Generic)
-instance FromJSON BlockTimeStrikePastPublic where
+instance FromJSON BlockTimeStrikePublic where
   parseJSON = commonParseJSON
-instance ToJSON BlockTimeStrikePastPublic where
+instance ToJSON BlockTimeStrikePublic where
   -- alter serialization names
   toJSON = commonToJSON genericToJSON
   toEncoding = commonToJSON genericToEncoding
-instance ToSchema BlockTimeStrikePastPublic where
-  declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikePastPublic") $ mempty
+instance ToSchema BlockTimeStrikePublic where
+  declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikePublic") $ mempty
     & type_ ?~ SwaggerObject
-    & example ?~ toJSON defaultBlockTimeStrikePastPublic
-instance Default BlockTimeStrikePastPublic where
-  def = defaultBlockTimeStrikePastPublic
-defaultBlockTimeStrikePastPublic :: BlockTimeStrikePastPublic
-defaultBlockTimeStrikePastPublic = BlockTimeStrikePastPublic
-  { blockTimeStrikePastPublicPastStrike = defaultBlockTimeStrikePast
-  , blockTimeStrikePastPublicGuessesCount = 0
+    & example ?~ toJSON defaultBlockTimeStrikePublic
+instance Default BlockTimeStrikePublic where
+  def = defaultBlockTimeStrikePublic
+defaultBlockTimeStrikePublic :: BlockTimeStrikePublic
+defaultBlockTimeStrikePublic = BlockTimeStrikePublic
+  { blockTimeStrikePublicStrike = defaultBlockTimeStrike
+  , blockTimeStrikePublicGuessesCount = 0
   }

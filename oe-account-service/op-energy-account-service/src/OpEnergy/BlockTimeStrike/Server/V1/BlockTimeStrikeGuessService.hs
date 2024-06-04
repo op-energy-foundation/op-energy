@@ -1,40 +1,37 @@
 {-- | This module implements BlockTime strike service.
  -}
-{-# LANGUAGE TemplateHaskell          #-}
-{-# LANGUAGE OverloadedStrings          #-}
-{-# LANGUAGE RecordWildCards          #-}
+{-# LANGUAGE TemplateHaskell           #-}
+{-# LANGUAGE OverloadedStrings         #-}
+{-# LANGUAGE RecordWildCards           #-}
 {-# LANGUAGE FlexibleContexts          #-}
+{-# LANGUAGE GADTs                     #-}
 module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
-  ( getBlockTimeStrikeFutureGuesses
-  , createBlockTimeStrikeFutureGuess
-  , getBlockTimeStrikeGuessResults
+  ( createBlockTimeStrikeFutureGuess
   , getBlockTimeStrikeGuessResultsPage
-  , calculateResultsLoop
-  , getBlockTimeStrikeFutureGuessesPage
+  , getBlockTimeStrikesGuessesPage
+  , getBlockTimeStrikeGuessesPage
+  , getBlockTimeStrikeGuess
+  , getBlockTimeStrikeGuessPerson
   ) where
 
-import           Servant (err400, err404, err500, throwError, errBody)
-import           Control.Monad.Trans.Reader (ask)
-import           Control.Monad.Trans.Maybe (MaybeT(..), runMaybeT)
-import           Control.Monad.Logger(logDebug, logError)
+import           Servant (err400, err500, throwError, errBody)
+import           Control.Monad.Trans.Reader (asks)
+import           Control.Monad.Logger( logError)
 import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
-import           Data.Maybe(fromJust)
 import qualified Control.Concurrent.STM.TVar as TVar
-import           Control.Monad(forM, forM_, forever, void)
-import           Control.Concurrent(threadDelay)
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Text.Encoding as Text
+import qualified Data.List as List
 
-import           Data.Text.Show(tshow)
 import           Data.Conduit ((.|))
 import qualified Data.Conduit as C
 import qualified Data.Conduit.Internal as C(zipSources)
+import qualified Data.Conduit.List as C
 import           Control.Monad.Trans
 import           Database.Persist.Postgresql
 import           Database.Persist.Pagination
 import           Prometheus(MonadMonitor)
-import           Control.Exception.Safe as E
 
 
 import           Data.OpEnergy.Account.API.V1.Account
@@ -46,140 +43,42 @@ import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
 import           Data.OpEnergy.Account.API.V1.PagingResult
 import           Data.OpEnergy.Account.API.V1.FilterRequest
+import           Data.OpEnergy.Account.API.V1.UUID
+import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
 import           OpEnergy.Account.Server.V1.Config (Config(..))
-import           OpEnergy.Account.Server.V1.Class (runAppT, AppT, AppM, State(..), runLogging, profile, withDBTransaction)
+import           OpEnergy.Account.Server.V1.Class ( AppT, AppM, State(..), runLogging, profile, withDBTransaction, withDBNOTransactionROUnsafe)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
-import           OpEnergy.PagingResult
 
--- | O(ln users) + O(strike future)
--- returns list BlockTimeStrikeFuture records. requires authenticated user
-getBlockTimeStrikeFutureGuesses :: AccountToken-> BlockHeight-> Natural Int-> AppM [BlockTimeStrikeGuessPublic ]
-getBlockTimeStrikeFutureGuesses token blockHeight nlocktime = profile "getBlockTimeStrikeFutureGuesses" $ do
-  mperson <- mgetPersonByAccountToken token
-  case mperson of
-    Nothing -> do
-      let err = "ERROR: getBlockTimeStrikeFutureGuesses: failed to authenticate user"
-      runLogging $ $(logError) err
-      throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
-    Just person -> do
-      mret <- getBlockTimeStrikeFutureGuesses person
-      case mret of
-        Nothing -> throwError err500 { errBody = "something went wrong"}
-        Just Nothing -> do
-          let err = "ERROR: getBlockTimeStrikeFutureGuesses: failed to get future strike for a given user"
-          runLogging $ $(logError) err
-          throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
-        Just (Just ret)-> return ret
-  where
-    getBlockTimeStrikeFutureGuesses :: (MonadIO m, MonadMonitor m) => Entity Person -> AppT m (Maybe (Maybe [BlockTimeStrikeGuessPublic]))
-    getBlockTimeStrikeFutureGuesses (Entity _ _) = profile "getBlockTimeStrikeFutureGuesses" $ do
-      withDBTransaction "" $ runMaybeT $ do
-        Entity strikeKey strike <- MaybeT $ selectFirst [ BlockTimeStrikeFutureBlock ==. blockHeight
-                               , BlockTimeStrikeFutureNlocktime ==. fromIntegral nlocktime
-                               ] []
-        ret <- MaybeT $ Just <$> selectList [ BlockTimeStrikeFutureGuessStrike ==. strikeKey] []
-        MaybeT $ Just <$> mapM (\(Entity _ guess) -> do
-                 person <- get (blockTimeStrikeFutureGuessPerson guess) >>= return . fromJust
-                 return $! BlockTimeStrikeGuessPublic
-                   { person = personUuid person
-                   , strike = strike
-                   , creationTime = blockTimeStrikeFutureGuessCreationTime guess
-                   , guess = blockTimeStrikeFutureGuessGuess guess
-                   }
-             ) ret
-
--- | O(ln users) + O(strike future)
--- returns list BlockTimeStrikeFuture records
-getBlockTimeStrikeFutureGuessesPage
-  :: Maybe (Natural Int)
-  -> Maybe (FilterRequest BlockTimeStrikeFutureGuess BlockTimeStrikeGuessPublicFilter)
-  -> AppM (PagingResult BlockTimeStrikeGuessPublic)
-getBlockTimeStrikeFutureGuessesPage mpage mfilter = profile "getBlockTimeStrikeFutureGuessesPage" $ do
-  State{  config = Config{ configRecordsPerReply = recordsPerReply}
-        } <- ask
-  mret <- pagingResult mpage (maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter ) sort BlockTimeStrikeFutureCreationTime
-    $ ( C.awaitForever $ \v@(Entity futureId _) -> do
-        C.toProducer $ C.zipSources
-          ( repeatC v
-          )
-          ( streamEntities
-            ( (BlockTimeStrikeFutureGuessStrike ==. futureId) : (maybe [] (buildFilter . unFilterRequest) mfilter))
-            BlockTimeStrikeFutureGuessCreationTime
-            (PageSize ((fromPositive recordsPerReply) + 1))
-            Descend
-            (Range Nothing Nothing)
-          )
-      )
-    .| ( C.awaitForever $ \(futureE, guessE@(Entity _ guessResult)) -> do
-        C.toProducer $ C.zipSources
-          ( repeatC (futureE, guessE)
-          )
-          ( streamEntities
-            ( (PersonId ==. blockTimeStrikeFutureGuessPerson guessResult) : (maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter))
-            PersonCreationTime
-            (PageSize ((fromPositive recordsPerReply) + 1))
-            Descend
-            (Range Nothing Nothing)
-          )
-        )
-    .| ( C.awaitForever $ \((Entity _ strike, Entity _ guess), Entity _ person )-> do
-        C.yield $ BlockTimeStrikeGuessPublic
-                  { person = personUuid person
-                  , strike = strike
-                  , creationTime = blockTimeStrikeFutureGuessCreationTime guess
-                  , guess = blockTimeStrikeFutureGuessGuess guess
-                  }
-       )
-  case mret of
-    Nothing -> do
-      throwError err500 {errBody = "something went wrong"}
-    Just ret-> return ret
-  where
-    repeatC v = C.yield v >> repeatC v
-    sort = maybe Descend (sortOrder . unFilterRequest) mfilter
-
-mgetBlockTimeStrikeFuture :: (MonadIO m, MonadMonitor m) => BlockHeight-> Natural Int-> AppT m (Maybe (Entity BlockTimeStrikeFuture))
-mgetBlockTimeStrikeFuture blockHeight nlocktime = profile "mgetBlockTimeStrikeFuture" $ do
+mgetBlockTimeStrikeFuture :: (MonadIO m, MonadMonitor m) => BlockHeight-> Natural Int-> AppT m (Maybe (Entity BlockTimeStrike))
+mgetBlockTimeStrikeFuture blockHeight strikeMediantime = profile "mgetBlockTimeStrikeFuture" $ do
   mret <- withDBTransaction "" $ do
-    selectFirst [ BlockTimeStrikeFutureBlock ==. blockHeight
-                , BlockTimeStrikeFutureNlocktime ==. fromIntegral nlocktime
+    selectFirst [ BlockTimeStrikeBlock ==. blockHeight
+                , BlockTimeStrikeStrikeMediantime ==. fromIntegral strikeMediantime
                 ] []
   case mret of
     Just some -> return some
     _ -> return Nothing
 
-mgetBlockTimeStrikePast :: (MonadIO m, MonadMonitor m) => BlockHeight-> Natural Int-> AppT m (Maybe (Entity BlockTimeStrikePast))
-mgetBlockTimeStrikePast blockHeight nlocktime = profile "mgetBlockTimeStrikePast" $ do
-  mret <- withDBTransaction "" $ do
-    selectFirst [ BlockTimeStrikePastBlock ==. blockHeight
-                , BlockTimeStrikePastNlocktime ==. fromIntegral nlocktime
-                ] []
-  case mret of
-    Just ret -> return ret
-    Nothing -> return Nothing
-
 -- | O(ln accounts).
 -- Tries to create future block time strike. Requires authenticated user and blockheight should be in the future
-createBlockTimeStrikeFutureGuess :: AccountToken-> BlockHeight-> Natural Int-> SlowFast-> AppM ()
-createBlockTimeStrikeFutureGuess token blockHeight nlocktime guess = profile "createBlockTimeStrikeFutureGuess" $ do
-  State{ config = Config{ configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip = configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip
-                        }
-       , blockTimeState = BlockTime.State{ latestConfirmedBlock = latestConfirmedBlockV }
-       } <- ask
+createBlockTimeStrikeFutureGuess :: AccountToken-> BlockHeight-> Natural Int-> SlowFast-> AppM BlockTimeStrikeGuessPublic
+createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess = profile "createBlockTimeStrikeFutureGuess" $ do
+  configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip <- asks (configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip . config)
+  latestConfirmedBlockV <- asks (BlockTime.latestConfirmedBlock . blockTimeState)
   mlatestConfirmedBlock <- liftIO $ TVar.readTVarIO latestConfirmedBlockV
   case mlatestConfirmedBlock of
     Nothing -> do
       let err = "ERROR: createBlockTimeStrikeFutureGuess: there is no current tip yet"
       runLogging $ $(logError) err
-      throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+      throwError err500 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
     Just tip
-      | blockHeaderMediantime tip > fromIntegral nlocktime -> do
-        let err = "ERROR: createBlockTimeStrikeFutureGuess: nlocktime is in the past, which is not expected"
+        | blockHeaderMediantime tip > fromIntegral strikeMediantime -> do
+        let err = "ERROR: createBlockTimeStrikeFutureGuess: strikeMediantime is in the past, which is not expected"
         runLogging $ $(logError) err
         throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
     Just tip
-      | blockHeaderHeight tip + naturalFromPositive configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip > blockHeight -> do
+      | blockHeaderHeight tip + naturalFromPositive configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip > blockHeight -> do
         let err = "ERROR: createBlockTimeStrikeFutureGuess: block height for new block time strike should be in the future + minimum configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip"
         runLogging $ $(logError) err
         throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
@@ -190,182 +89,455 @@ createBlockTimeStrikeFutureGuess token blockHeight nlocktime guess = profile "cr
           let err = "ERROR: createBlockTimeStrikeFutureGuess: person was not able to authenticate itself"
           runLogging $ $(logError) err
           throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
-        Just (Entity personKey _) -> do
-          mstrike <- mgetBlockTimeStrikeFuture blockHeight nlocktime
+        Just (Entity personKey person) -> do
+          mstrike <- mgetBlockTimeStrikeFuture blockHeight strikeMediantime
           case mstrike of
             Nothing-> do
               let err = "ERROR: createBlockTimeStrikeFutureGuess: future strike was not able to authenticate itself"
               runLogging $ $(logError) err
               throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
-            Just (Entity strikeKey _) -> do
+            Just (Entity strikeKey strike) -> do
               mret <- createBlockTimeStrikeFutureGuess personKey strikeKey guess
               case mret of
                 Nothing -> throwError err500 {errBody = "something went wrong"}
-                Just _ -> return ()
+                Just v -> return $ BlockTimeStrikeGuessPublic
+                  { person = personUuid person
+                  , strike = strike
+                  , creationTime = blockTimeStrikeGuessCreationTime v
+                  , guess = guess
+                  }
   where
-    createBlockTimeStrikeFutureGuess :: (MonadMonitor m, MonadIO m) => Key Person-> Key BlockTimeStrikeFuture-> SlowFast-> AppT m (Maybe ())
+    createBlockTimeStrikeFutureGuess :: (MonadMonitor m, MonadIO m) => Key Person-> Key BlockTimeStrike-> SlowFast-> AppT m (Maybe BlockTimeStrikeGuess)
     createBlockTimeStrikeFutureGuess personKey strikeKey guess = profile "createBlockTimeStrikeFutureGuess" $ do
       nowUTC <- liftIO getCurrentTime
       let now = utcTimeToPOSIXSeconds nowUTC
       withDBTransaction "" $ do
-        _ <- insert $ BlockTimeStrikeFutureGuess
-          { blockTimeStrikeFutureGuessGuess = guess
-          , blockTimeStrikeFutureGuessCreationTime = now
-          , blockTimeStrikeFutureGuessPerson = personKey
-          , blockTimeStrikeFutureGuessStrike = strikeKey
-          }
-        return ()
-
--- | O(ln accounts) + O(BlockTimeStrikePast).
--- returns list BlockTimeStrikePast records. requires authenticated user
-getBlockTimeStrikeGuessResults :: AccountToken-> BlockHeight-> Natural Int-> AppM [ BlockTimeStrikeGuessResultPublic]
-getBlockTimeStrikeGuessResults token blockHeight nlocktime = profile "getBlockTimeStrikeGuessResults" $ do
-  mperson <- mgetPersonByAccountToken token
-  case mperson of
-    Just person -> do
-      mstrike <- mgetBlockTimeStrikePast blockHeight nlocktime
-      case mstrike of
-        Just strike-> do
-          mret <- getBlockTimeStrikeGuessResult person strike
-          case mret of
-            Nothing -> throwError err500 { errBody = "something went wrong"}
-            Just ret -> return ret
-        Nothing-> do
-          let err = "ERROR: getBlockTimeStrikeGuessResults: there is no past blocktime strike with given block height and nlocktime"
-          runLogging $ $(logError) err
-          throwError err404 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
-    Nothing -> do
-      let msg = "ERROR: getBlockTimeStrikeGuessResults: person was not able to authenticate itself"
-      runLogging $ $(logError) msg
-      throwError err404
-  where
-    getBlockTimeStrikeGuessResult :: (MonadIO m, MonadMonitor m) => (Entity Person) -> Entity BlockTimeStrikePast-> AppT m (Maybe [ BlockTimeStrikeGuessResultPublic])
-    getBlockTimeStrikeGuessResult _ (Entity _ strike) = do
-      withDBTransaction "" $ do
-        (guessResults :: [Entity BlockTimeStrikePastGuess]) <- selectList [] []
-        forM guessResults $ \(Entity _ guessResult)-> do
-          person <- get (blockTimeStrikePastGuessPerson guessResult) >>= return . fromJust -- persistent ensures that person with appropriate PersonId exist
-          return $ BlockTimeStrikeGuessResultPublic
-            { person = personUuid person
-            , strike = strike
-            , creationTime = blockTimeStrikePastGuessFutureGuessCreationTime guessResult
-            , archiveTime = blockTimeStrikePastGuessCreationTime guessResult
-            , guess = blockTimeStrikePastGuessGuess guessResult
-            , observedResult = blockTimeStrikePastGuessObservedResult guessResult
-            }
+        let value = BlockTimeStrikeGuess
+              { blockTimeStrikeGuessGuess = guess
+              , blockTimeStrikeGuessCreationTime = now
+              , blockTimeStrikeGuessPerson = personKey
+              , blockTimeStrikeGuessStrike = strikeKey
+              }
+        _ <- insert value
+        return value
 
 -- | O(ln accounts) + O(BlockTimeStrikePast).
 -- returns list BlockTimeStrikePast records
 getBlockTimeStrikeGuessResultsPage
   :: Maybe (Natural Int)
-  -> Maybe (FilterRequest BlockTimeStrikePastGuess BlockTimeStrikeGuessResultPublicFilter)
-  -> AppM (PagingResult BlockTimeStrikeGuessResultPublic)
-getBlockTimeStrikeGuessResultsPage mpage mfilter = do
-  mret <- getBlockTimeStrikeGuessResults
-  case mret of
+  -> Maybe (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
+  -> AppM (PagingResult BlockTimeStrikeGuessPublic)
+getBlockTimeStrikeGuessResultsPage mpage mfilter = profile "getBlockTimeStrikeGuessResultsPage" $ do
+  mconfirmedBlockV <- asks ( BlockTime.latestConfirmedBlock . blockTimeState)
+  mconfirmedBlock <- liftIO $ TVar.readTVarIO mconfirmedBlockV
+  case mconfirmedBlock of
     Nothing -> do
-      throwError err500 {errBody = "something went wrong"}
-    Just ret -> return ret
+      let err = "ERROR: getBlockTimeStrikeGuessResultsPage: no confirmed block found yet"
+      runLogging $ $(logError) err
+      throwError err500 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+    Just confirmedBlock -> do
+      let
+          page = maybe 0 id mpage
+      recordsPerReply <- asks (configRecordsPerReply . config)
+      mret <- withDBNOTransactionROUnsafe "" $ do
+        count <- C.runConduit
+          $ filters recordsPerReply confirmedBlock
+          .| ( do
+                 let
+                     loop (acc::Int) = do
+                       mv <- C.await
+                       case mv of
+                         Nothing -> return acc
+                         Just _ -> do
+                           loop (acc + 1)
+                 loop 0
+             )
+        res <- C.runConduit
+          $ filters recordsPerReply confirmedBlock
+          .| (C.drop (fromNatural page * fromPositive recordsPerReply) >> C.awaitForever C.yield) -- navigate to page
+          .| ( C.awaitForever $ \((Entity _ strike, Entity _ guess), Entity _ person) -> do
+               C.yield $ BlockTimeStrikeGuessPublic
+                         { person = personUuid person
+                         , strike = strike
+                         , creationTime = blockTimeStrikeGuessCreationTime guess
+                         , guess = blockTimeStrikeGuessGuess guess
+                         }
+             )
+          .| C.take (fromPositive recordsPerReply + 1) -- we take +1 to understand if there is a next page available
+        return (count, res)
+      case mret of
+          Nothing -> do
+            throwError err500 {errBody = "something went wrong, check logs for details"}
+          Just (count, guessesTail) -> do
+            let newPage =
+                  if List.length guessesTail > fromPositive recordsPerReply
+                  then Just (fromIntegral (fromNatural page + 1))
+                  else Nothing
+                results = List.take (fromPositive recordsPerReply) guessesTail
+            return $ PagingResult
+              { pagingResultNextPage = newPage
+              , pagingResultCount = fromIntegral count
+              , pagingResultResults = results
+              }
   where
     repeatC v = C.yield v >> repeatC v
     sort = maybe Descend (sortOrder . unFilterRequest . id1 . mapFilter) mfilter
       where
-        id1 :: FilterRequest BlockTimeStrikePast BlockTimeStrikeGuessResultPublicFilter -> FilterRequest BlockTimeStrikePast BlockTimeStrikeGuessResultPublicFilter
+        id1 :: FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter -> FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter
         id1 = id -- helping typechecker
-    getBlockTimeStrikeGuessResults :: (MonadIO m, MonadMonitor m, MonadCatch m) => AppT m (Maybe (PagingResult BlockTimeStrikeGuessResultPublic))
-    getBlockTimeStrikeGuessResults = do
-      State{ config = Config{ configRecordsPerReply = recordsPerReply}
-           } <- ask
-      pagingResult mpage (maybe [] (buildFilter . unFilterRequest . mapFilter ) mfilter) sort BlockTimeStrikePastObservedBlockMediantime
-        $ ( C.awaitForever $ \v@(Entity pastId _)-> do
-            C.toProducer $ C.zipSources
-              ( repeatC v
-              )
-              ( streamEntities
-                ( (BlockTimeStrikePastGuessStrike ==. pastId) : (maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter))
-                BlockTimeStrikePastGuessCreationTime
-                (PageSize ((fromPositive recordsPerReply) + 1))
-                Descend
-                (Range Nothing Nothing)
-              )
-          )
-        .| ( C.awaitForever $ \(pastE, guessE@(Entity _ guessResult)) -> do
-            C.toProducer $ C.zipSources
-              ( repeatC (pastE, guessE)
-              )
-              ( streamEntities
-                ( (PersonId ==. blockTimeStrikePastGuessPerson guessResult) : (maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter))
-                PersonCreationTime
-                (PageSize ((fromPositive recordsPerReply) + 1))
-                Descend
-                (Range Nothing Nothing)
-              )
-           )
-        .| ( C.awaitForever $ \((Entity _ past, Entity _ guessResult), Entity _ person )-> do
-            C.yield $ BlockTimeStrikeGuessResultPublic
-              { person = personUuid person
-              , strike = past
-              , creationTime = blockTimeStrikePastGuessFutureGuessCreationTime guessResult
-              , archiveTime = blockTimeStrikePastGuessCreationTime guessResult
-              , guess = blockTimeStrikePastGuessGuess guessResult
-              , observedResult = blockTimeStrikePastGuessObservedResult guessResult
-              }
-           )
+    filters recordsPerReply confirmedBlock =
+      streamEntities
+          ((BlockTimeStrikeBlock <=. blockHeaderHeight confirmedBlock):(maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter ))
+          BlockTimeStrikeId
+          (PageSize ((fromPositive recordsPerReply) + 1))
+          sort
+          (Range Nothing Nothing)
+      .| ( C.awaitForever $ \v@(Entity strikeId _)-> do
+          C.toProducer $ C.zipSources
+            (repeatC v)
+            (streamEntities
+              (( BlockTimeStrikeGuessStrike ==. strikeId ):(maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter ))
+              BlockTimeStrikeGuessId
+              (PageSize ((fromPositive recordsPerReply) + 1))
+              sort
+              (Range Nothing Nothing)
+            )
+         )
+      .| ( C.awaitForever $ \v@(_, Entity _ guess )-> do
+          C.toProducer $ C.zipSources
+            (repeatC v)
+            ( streamEntities
+              (( PersonId ==. blockTimeStrikeGuessPerson guess ):(maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter ))
+              PersonId
+              (PageSize ((fromPositive recordsPerReply) + 1))
+              sort
+              (Range Nothing Nothing)
+            )
+         )
 
-calculateResultsLoop :: (MonadIO m, MonadMonitor m) => AppT m ()
-calculateResultsLoop = forever $ do
-  State{ config = Config {configSchedulerPollRateSecs = configSchedulerPollRateSecs}} <- ask
-  runLogging $ $(logDebug) $ "calculateResultsLoop: iteration"
-  calculateResultsIteration
-  liftIO $ threadDelay $ 1000000 * (fromIntegral configSchedulerPollRateSecs) -- sleep for poll rate secs
+-- | returns list BlockTimeStrikeGuess records
+getBlockTimeStrikesGuessesPage
+  :: Maybe (Natural Int)
+  -> Maybe (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
+  -> AppM (PagingResult BlockTimeStrikeGuessPublic)
+getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuessesPage" $ do
+  recordsPerReply <- asks (configRecordsPerReply . config)
+  latestConfirmedBlockV <- asks (BlockTime.latestConfirmedBlock . blockTimeState)
+  mlatestConfirmedBlock <- liftIO $ TVar.readTVarIO latestConfirmedBlockV
+  averageBlockDiscoverSecs <- asks (configAverageBlockDiscoverSecs . config)
+  minimumBlocksAhead <- asks (configBlockTimeStrikeMinimumBlockAheadCurrentTip . config)
+  case mlatestConfirmedBlock of
+    Nothing -> do
+      let msg = "getBlockTimeStrikesGuessesPage: no confirmed block found yet"
+      runLogging $  $(logError) msg
+      throwError err500 { errBody = BS.fromStrict $ Text.encodeUtf8 msg}
+    Just confirmedBlock -> do
+      let finalFilter =
+            case maybe Nothing (blockTimeStrikeGuessResultPublicFilterClass . fst . unFilterRequest) mfilter of
+              Nothing -> filter
+              Just BlockTimeStrikeFilterClassGuessable ->
+                ( (BlockTimeStrikeBlock >=. (blockHeaderHeight confirmedBlock + naturalFromPositive minimumBlocksAhead))
+                 :(BlockTimeStrikeStrikeMediantime >=. (fromIntegral (blockHeaderMediantime confirmedBlock) + (fromIntegral $ minimumBlocksAhead * averageBlockDiscoverSecs)))
+                 :filter
+                )
+              Just BlockTimeStrikeFilterClassOutcomeKnown ->
+                ( (BlockTimeStrikeObservedResult !=. Nothing)
+                 :filter
+                )
+              Just BlockTimeStrikeFilterClassOutcomeUnknown ->
+                ( (BlockTimeStrikeObservedResult ==. Nothing)
+                 :filter
+                )
+      mret <- withDBNOTransactionROUnsafe "" $ do
+        count <- C.runConduit
+          $ filters finalFilter recordsPerReply
+          .| ( do
+                let
+                    loop (acc::Int) = do
+                      mv <- C.await
+                      case mv of
+                        Nothing -> return acc
+                        Just _-> do
+                          loop (acc + 1)
+                loop 0
+            )
+        res <- C.runConduit
+          $ filters finalFilter recordsPerReply
+          .| (C.drop (fromNatural page * fromPositive recordsPerReply) >> C.awaitForever C.yield) -- navigate to page
+          .| ( C.awaitForever $ \((Entity _ strike, Entity _ guess), Entity _ person) -> do
+              C.yield $ BlockTimeStrikeGuessPublic
+                        { person = personUuid person
+                        , strike = strike
+                        , creationTime = blockTimeStrikeGuessCreationTime guess
+                        , guess = blockTimeStrikeGuessGuess guess
+                        }
+            )
+          .| C.take (fromPositive recordsPerReply + 1) -- we take +1 to understand if there is a next page available
+        return (count, res)
+      case mret of
+          Nothing -> do
+            throwError err500 {errBody = "something went wrong, check logs for details"}
+          Just (count, guessesTail) -> do
+            let newPage =
+                  if List.length guessesTail > fromPositive recordsPerReply
+                  then Just (fromIntegral (fromNatural page + 1))
+                  else Nothing
+                results = List.take (fromPositive recordsPerReply) guessesTail
+            return $ PagingResult
+              { pagingResultNextPage = newPage
+              , pagingResultCount = fromIntegral count
+              , pagingResultResults = results
+              }
   where
-    calculateResultsIteration :: (MonadIO m, MonadMonitor m) => AppT m ()
-    calculateResultsIteration = do
-      state <- ask
-      void $ withDBTransaction "" $ do
-        (observedBlocks :: [Entity BlockTimeStrikeFutureObservedBlock]) <- selectList [] []
-        forM_ observedBlocks $ \(Entity observedBlockKey observedBlock) -> do
-          nowUTC <- liftIO getCurrentTime
-          let now = utcTimeToPOSIXSeconds nowUTC
-          -- get past strike
-          pastStrike <- get (blockTimeStrikeFutureObservedBlockPastStrike observedBlock) >>= return . fromJust
-          futureStrike <- get (blockTimeStrikeFutureObservedBlockFutureStrike observedBlock) >>= return . fromJust
-          if blockTimeStrikePastBlock pastStrike == blockTimeStrikeFutureBlock futureStrike
-            then do
-              -- get guesses
-              (guesses:: [Entity BlockTimeStrikeFutureGuess]) <- selectList [ BlockTimeStrikeFutureGuessStrike ==. (blockTimeStrikeFutureObservedBlockFutureStrike observedBlock)] []
-              -- create results, removing guesses
-              _ <- forM_ guesses $ \(Entity guessId guess) -> do
-                -- ideally we should notify user in some way about "you were wrong/right!" message
-                -- create result
-                _ <- insert $ BlockTimeStrikePastGuess
-                  { blockTimeStrikePastGuessObservedResult = blockTimeStrikePastObservedResult pastStrike
-                  , blockTimeStrikePastGuessGuess = blockTimeStrikeFutureGuessGuess guess
-                  , blockTimeStrikePastGuessCreationTime = now
-                  , blockTimeStrikePastGuessFutureGuessCreationTime = blockTimeStrikeFutureGuessCreationTime guess
-                  , blockTimeStrikePastGuessStrike = blockTimeStrikeFutureObservedBlockPastStrike observedBlock
-                  , blockTimeStrikePastGuessPerson = blockTimeStrikeFutureGuessPerson guess
-                  }
-                -- remove guess
-                delete guessId
-              -- remove observedBlock
-              _ <- delete observedBlockKey
-              liftIO $ runAppT state $ do
-                runLogging $ $(logDebug) $ "calculateResultsLoop: removed observedBlockKey "
-                  <> tshow (blockTimeStrikePastBlock pastStrike) <> " , "
-                  <> tshow (blockTimeStrikeFutureBlock futureStrike)
-                  <> ", observedBlockKey : " <> tshow observedBlockKey
-              -- mark blocktime strike future as ready to be removed
-              _ <- insert $ BlockTimeStrikeFutureReadyToRemove
-                { blockTimeStrikeFutureReadyToRemoveFutureStrike = (blockTimeStrikeFutureObservedBlockFutureStrike observedBlock)
-                , blockTimeStrikeFutureReadyToRemovePastStrike = (blockTimeStrikeFutureObservedBlockPastStrike observedBlock)
-                }
-              return ()
-            else do -- move observed block to observed block fail
-              liftIO $ runAppT state $ do
-                runLogging $ $(logError) $ "calculateResultsLoop: BlockTimeStrikePastBlock != BlockTimeStrikeFutureBlock: "
-                  <> tshow (blockTimeStrikePastBlock pastStrike) <> " != "
-                  <> tshow (blockTimeStrikeFutureBlock futureStrike)
-                  <> ", observedBlockKey : " <> tshow observedBlockKey
-                  <> ", this is not expected, deleting this record: it should be properly recreated when the next current tip will be discovered or during boot"
-              delete observedBlockKey
+    page = maybe 0 id mpage
+    filter = maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter
+    repeatC v = C.yield v >> repeatC v
+    sort = maybe Descend (sortOrder . unFilterRequest . id1 . mapFilter) mfilter
+      where
+        id1 :: FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter -> FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter
+        id1 = id -- helping typechecker
+    filters finalFilter recordsPerReply =
+      streamEntities
+          finalFilter
+          BlockTimeStrikeId
+          (PageSize ((fromPositive recordsPerReply) + 1))
+          sort
+          (Range Nothing Nothing)
+      .| ( C.awaitForever $ \v@(Entity strikeId _)-> do
+          C.toProducer $ C.zipSources
+            (repeatC v)
+            (streamEntities
+              (( BlockTimeStrikeGuessStrike ==. strikeId ):(maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter ))
+              BlockTimeStrikeGuessId
+              (PageSize ((fromPositive recordsPerReply) + 1))
+              sort
+              (Range Nothing Nothing)
+            )
+         )
+      .| ( C.awaitForever $ \v@(_, Entity _ guess )-> do
+          C.toProducer $ C.zipSources
+            (repeatC v)
+            ( streamEntities
+              (( PersonId ==. blockTimeStrikeGuessPerson guess ):(maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter ))
+              PersonId
+              (PageSize ((fromPositive recordsPerReply) + 1))
+              sort
+              (Range Nothing Nothing)
+            )
+         )
+
+-- | returns list BlockTimeStrikeGuesses records
+getBlockTimeStrikeGuessesPage
+  :: BlockHeight
+  -> Natural Int
+  -> Maybe (Natural Int)
+  -> Maybe (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
+  -> AppM (PagingResult BlockTimeStrikeGuessPublic)
+getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilter = profile "getBlockTimeStrikesGuessesPage" $ do
+  recordsPerReply <- asks (configRecordsPerReply . config)
+  mret <- withDBNOTransactionROUnsafe "" $ do
+    count <- C.runConduit
+      $ filters recordsPerReply
+      .| ( do
+             let
+                 loop (acc::Int) = do
+                   mv <- C.await
+                   case mv of
+                     Nothing -> return acc
+                     Just _-> do
+                       loop (acc + 1)
+             loop 0
+         )
+    res <- C.runConduit
+      $ filters recordsPerReply
+      .| (C.drop (fromNatural page * fromPositive recordsPerReply) >> C.awaitForever C.yield) -- navigate to page
+      .| ( C.awaitForever $ \((Entity _ strike, Entity _ guess), Entity _ person) -> do
+           C.yield $ BlockTimeStrikeGuessPublic
+                     { person = personUuid person
+                     , strike = strike
+                     , creationTime = blockTimeStrikeGuessCreationTime guess
+                     , guess = blockTimeStrikeGuessGuess guess
+                     }
+         )
+      .| C.take (fromPositive recordsPerReply + 1) -- we take +1 to understand if there is a next page available
+    return (count, res)
+  case mret of
+      Nothing -> do
+        throwError err500 {errBody = "something went wrong, check logs for details"}
+      Just (count, guessesTail) -> do
+        let newPage =
+              if List.length guessesTail > fromPositive recordsPerReply
+              then Just (fromIntegral (fromNatural page + 1))
+              else Nothing
+            results = List.take (fromPositive recordsPerReply) guessesTail
+        return $ PagingResult
+          { pagingResultNextPage = newPage
+          , pagingResultCount = fromIntegral count
+          , pagingResultResults = results
+          }
+  where
+    page = maybe 0 id mpage
+    repeatC v = C.yield v >> repeatC v
+    sort = maybe Descend (sortOrder . unFilterRequest . id1 . mapFilter) mfilter
+      where
+        id1 :: FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter -> FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter
+        id1 = id -- helping typechecker
+    filters recordsPerReply =
+      streamEntities
+          [ BlockTimeStrikeBlock ==. blockHeight, BlockTimeStrikeStrikeMediantime ==. fromIntegral strikeMediantime ]
+          BlockTimeStrikeId
+          (PageSize ((fromPositive recordsPerReply) + 1))
+          sort
+          (Range Nothing Nothing)
+      .| ( C.awaitForever $ \v@(Entity strikeId _)-> do
+          C.toProducer $ C.zipSources
+            (repeatC v)
+            (streamEntities
+              (( BlockTimeStrikeGuessStrike ==. strikeId ):(maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter ))
+              BlockTimeStrikeGuessId
+              (PageSize ((fromPositive recordsPerReply) + 1))
+              sort
+              (Range Nothing Nothing)
+            )
+         )
+      .| ( C.awaitForever $ \v@(_, Entity _ guess )-> do
+          C.toProducer $ C.zipSources
+            (repeatC v)
+            ( streamEntities
+              (( PersonId ==. blockTimeStrikeGuessPerson guess ):(maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter ))
+              PersonId
+              (PageSize ((fromPositive recordsPerReply) + 1))
+              sort
+              (Range Nothing Nothing)
+            )
+         )
+
+-- | returns BlockTimeStrikeGuessPublic by strike and person, taken from account token
+getBlockTimeStrikeGuess
+  :: AccountToken
+  -> BlockHeight
+  -> Natural Int
+  -> AppM BlockTimeStrikeGuessPublic
+getBlockTimeStrikeGuess token blockHeight strikeMediantime = profile "getBlockTimeStrikeGuess" $ do
+  mperson <- mgetPersonByAccountToken token
+  case mperson of
+    Nothing-> do
+      let err = "ERROR: getBlockTimeStrikeGuess: person was not able to authenticate itself"
+      runLogging $ $(logError) err
+      throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+    Just personE -> do
+      mstrike <- actualGetStrikeGuess personE blockHeight (fromIntegral strikeMediantime)
+      case mstrike of
+        Nothing-> do
+          let err = "ERROR: getBlockTimeStrikeGuess: something went wrong, see logs for details"
+          runLogging $ $(logError) err
+          throwError err500 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+        Just Nothing -> do
+          let err = "ERROR: getBlockTimeStrikeGuess: no strike or guess found"
+          runLogging $ $(logError) err
+          throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+        Just (Just ret)-> return ret
+
+  where
+    repeatC v = C.yield v >> repeatC v
+    actualGetStrikeGuess (Entity personKey person) blockHeight strikeMediantime = do
+      recordsPerReply <- asks (configRecordsPerReply . config)
+      withDBNOTransactionROUnsafe "" $ do
+        C.runConduit
+          $ streamEntities
+            [BlockTimeStrikeBlock ==. blockHeight, BlockTimeStrikeStrikeMediantime ==. strikeMediantime]
+            BlockTimeStrikeId
+            (PageSize ((fromPositive recordsPerReply) + 1))
+            Descend
+            (Range Nothing Nothing)
+          .| ( C.awaitForever $ \v@(Entity strikeId _)-> do
+              C.toProducer $ C.zipSources
+                (repeatC v)
+                (streamEntities
+                  [ BlockTimeStrikeGuessStrike ==. strikeId, BlockTimeStrikeGuessPerson ==. personKey ]
+                  BlockTimeStrikeGuessId
+                  (PageSize ((fromPositive recordsPerReply) + 1))
+                  Descend
+                  (Range Nothing Nothing)
+                )
+             )
+          .| ( let loop = do
+                     mv <- C.await
+                     case mv of
+                       Nothing -> return Nothing
+                       Just (Entity _ strike, Entity _ guess) -> return $ Just $ BlockTimeStrikeGuessPublic
+                         { person = personUuid person
+                         , strike = strike
+                         , creationTime = blockTimeStrikeGuessCreationTime guess
+                         , guess = blockTimeStrikeGuessGuess guess
+                         }
+               in loop
+             )
+
+getBlockTimeStrikeGuessPerson
+  :: UUID Person
+  -> BlockHeight
+  -> Natural Int
+  -> AppM BlockTimeStrikeGuessPublic
+getBlockTimeStrikeGuessPerson uuid blockHeight strikeMediantime = profile "getBlockTimeStrikeGuessPerson" $ do
+  mperson <- mgetPersonByUUID uuid
+  case mperson of
+    Nothing -> do
+      let err = "ERROR: getBlockTimeStrikeGuessPerson: something went wrong, check logs"
+      runLogging $ $(logError) err
+      throwError err500 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+    Just Nothing-> do
+      let err = "ERROR: getBlockTimeStrikeGuessPerson: person was not able to authenticate itself"
+      runLogging $ $(logError) err
+      throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+    Just (Just personE) -> do
+      mstrike <- actualGetStrikeGuess personE blockHeight (fromIntegral strikeMediantime)
+      case mstrike of
+        Nothing-> do
+          let err = "ERROR: getBlockTimeStrikeGuess: something went wrong, see logs for details"
+          runLogging $ $(logError) err
+          throwError err500 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+        Just Nothing -> do
+          let err = "ERROR: getBlockTimeStrikeGuess: no strike or guess found"
+          runLogging $ $(logError) err
+          throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+        Just (Just ret)-> return ret
+
+  where
+    repeatC v = C.yield v >> repeatC v
+    mgetPersonByUUID uuid = do
+      withDBNOTransactionROUnsafe "" $ do
+        selectFirst [ PersonUuid ==. uuid ][]
+    actualGetStrikeGuess (Entity personKey person) blockHeight strikeMediantime = do
+      recordsPerReply <- asks (configRecordsPerReply . config)
+      withDBNOTransactionROUnsafe "" $ do
+        C.runConduit
+          $ streamEntities
+            [BlockTimeStrikeBlock ==. blockHeight, BlockTimeStrikeStrikeMediantime ==. strikeMediantime]
+            BlockTimeStrikeId
+            (PageSize ((fromPositive recordsPerReply) + 1))
+            Descend
+            (Range Nothing Nothing)
+          .| ( C.awaitForever $ \v@(Entity strikeId _)-> do
+              C.toProducer $ C.zipSources
+                (repeatC v)
+                (streamEntities
+                  [ BlockTimeStrikeGuessStrike ==. strikeId, BlockTimeStrikeGuessPerson ==. personKey ]
+                  BlockTimeStrikeGuessId
+                  (PageSize ((fromPositive recordsPerReply) + 1))
+                  Descend
+                  (Range Nothing Nothing)
+                )
+             )
+          .| ( let loop = do
+                     mv <- C.await
+                     case mv of
+                       Nothing -> return Nothing
+                       Just (Entity _ strike, Entity _ guess) -> return $ Just $ BlockTimeStrikeGuessPublic
+                         { person = personUuid person
+                         , strike = strike
+                         , creationTime = blockTimeStrikeGuessCreationTime guess
+                         , guess = blockTimeStrikeGuessGuess guess
+                         }
+               in loop
+             )

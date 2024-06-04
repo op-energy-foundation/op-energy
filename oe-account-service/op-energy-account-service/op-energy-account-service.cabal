@@ -60,7 +60,7 @@ library
                    , OpEnergy.BlockTimeStrike.Server.V1.Class
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
-                   , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledFutureStrikeCreation
+                   , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledStrikeCreation
                    , Data.Text.Show
                    , OpEnergy.PagingResult
     build-depends:    base ^>=4.15.1.0
