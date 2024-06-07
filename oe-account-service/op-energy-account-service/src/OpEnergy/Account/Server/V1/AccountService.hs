@@ -19,7 +19,7 @@ module OpEnergy.Account.Server.V1.AccountService
   , mgetPersonByAccountToken -- supposed that another services will use this function to authenticate user
   ) where
 
-import           Servant (err404, throwError, errBody)
+import           Servant (err400)
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.IO.Class (liftIO, MonadIO)
 import           Control.Monad.Logger(logError)
@@ -45,6 +45,7 @@ import           Data.OpEnergy.Account.API.V1.UUID
 import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging)
 import           OpEnergy.Account.Server.V1.Metrics(MetricsState(..))
+import           Data.OpEnergy.API.V1.Error
 
 
 -- | see OpEnergy.Account.API.V1.AccountV1API for reference of 'register' API call
@@ -107,7 +108,7 @@ login secret = do
       Nothing -> do
         let err = "ERROR: login: failed to find user account with given secret"
         runLogging $ $(logError) err
-        throwError err404{errBody = LBS.fromStrict (Text.encodeUtf8 err)}
+        throwJSON err400 err
       Just (Entity personKey person) -> do
         -- increase loginsCount returning new value
         loginsCount <- liftIO $! P.observeDuration accountUpdateLoginsCount $ flip runSqlPersistMPool pool $ do
@@ -201,7 +202,7 @@ postDisplayName (PostUserDisplayNameRequest token newName) = do
       Nothing-> do
         let err = "ERROR: postDisplayName: invalid token"
         runLogging $ $(logError) err
-        throwError err404 {errBody = LBS.fromStrict (Text.encodeUtf8 err)}
+        throwJSON err400 err
       Just ( Entity key _ ) -> do
         -- now we need to ensure, that new name do not overlaps with already existing
         mexists <- mgetPersonByDisplayName newName
@@ -216,7 +217,7 @@ postDisplayName (PostUserDisplayNameRequest token newName) = do
           Just _ -> do
             let err = "ERROR: postDisplayName: user with given display name already exists"
             runLogging $ $(logError) err
-            throwError err404 {errBody = LBS.fromStrict (Text.encodeUtf8 err)}
+            throwJSON err400 err
 
 -- | this function is being called on boot and supposed to be used to load some state from DB
 loadDBState :: AppT IO ()

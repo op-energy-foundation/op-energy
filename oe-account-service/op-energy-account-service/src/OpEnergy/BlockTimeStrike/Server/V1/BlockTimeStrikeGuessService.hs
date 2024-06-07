@@ -14,15 +14,14 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
   , getBlockTimeStrikeGuessPerson
   ) where
 
-import           Servant (err400, err500, throwError, errBody)
+import           Servant (err400, err500)
 import           Control.Monad.Trans.Reader (asks)
 import           Control.Monad.Logger( logError)
 import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
 import qualified Control.Concurrent.STM.TVar as TVar
-import qualified Data.ByteString.Lazy as BS
-import qualified Data.Text.Encoding as Text
 import qualified Data.List as List
+import           Data.Text(Text)
 
 import           Data.Conduit ((.|))
 import qualified Data.Conduit as C
@@ -45,6 +44,7 @@ import           Data.OpEnergy.Account.API.V1.PagingResult
 import           Data.OpEnergy.Account.API.V1.FilterRequest
 import           Data.OpEnergy.Account.API.V1.UUID
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
+import           Data.OpEnergy.API.V1.Error (throwJSON)
 import           OpEnergy.Account.Server.V1.Config (Config(..))
 import           OpEnergy.Account.Server.V1.Class ( AppT, AppM, State(..), runLogging, profile, withDBTransaction, withDBNOTransactionROUnsafe)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
@@ -71,35 +71,35 @@ createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess = prof
     Nothing -> do
       let err = "ERROR: createBlockTimeStrikeFutureGuess: there is no current tip yet"
       runLogging $ $(logError) err
-      throwError err500 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+      throwJSON err500 err
     Just tip
         | blockHeaderMediantime tip > fromIntegral strikeMediantime -> do
         let err = "ERROR: createBlockTimeStrikeFutureGuess: strikeMediantime is in the past, which is not expected"
         runLogging $ $(logError) err
-        throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+        throwJSON err400 err
     Just tip
       | blockHeaderHeight tip + naturalFromPositive configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip > blockHeight -> do
         let err = "ERROR: createBlockTimeStrikeFutureGuess: block height for new block time strike should be in the future + minimum configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip"
         runLogging $ $(logError) err
-        throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+        throwJSON err400 err
     _ -> do
       mperson <- mgetPersonByAccountToken token
       case mperson of
         Nothing-> do
           let err = "ERROR: createBlockTimeStrikeFutureGuess: person was not able to authenticate itself"
           runLogging $ $(logError) err
-          throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+          throwJSON err400 err
         Just (Entity personKey person) -> do
           mstrike <- mgetBlockTimeStrikeFuture blockHeight strikeMediantime
           case mstrike of
             Nothing-> do
               let err = "ERROR: createBlockTimeStrikeFutureGuess: future strike was not able to authenticate itself"
               runLogging $ $(logError) err
-              throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+              throwJSON err400 err
             Just (Entity strikeKey strike) -> do
               mret <- createBlockTimeStrikeFutureGuess personKey strikeKey guess
               case mret of
-                Nothing -> throwError err500 {errBody = "something went wrong"}
+                Nothing -> throwJSON err500 ("something went wrong"::Text)
                 Just v -> return $ BlockTimeStrikeGuessPublic
                   { person = personUuid person
                   , strike = strike
@@ -134,7 +134,7 @@ getBlockTimeStrikeGuessResultsPage mpage mfilter = profile "getBlockTimeStrikeGu
     Nothing -> do
       let err = "ERROR: getBlockTimeStrikeGuessResultsPage: no confirmed block found yet"
       runLogging $ $(logError) err
-      throwError err500 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+      throwJSON err500 err
     Just confirmedBlock -> do
       let
           page = maybe 0 id mpage
@@ -167,7 +167,7 @@ getBlockTimeStrikeGuessResultsPage mpage mfilter = profile "getBlockTimeStrikeGu
         return (count, res)
       case mret of
           Nothing -> do
-            throwError err500 {errBody = "something went wrong, check logs for details"}
+            throwJSON err500 ("something went wrong, check logs for details"::Text)
           Just (count, guessesTail) -> do
             let newPage =
                   if List.length guessesTail > fromPositive recordsPerReply
@@ -230,7 +230,7 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
     Nothing -> do
       let msg = "getBlockTimeStrikesGuessesPage: no confirmed block found yet"
       runLogging $  $(logError) msg
-      throwError err500 { errBody = BS.fromStrict $ Text.encodeUtf8 msg}
+      throwJSON err500 msg
     Just confirmedBlock -> do
       let finalFilter =
             case maybe Nothing (blockTimeStrikeGuessResultPublicFilterClass . fst . unFilterRequest) mfilter of
@@ -276,7 +276,7 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
         return (count, res)
       case mret of
           Nothing -> do
-            throwError err500 {errBody = "something went wrong, check logs for details"}
+            throwJSON err500 ("something went wrong, check logs for details"::Text)
           Just (count, guessesTail) -> do
             let newPage =
                   if List.length guessesTail > fromPositive recordsPerReply
@@ -363,7 +363,7 @@ getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilter = profi
     return (count, res)
   case mret of
       Nothing -> do
-        throwError err500 {errBody = "something went wrong, check logs for details"}
+        throwJSON err500 ("something went wrong, check logs for details"::Text)
       Just (count, guessesTail) -> do
         let newPage =
               if List.length guessesTail > fromPositive recordsPerReply
@@ -424,18 +424,18 @@ getBlockTimeStrikeGuess token blockHeight strikeMediantime = profile "getBlockTi
     Nothing-> do
       let err = "ERROR: getBlockTimeStrikeGuess: person was not able to authenticate itself"
       runLogging $ $(logError) err
-      throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+      throwJSON err400 err
     Just personE -> do
       mstrike <- actualGetStrikeGuess personE blockHeight (fromIntegral strikeMediantime)
       case mstrike of
         Nothing-> do
           let err = "ERROR: getBlockTimeStrikeGuess: something went wrong, see logs for details"
           runLogging $ $(logError) err
-          throwError err500 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+          throwJSON err500 err
         Just Nothing -> do
           let err = "ERROR: getBlockTimeStrikeGuess: no strike or guess found"
           runLogging $ $(logError) err
-          throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+          throwJSON err400 err
         Just (Just ret)-> return ret
 
   where
@@ -485,22 +485,22 @@ getBlockTimeStrikeGuessPerson uuid blockHeight strikeMediantime = profile "getBl
     Nothing -> do
       let err = "ERROR: getBlockTimeStrikeGuessPerson: something went wrong, check logs"
       runLogging $ $(logError) err
-      throwError err500 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+      throwJSON err500 err
     Just Nothing-> do
       let err = "ERROR: getBlockTimeStrikeGuessPerson: person was not able to authenticate itself"
       runLogging $ $(logError) err
-      throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+      throwJSON err400 err
     Just (Just personE) -> do
       mstrike <- actualGetStrikeGuess personE blockHeight (fromIntegral strikeMediantime)
       case mstrike of
         Nothing-> do
           let err = "ERROR: getBlockTimeStrikeGuess: something went wrong, see logs for details"
           runLogging $ $(logError) err
-          throwError err500 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+          throwJSON err500 err
         Just Nothing -> do
           let err = "ERROR: getBlockTimeStrikeGuess: no strike or guess found"
           runLogging $ $(logError) err
-          throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+          throwJSON err400 err
         Just (Just ret)-> return ret
 
   where

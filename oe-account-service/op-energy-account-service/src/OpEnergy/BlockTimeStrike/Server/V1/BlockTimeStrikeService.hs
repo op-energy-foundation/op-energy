@@ -13,7 +13,7 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
   , getBlockTimeStrike
   ) where
 
-import           Servant (err400, err500, throwError, errBody)
+import           Servant (err400, err500)
 import           Control.Monad.Trans.Reader (ask, asks)
 import           Control.Monad.Logger(logDebug, logError, logInfo)
 import           Control.Monad(forever, when)
@@ -21,9 +21,8 @@ import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
 import qualified Control.Concurrent.STM.TVar as TVar
 import qualified Control.Concurrent.MVar as MVar
-import qualified Data.ByteString.Lazy as BS
+import           Data.Text (Text)
 import qualified Data.Text as Text
-import qualified Data.Text.Encoding as Text
 import           Data.Conduit( (.|) )
 import qualified Data.Conduit as C
 import qualified Data.Conduit.List as C
@@ -47,6 +46,7 @@ import           Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic
 import           Data.OpEnergy.Account.API.V1.PagingResult
 import           Data.OpEnergy.Account.API.V1.FilterRequest
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
+import           Data.OpEnergy.API.V1.Error(throwJSON)
 import           OpEnergy.Account.Server.V1.Config (Config(..))
 import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging, profile, withDBTransaction, runLoggingIO, withDBNOTransactionROUnsafe )
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
@@ -65,7 +65,7 @@ getBlockTimeStrikeFuturePage mpage mfilter = profile "getBlockTimeStrikeFuturePa
   runLogging $ $(logDebug) $ "filter: " <> (Text.pack $ show mfilter)
   case mret of
     Nothing -> do
-      throwError err500 {errBody = "something went wrong"}
+      throwJSON err500 ("something went wrong"::Text)
     Just ret -> return ret
   where
     filter = (BlockTimeStrikeObservedBlockHash ==. Nothing):(maybe [] (buildFilter . unFilterRequest) mfilter)
@@ -86,30 +86,30 @@ createBlockTimeStrikeFuture token blockHeight strikeMediantime = profile "create
     Nothing -> do
       let err = "ERROR: createBlockTimeStrike: there is no current tip yet"
       runLogging $ $(logError) err
-      throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+      throwJSON err400 err
     Just tip
       | blockHeaderMediantime tip > fromIntegral strikeMediantime -> do
         let err = "ERROR: strikeMediantime is in the past, which is not expected"
         runLogging $ $(logError) err
-        throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+        throwJSON err400 err
     Just tip
       | blockHeaderHeight tip + naturalFromPositive configBlockTimeStrikeMinimumBlockAheadCurrentTip > blockHeight -> do
         let msg = "ERROR: createBlockTimeStrike: block height for new block time strike should be in the future + minimum configBlockTimeStrikeMinimumBlockAheadCurrentTip"
         runLogging $ $(logError) msg
-        throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 msg)}
+        throwJSON err400 msg
     _ -> do
       mperson <- mgetPersonByAccountToken token
       case mperson of
         Nothing -> do
           let err = "ERROR: createBlockTimeStrike: person was not able to authenticate itself"
           runLogging $ $(logError) err
-          throwError err400 {errBody = BS.fromStrict (Text.encodeUtf8 err)}
+          throwJSON err400 err
         Just person -> do
           mret <- createBlockTimeStrikeEnsuredConditions person
           case mret of
             Just ret -> return ret
             Nothing -> do
-              throwError err500 {errBody = "something went wrong"}
+              throwJSON err500 (("something went wrong")::Text)
   where
     createBlockTimeStrikeEnsuredConditions :: (MonadIO m, MonadMonitor m) => (Entity Person) -> AppT m (Maybe ())
     createBlockTimeStrikeEnsuredConditions _ = do
@@ -134,7 +134,7 @@ getBlockTimeStrikePastPage mpage mfilter = profile "getBlockTimeStrikePastPage" 
   mret <- getBlockTimeStrikePast
   case mret of
     Nothing -> do
-      throwError err500 {errBody = "something went wrong"}
+      throwJSON err500 ("something went wrong" :: Text)
     Just ret -> return ret
   where
     sort = maybe Descend (sortOrder . unFilterRequest) mfilter
@@ -249,7 +249,7 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
     Nothing -> do
       let msg = "getBlockTimeStrikesPage: no confirmed block found yet"
       runLogging $  $(logError) msg
-      throwError err500 { errBody = BS.fromStrict $ Text.encodeUtf8 msg}
+      throwJSON err500 msg
     Just confirmedBlock -> do
       let finalFilter =
             case maybe Nothing (blockTimeStrikeFilterClass . fst . unFilterRequest) mfilter of
@@ -270,7 +270,7 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
       mret <- getBlockTimeStrikePast finalFilter
       case mret of
         Nothing -> do
-          throwError err500 {errBody = "something went wrong"}
+          throwJSON err500 ("something went wrong"::Text)
         Just ret -> return ret
   where
     sort = maybe Descend (sortOrder . unFilterRequest) mfilter
@@ -291,9 +291,9 @@ getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $
   mret <- actualGetBlockTimeStrike
   case mret of
     Nothing -> do
-      throwError err500 {errBody = "something went wrong"}
+      throwJSON err500 ("something went wrong"::Text)
     Just Nothing -> do
-      throwError err400 {errBody = "strike not found"}
+      throwJSON err400 ("strike not found"::Text)
     Just (Just ret) -> return ret
   where
     actualGetBlockTimeStrike = do
