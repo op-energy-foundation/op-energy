@@ -243,7 +243,7 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
         res <- C.runConduit
           $ filters finalFilter linesPerPage
           .| (C.drop (fromNatural page * fromPositive linesPerPage) >> C.awaitForever C.yield) -- navigate to page
-          .| ( C.awaitForever $ \((Entity _ strike, Entity _ guess), Entity _ person) -> do
+          .| ( C.awaitForever $ \((Entity _ guess, Entity _ strike), Entity _ person) -> do
               C.yield $ BlockTimeStrikeGuessPublic
                         { person = personUuid person
                         , strike = strike
@@ -276,23 +276,23 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
         id1 = id -- helping typechecker
     filters finalFilter linesPerPage =
       streamEntities
-          finalFilter
-          BlockTimeStrikeId
+          (maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter )
+          BlockTimeStrikeGuessId
           (PageSize ((fromPositive linesPerPage) + 1))
           sort
           (Range Nothing Nothing)
-      .| ( C.awaitForever $ \v@(Entity strikeId _)-> do
+      .| ( C.awaitForever $ \v@(Entity _ guess)-> do
           C.toProducer $ C.zipSources
             (repeatC v)
             (streamEntities
-              (( BlockTimeStrikeGuessStrike ==. strikeId ):(maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter ))
-              BlockTimeStrikeGuessId
+              ((BlockTimeStrikeId ==. blockTimeStrikeGuessStrike guess):finalFilter)
+              BlockTimeStrikeId
               (PageSize ((fromPositive linesPerPage) + 1))
               sort
               (Range Nothing Nothing)
             )
          )
-      .| ( C.awaitForever $ \v@(_, Entity _ guess )-> do
+      .| ( C.awaitForever $ \v@( Entity _ guess, _ )-> do
           C.toProducer $ C.zipSources
             (repeatC v)
             ( streamEntities
