@@ -43,6 +43,7 @@ import           Data.OpEnergy.Account.API.V1.UUID
 import           Data.OpEnergy.Account.API.V1.Common
 import           Data.OpEnergy.Account.API.V1.FilterRequest
 import           Data.OpEnergy.API.V1.Block(BlockHeight)
+import           Data.OpEnergy.API.V1.Positive(Positive)
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
 
 share [mkPersist sqlSettings, mkMigrate "migrateBlockTimeStrikeGuess"] [persistLowerCase|
@@ -129,6 +130,7 @@ data BlockTimeStrikeGuessResultPublicFilter = BlockTimeStrikeGuessResultPublicFi
     -- sort
   , blockTimeStrikeGuessResultPublicFilterSort                  :: Maybe SortOrder
   , blockTimeStrikeGuessResultPublicFilterClass                 :: Maybe BlockTimeStrikeFilterClass
+  , blockTimeStrikeGuessResultPublicFilterLinesPerPage          :: Maybe (Positive Int)
   }
   deriving (Eq, Show, Generic)
 instance Default BlockTimeStrikeGuessResultPublicFilter where
@@ -189,6 +191,7 @@ instance BuildFilter BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter
                 -- sort
                 _
                 _
+                _ -- lines per page
               , _
               ) = List.concat
     [ maybe [] (\v-> [BlockTimeStrikeGuessGuess ==. v]) mGuessEQ
@@ -218,6 +221,7 @@ instance BuildFilter Person BlockTimeStrikeGuessResultPublicFilter where
                 -- sort
                 _
                 _
+                _ -- lines per page
               , _
               ) = List.concat
     [ maybe [] (\v-> [ PersonUuid ==. v ]) mPersonEQ
@@ -248,6 +252,7 @@ instance BuildFilter BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter wher
                 -- sort
                 _
                 _
+                _ -- lines per page
               , _
               ) = List.concat
         -- strike block height
@@ -282,4 +287,5 @@ defaultBlockTimeStrikeGuessResultPublicFilter =  BlockTimeStrikeGuessResultPubli
   , blockTimeStrikeGuessResultPublicFilterStrikeMediantimeNEQ   = Just 1
   , blockTimeStrikeGuessResultPublicFilterSort                  = Just Descend
   , blockTimeStrikeGuessResultPublicFilterClass                 = Just defaultBlockTimeStrikeFilterClass
+  , blockTimeStrikeGuessResultPublicFilterLinesPerPage          = Just 100
   }

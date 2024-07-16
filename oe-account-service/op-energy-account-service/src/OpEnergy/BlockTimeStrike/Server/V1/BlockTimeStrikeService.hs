@@ -72,7 +72,10 @@ getBlockTimeStrikeFuturePage mpage mfilter = profile "getBlockTimeStrikeFuturePa
     sort = maybe Descend (sortOrder . unFilterRequest) mfilter
     getBlockTimeStrikeFuture :: (MonadIO m, MonadMonitor m, MonadCatch m) => AppT m (Maybe (PagingResult BlockTimeStrike))
     getBlockTimeStrikeFuture = do
-      pagingResult mpage filter sort BlockTimeStrikeCreationTime $ C.map $ \(Entity _ v) -> v
+      recordsPerReply <- asks (configRecordsPerReply . config)
+      let
+          linesPerPage = maybe recordsPerReply (maybe recordsPerReply id . blockTimeStrikeFilterLinesPerPage . fst . unFilterRequest ) mfilter
+      pagingResult mpage linesPerPage filter sort BlockTimeStrikeCreationTime $ C.map $ \(Entity _ v) -> v
 
 -- | O(ln accounts).
 -- Tries to create future block time strike. Requires authenticated user and blockheight should be in the future
@@ -140,7 +143,10 @@ getBlockTimeStrikePastPage mpage mfilter = profile "getBlockTimeStrikePastPage" 
     sort = maybe Descend (sortOrder . unFilterRequest) mfilter
     filter = (BlockTimeStrikeObservedBlockHash !=. Nothing):(maybe [] (buildFilter . unFilterRequest) mfilter)
     getBlockTimeStrikePast = do
-      pagingResult mpage filter sort BlockTimeStrikeObservedBlockMediantime
+      recordsPerReply <- asks (configRecordsPerReply . config)
+      let
+          linesPerPage = maybe recordsPerReply (maybe recordsPerReply id . blockTimeStrikeFilterLinesPerPage . fst . unFilterRequest ) mfilter
+      pagingResult mpage linesPerPage filter sort BlockTimeStrikeObservedBlockMediantime
         $ ( C.awaitForever $ \(Entity strikeId strike) -> do
             resultsCnt <- lift $ count [ BlockTimeStrikeGuessStrike ==. strikeId ]
             C.yield (BlockTimeStrikePublic {blockTimeStrikePublicStrike = strike, blockTimeStrikePublicGuessesCount = fromIntegral resultsCnt})
@@ -276,7 +282,10 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
     sort = maybe Descend (sortOrder . unFilterRequest) mfilter
     filter = (maybe [] (buildFilter . unFilterRequest) mfilter)
     getBlockTimeStrikePast finalFilter = do
-      pagingResult mpage finalFilter sort BlockTimeStrikeId
+      recordsPerReply <- asks (configRecordsPerReply . config)
+      let
+          linesPerPage = maybe recordsPerReply (maybe recordsPerReply id . blockTimeStrikeFilterLinesPerPage . fst . unFilterRequest ) mfilter
+      pagingResult mpage linesPerPage finalFilter sort BlockTimeStrikeId
         $ ( C.awaitForever $ \(Entity strikeId strike) -> do
             resultsCnt <- lift $ count [ BlockTimeStrikeGuessStrike ==. strikeId ]
             C.yield (BlockTimeStrikePublic {blockTimeStrikePublicStrike = strike, blockTimeStrikePublicGuessesCount = fromIntegral resultsCnt})

@@ -20,8 +20,6 @@ import           Data.Proxy
 data PagingResult a = PagingResult
   { pagingResultNextPage :: Maybe Word32
     -- ^ Nothing if there are no more pages coming
-  , pagingResultCount:: Word32
-    -- ^ records count. TOTAL, not count of elements of the page.
   , pagingResultResults :: [ a ]
     -- ^ contains list of records on a request page. Count of records defined by services' configs. For blocktime service, check configRecordsPerReply
   }
@@ -60,6 +58,5 @@ instance Default a => Default (PagingResult a) where
 defaultPagingResult :: Default a => PagingResult a
 defaultPagingResult = PagingResult
   { pagingResultNextPage = Nothing
-  , pagingResultCount = 1
   , pagingResultResults = [ def ]
   }

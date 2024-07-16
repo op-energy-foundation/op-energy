@@ -41,6 +41,7 @@ import           Data.Default
 import           Data.OpEnergy.API.V1.Block(BlockHeight, defaultBlockHeight)
 import           Data.OpEnergy.Account.API.V1.Account
 import           Data.OpEnergy.API.V1.Block(BlockHash)
+import           Data.OpEnergy.API.V1.Positive(Positive)
 import qualified Data.OpEnergy.API.V1.Hash as BlockHash (defaultHash)
 import           Data.OpEnergy.Account.API.V1.FilterRequest
 import           Data.OpEnergy.Account.API.V1.Common
@@ -75,6 +76,7 @@ data BlockTimeStrikeFilter = BlockTimeStrikeFilter
   , blockTimeStrikeFilterObservedBlockHashNEQ       :: Maybe BlockHash
   , blockTimeStrikeFilterSort                       :: Maybe SortOrder
   , blockTimeStrikeFilterClass                      :: Maybe BlockTimeStrikeFilterClass
+  , blockTimeStrikeFilterLinesPerPage               :: Maybe (Positive Int)
   }
   deriving (Eq, Show, Generic)
 instance ToSchema BlockTimeStrikeFilter where
@@ -106,6 +108,7 @@ defaultBlockTimeStrikeFilter = BlockTimeStrikeFilter
   , blockTimeStrikeFilterObservedBlockHashNEQ  = Just BlockHash.defaultHash
   , blockTimeStrikeFilterSort                  = Just Descend
   , blockTimeStrikeFilterClass                 = Just BlockTimeStrikeFilterClassGuessable
+  , blockTimeStrikeFilterLinesPerPage          = Just 100
   }
 
 defaultBlockTimeStrike :: BlockTimeStrike
@@ -215,6 +218,7 @@ instance BuildFilter BlockTimeStrike BlockTimeStrikeFilter where
                 mobservedBlockHashNEQ
                 _ -- sort
                 _ -- class
+                _ -- linesPerPage
               , _
               ) = List.concat
     [ maybe [] (\v-> [BlockTimeStrikeStrikeMediantime >=. v]) mstrikeMediantimeGTE

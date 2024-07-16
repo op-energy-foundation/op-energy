@@ -139,22 +139,12 @@ getBlockTimeStrikeGuessResultsPage mpage mfilter = profile "getBlockTimeStrikeGu
       let
           page = maybe 0 id mpage
       recordsPerReply <- asks (configRecordsPerReply . config)
+      let
+          linesPerPage = maybe recordsPerReply (maybe recordsPerReply id . blockTimeStrikeGuessResultPublicFilterLinesPerPage . fst . unFilterRequest ) mfilter
       mret <- withDBNOTransactionROUnsafe "" $ do
-        count <- C.runConduit
-          $ filters recordsPerReply confirmedBlock
-          .| ( do
-                 let
-                     loop (acc::Int) = do
-                       mv <- C.await
-                       case mv of
-                         Nothing -> return acc
-                         Just _ -> do
-                           loop (acc + 1)
-                 loop 0
-             )
         res <- C.runConduit
-          $ filters recordsPerReply confirmedBlock
-          .| (C.drop (fromNatural page * fromPositive recordsPerReply) >> C.awaitForever C.yield) -- navigate to page
+          $ filters linesPerPage confirmedBlock
+          .| (C.drop (fromNatural page * fromPositive linesPerPage) >> C.awaitForever C.yield) -- navigate to page
           .| ( C.awaitForever $ \((Entity _ strike, Entity _ guess), Entity _ person) -> do
                C.yield $ BlockTimeStrikeGuessPublic
                          { person = personUuid person
@@ -163,20 +153,19 @@ getBlockTimeStrikeGuessResultsPage mpage mfilter = profile "getBlockTimeStrikeGu
                          , guess = blockTimeStrikeGuessGuess guess
                          }
              )
-          .| C.take (fromPositive recordsPerReply + 1) -- we take +1 to understand if there is a next page available
-        return (count, res)
+          .| C.take (fromPositive linesPerPage + 1) -- we take +1 to understand if there is a next page available
+        return (res)
       case mret of
           Nothing -> do
             throwJSON err500 ("something went wrong, check logs for details"::Text)
-          Just (count, guessesTail) -> do
+          Just (guessesTail) -> do
             let newPage =
-                  if List.length guessesTail > fromPositive recordsPerReply
+                  if List.length guessesTail > fromPositive linesPerPage
                   then Just (fromIntegral (fromNatural page + 1))
                   else Nothing
-                results = List.take (fromPositive recordsPerReply) guessesTail
+                results = List.take (fromPositive linesPerPage) guessesTail
             return $ PagingResult
               { pagingResultNextPage = newPage
-              , pagingResultCount = fromIntegral count
               , pagingResultResults = results
               }
   where
@@ -226,6 +215,8 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
   mlatestConfirmedBlock <- liftIO $ TVar.readTVarIO latestConfirmedBlockV
   averageBlockDiscoverSecs <- asks (configAverageBlockDiscoverSecs . config)
   minimumBlocksAhead <- asks (configBlockTimeStrikeMinimumBlockAheadCurrentTip . config)
+  let
+      linesPerPage = maybe recordsPerReply (maybe recordsPerReply id . blockTimeStrikeGuessResultPublicFilterLinesPerPage . fst . unFilterRequest ) mfilter
   case mlatestConfirmedBlock of
     Nothing -> do
       let msg = "getBlockTimeStrikesGuessesPage: no confirmed block found yet"
@@ -249,22 +240,10 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
                  :filter
                 )
       mret <- withDBNOTransactionROUnsafe "" $ do
-        count <- C.runConduit
-          $ filters finalFilter recordsPerReply
-          .| ( do
-                let
-                    loop (acc::Int) = do
-                      mv <- C.await
-                      case mv of
-                        Nothing -> return acc
-                        Just _-> do
-                          loop (acc + 1)
-                loop 0
-            )
         res <- C.runConduit
-          $ filters finalFilter recordsPerReply
-          .| (C.drop (fromNatural page * fromPositive recordsPerReply) >> C.awaitForever C.yield) -- navigate to page
-          .| ( C.awaitForever $ \((Entity _ strike, Entity _ guess), Entity _ person) -> do
+          $ filters finalFilter linesPerPage
+          .| (C.drop (fromNatural page * fromPositive linesPerPage) >> C.awaitForever C.yield) -- navigate to page
+          .| ( C.awaitForever $ \((Entity _ guess, Entity _ strike), Entity _ person) -> do
               C.yield $ BlockTimeStrikeGuessPublic
                         { person = personUuid person
                         , strike = strike
@@ -272,20 +251,19 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
                         , guess = blockTimeStrikeGuessGuess guess
                         }
             )
-          .| C.take (fromPositive recordsPerReply + 1) -- we take +1 to understand if there is a next page available
-        return (count, res)
+          .| C.take (fromPositive linesPerPage + 1) -- we take +1 to understand if there is a next page available
+        return (res)
       case mret of
           Nothing -> do
             throwJSON err500 ("something went wrong, check logs for details"::Text)
-          Just (count, guessesTail) -> do
+          Just (guessesTail) -> do
             let newPage =
-                  if List.length guessesTail > fromPositive recordsPerReply
+                  if List.length guessesTail > fromPositive linesPerPage
                   then Just (fromIntegral (fromNatural page + 1))
                   else Nothing
-                results = List.take (fromPositive recordsPerReply) guessesTail
+                results = List.take (fromPositive linesPerPage) guessesTail
             return $ PagingResult
               { pagingResultNextPage = newPage
-              , pagingResultCount = fromIntegral count
               , pagingResultResults = results
               }
   where
@@ -296,31 +274,31 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
       where
         id1 :: FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter -> FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter
         id1 = id -- helping typechecker
-    filters finalFilter recordsPerReply =
+    filters finalFilter linesPerPage =
       streamEntities
-          finalFilter
-          BlockTimeStrikeId
-          (PageSize ((fromPositive recordsPerReply) + 1))
+          (maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter )
+          BlockTimeStrikeGuessId
+          (PageSize ((fromPositive linesPerPage) + 1))
           sort
           (Range Nothing Nothing)
-      .| ( C.awaitForever $ \v@(Entity strikeId _)-> do
+      .| ( C.awaitForever $ \v@(Entity _ guess)-> do
           C.toProducer $ C.zipSources
             (repeatC v)
             (streamEntities
-              (( BlockTimeStrikeGuessStrike ==. strikeId ):(maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter ))
-              BlockTimeStrikeGuessId
-              (PageSize ((fromPositive recordsPerReply) + 1))
+              ((BlockTimeStrikeId ==. blockTimeStrikeGuessStrike guess):finalFilter)
+              BlockTimeStrikeId
+              (PageSize ((fromPositive linesPerPage) + 1))
               sort
               (Range Nothing Nothing)
             )
          )
-      .| ( C.awaitForever $ \v@(_, Entity _ guess )-> do
+      .| ( C.awaitForever $ \v@( Entity _ guess, _ )-> do
           C.toProducer $ C.zipSources
             (repeatC v)
             ( streamEntities
               (( PersonId ==. blockTimeStrikeGuessPerson guess ):(maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter ))
               PersonId
-              (PageSize ((fromPositive recordsPerReply) + 1))
+              (PageSize ((fromPositive linesPerPage) + 1))
               sort
               (Range Nothing Nothing)
             )
@@ -335,22 +313,12 @@ getBlockTimeStrikeGuessesPage
   -> AppM (PagingResult BlockTimeStrikeGuessPublic)
 getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilter = profile "getBlockTimeStrikesGuessesPage" $ do
   recordsPerReply <- asks (configRecordsPerReply . config)
+  let
+      linesPerPage = maybe recordsPerReply (maybe recordsPerReply id . blockTimeStrikeGuessResultPublicFilterLinesPerPage . fst . unFilterRequest ) mfilter
   mret <- withDBNOTransactionROUnsafe "" $ do
-    count <- C.runConduit
-      $ filters recordsPerReply
-      .| ( do
-             let
-                 loop (acc::Int) = do
-                   mv <- C.await
-                   case mv of
-                     Nothing -> return acc
-                     Just _-> do
-                       loop (acc + 1)
-             loop 0
-         )
     res <- C.runConduit
-      $ filters recordsPerReply
-      .| (C.drop (fromNatural page * fromPositive recordsPerReply) >> C.awaitForever C.yield) -- navigate to page
+      $ filters linesPerPage
+      .| (C.drop (fromNatural page * fromPositive linesPerPage) >> C.awaitForever C.yield) -- navigate to page
       .| ( C.awaitForever $ \((Entity _ strike, Entity _ guess), Entity _ person) -> do
            C.yield $ BlockTimeStrikeGuessPublic
                      { person = personUuid person
@@ -359,20 +327,19 @@ getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilter = profi
                      , guess = blockTimeStrikeGuessGuess guess
                      }
          )
-      .| C.take (fromPositive recordsPerReply + 1) -- we take +1 to understand if there is a next page available
-    return (count, res)
+      .| C.take (fromPositive linesPerPage + 1) -- we take +1 to understand if there is a next page available
+    return (res)
   case mret of
       Nothing -> do
         throwJSON err500 ("something went wrong, check logs for details"::Text)
-      Just (count, guessesTail) -> do
+      Just (guessesTail) -> do
         let newPage =
-              if List.length guessesTail > fromPositive recordsPerReply
+              if List.length guessesTail > fromPositive linesPerPage
               then Just (fromIntegral (fromNatural page + 1))
               else Nothing
-            results = List.take (fromPositive recordsPerReply) guessesTail
+            results = List.take (fromPositive linesPerPage) guessesTail
         return $ PagingResult
           { pagingResultNextPage = newPage
-          , pagingResultCount = fromIntegral count
           , pagingResultResults = results
           }
   where

@@ -6,7 +6,7 @@ module OpEnergy.PagingResult
   ) where
 
 import qualified Data.List as List
-import           Control.Monad.Trans.Reader (ask, ReaderT)
+import           Control.Monad.Trans.Reader ( ReaderT)
 
 import qualified Data.Conduit as C
 import           Data.Conduit ((.|), runConduit, ConduitT)
@@ -20,11 +20,10 @@ import           Control.Monad.Trans.Resource
 import           Prometheus(MonadMonitor(..))
 
 import           Data.OpEnergy.Account.API.V1.PagingResult
-import           Data.OpEnergy.API.V1.Positive(fromPositive)
+import           Data.OpEnergy.API.V1.Positive(Positive, fromPositive)
 import           Data.OpEnergy.API.V1.Natural
 
-import           OpEnergy.Account.Server.V1.Config (Config(..))
-import           OpEnergy.Account.Server.V1.Class ( AppT, State(..), profile, withDBTransaction)
+import           OpEnergy.Account.Server.V1.Class ( AppT, profile, withDBTransaction)
 
 pagingResult
   :: ( PersistEntity r
@@ -36,6 +35,7 @@ pagingResult
      , MonadMonitor m
      )
   =>  Maybe (Natural Int)
+  -> Positive Int
   -> [Filter r]
   -> SortOrder
   -> EntityField r typ
@@ -44,28 +44,22 @@ pagingResult
     (r1)
     (ReaderT SqlBackend (NoLoggingT (ResourceT IO))) ()
   -> AppT m (Maybe (PagingResult r1) )
-pagingResult mpage filter sortOrder field next = profile "pagingResult" $ do
-  State{ config = Config{ configRecordsPerReply = recordsPerReply}
-       } <- ask
+pagingResult mpage recordsPerReply filter sortOrder field next = profile "pagingResult" $ do
   mret <- withDBTransaction "" $ do
-    totalCount <- count (filter)
-    if (fromNatural page) * (fromPositive recordsPerReply) >= totalCount
-      then return (totalCount, []) -- page out of range
-      else do
-        pageResults <- runConduit
-          $ streamEntities
-            filter
-            field
-            (PageSize ((fromPositive recordsPerReply) + 1))
-            sortOrder
-            (Range Nothing Nothing)
-          .| (C.drop (fromNatural page * fromPositive recordsPerReply) >> C.awaitForever C.yield) -- navigate to page
-          .| next
-          .| C.take (fromPositive recordsPerReply + 1) -- we take +1 to understand if there is a next page available
-        return (totalCount, pageResults)
+    pageResults <- runConduit
+      $ streamEntities
+        filter
+        field
+        (PageSize ((fromPositive recordsPerReply) + 1))
+        sortOrder
+        (Range Nothing Nothing)
+      .| (C.drop (fromNatural page * fromPositive recordsPerReply) >> C.awaitForever C.yield) -- navigate to page
+      .| next
+      .| C.take (fromPositive recordsPerReply + 1) -- we take +1 to understand if there is a next page available
+    return (pageResults)
   case mret of
     Nothing -> return Nothing
-    Just (totalCount, resultsTail) -> do
+    Just (resultsTail) -> do
       let newPage =
             if List.length resultsTail > fromPositive recordsPerReply
             then Just (fromIntegral (fromNatural page + 1))
@@ -73,7 +67,6 @@ pagingResult mpage filter sortOrder field next = profile "pagingResult" $ do
           results = List.take (fromPositive recordsPerReply) resultsTail
       return $ Just $ PagingResult
         { pagingResultNextPage = newPage
-        , pagingResultCount = fromIntegral totalCount
         , pagingResultResults = results
         }
   where
