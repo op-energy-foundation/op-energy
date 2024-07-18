@@ -11,6 +11,7 @@ import Control.Monad.Reader(ask)
 import Control.Monad.IO.Class(MonadIO, liftIO)
 import           Control.Monad.Logger( logInfo, logDebug)
 import Control.Monad(forM_, when)
+import qualified Control.Concurrent.STM.TVar as TVar
 
 import           Database.Persist.Postgresql
 import           Prometheus(MonadMonitor)
@@ -19,7 +20,8 @@ import           Data.OpEnergy.API.V1.Block
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
 import           Data.OpEnergy.API.V1.Positive
 import           Data.OpEnergy.API.V1.Natural
-import           OpEnergy.Account.Server.V1.Class (profile, AppT, State(..), runLogging, withDBTransaction)
+import           OpEnergy.Account.Server.V1.Class as Account (profile, AppT, State(..), runLogging, withDBTransaction)
+import           OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import           OpEnergy.Account.Server.V1.Config
 import           Data.Text.Show
 
@@ -31,48 +33,57 @@ maybeCreateStrikes
   => BlockHeader
   -> AppT m ()
 maybeCreateStrikes currentTip = do
-  ensureStrikeExistsAhead currentTip
+  ensureGuessableStrikeExistsAhead currentTip
 
--- | this function creates necessary future strikes if they haven't been created yet as it tries to be idempotent.
--- NOTE: currently, we use CurrentTip + Config.configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip as the minimum block height for a future strike.
-ensureStrikeExistsAhead
+-- | this function creates necessary guessable strikes if they haven't been created yet as it tries to be idempotent.
+-- NOTE: currently, we use latest unconfirmed block height + Config.configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip as the minimum block height for a future strike.
+ensureGuessableStrikeExistsAhead
   :: ( MonadIO m
      , MonadMonitor m
      )
   => BlockHeader
   -> AppT m ()
-ensureStrikeExistsAhead currentTip = profile "ensureStrikeExistsAhead" $ do
-  State{ config = Config
-         { configBlockTimeStrikeShouldExistsAheadCurrentTip = configBlockTimeStrikeShouldExistsAheadCurrentTip
-         , configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip = configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
+ensureGuessableStrikeExistsAhead currentTip = profile "ensureGuessableStrikeExistsAhead" $ do
+  Account.State{ config = Config
+         { configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip = configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
+         , configBlockTimeStrikeShouldExistsAheadCurrentTip = configBlockTimeStrikeShouldExistsAheadCurrentTip
+         }
+       , blockTimeState = BlockTime.State
+         { latestUnconfirmedBlockHeight = latestUnconfirmedBlockHeightV
          }
        } <- ask
-  let minimumStrikeHeight = blockHeaderHeight currentTip + naturalFromPositive configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
-      maximumStrikeHeight = blockHeaderHeight currentTip + naturalFromPositive configBlockTimeStrikeShouldExistsAheadCurrentTip
-  runLogging $ $(logDebug) ("ensureStrikeExistsAhead: currentTip: " <> tshow currentTip <>  ", min/max: " <> tshow [minimumStrikeHeight, maximumStrikeHeight])
-  nonExistentBlockHeights <- do
-    now <- liftIO getCurrentTime
-    withDBTransaction "" $ do
-      futureStrikesE <- selectList
-        [ BlockTimeStrikeBlock >=. minimumStrikeHeight
-        , BlockTimeStrikeBlock <=. maximumStrikeHeight
-        ] []
-      let futureStrikes = List.map (\(Entity _ strike) -> blockTimeStrikeBlock strike) futureStrikesE
-      let nonExistentStrikeHeights = List.filter
-            (\height-> height `notElem` futureStrikes)
-            [ minimumStrikeHeight .. maximumStrikeHeight ]
-      forM_ nonExistentStrikeHeights $ \height-> do
-        insert (BlockTimeStrike { blockTimeStrikeBlock = height
-                                , blockTimeStrikeStrikeMediantime =
-                                  fromIntegral
-                                  $ blockHeaderMediantime currentTip
-                                  + fromIntegral ((fromNatural (height - blockHeaderHeight currentTip)) * 600) -- assume 10 minutes time slices for strike mediantime
-                                , blockTimeStrikeCreationTime = utcTimeToPOSIXSeconds now
-                                , blockTimeStrikeObservedResult = Nothing
-                                , blockTimeStrikeObservedBlockMediantime = Nothing
-                                , blockTimeStrikeObservedBlockHash = Nothing
-                                })
-      return nonExistentStrikeHeights
-  when (List.length nonExistentBlockHeights > 0) $ do
-    runLogging $ $(logInfo) ("ensureStrikeExistsAhead: created future strikes: " <> (tshow nonExistentBlockHeights))
+  mlatestUnconfirmedBlockHeight <- liftIO $ TVar.readTVarIO latestUnconfirmedBlockHeightV
+  case mlatestUnconfirmedBlockHeight of
+    Nothing -> return () -- in case if no tip known yet
+    Just latestUnconfirmedBlockHeight -> do
+      -- respect threshold of allowed guess
+      let minimumStrikeHeight = latestUnconfirmedBlockHeight + naturalFromPositive configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
+          maximumStrikeHeight = minimumStrikeHeight + naturalFromPositive configBlockTimeStrikeShouldExistsAheadCurrentTip
+      runLogging $ $(logDebug) ("ensureStrikeExistsAhead: currentTip: " <> tshow currentTip <>  ", min/max: " <> tshow [minimumStrikeHeight, maximumStrikeHeight])
+      nonExistentBlockHeights <- do
+        now <- liftIO getCurrentTime
+        withDBTransaction "" $ do
+          futureStrikesE <- selectList
+            [ BlockTimeStrikeBlock >=. minimumStrikeHeight
+            , BlockTimeStrikeBlock <=. maximumStrikeHeight
+            ] []
+          let futureStrikes = List.map (\(Entity _ strike) -> blockTimeStrikeBlock strike) futureStrikesE
+          let nonExistentStrikeHeights = List.filter
+                (\height-> height `notElem` futureStrikes)
+                [ minimumStrikeHeight .. maximumStrikeHeight ]
+          forM_ nonExistentStrikeHeights $ \height-> do
+            insert (BlockTimeStrike { blockTimeStrikeBlock = height
+                                    , blockTimeStrikeStrikeMediantime =
+                                      fromIntegral
+                                      $ blockHeaderMediantime currentTip
+                                      + fromIntegral ((fromNatural (height - blockHeaderHeight currentTip)) * 600) -- assume 10 minutes time slices for strike mediantime
+                                    , blockTimeStrikeCreationTime = utcTimeToPOSIXSeconds now
+                                    , blockTimeStrikeObservedResult = Nothing
+                                    , blockTimeStrikeObservedBlockMediantime = Nothing
+                                    , blockTimeStrikeObservedBlockHash = Nothing
+                                    })
+          return nonExistentStrikeHeights
+      when (List.length nonExistentBlockHeights > 0) $ do
+        runLogging $ $(logInfo) ("ensureStrikeExistsAhead: created future strikes: " <> (tshow nonExistentBlockHeights))
+
 

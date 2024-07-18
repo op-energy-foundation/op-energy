@@ -100,16 +100,19 @@ runBlockSpanClient = do
       receiveCurrentTipInLoop state conn
     -- | handle new message
     handleMessage _ MessagePong = return () -- ignore pong message
-    handleMessage state (MessageNewestBlockHeader header) = -- update current tip
+    handleMessage state (MessageNewestBlockHeader header unconfirmedBlockHeight) = -- update current tip
       runAppT state $ do
         State{ blockTimeState =
                BlockTime.State
                { latestConfirmedBlock = latestConfirmedBlockV
                , blockTimeStrikeCurrentTip = blockTimeStrikeCurrentTipV
+               , latestUnconfirmedBlockHeight = latestUnconfirmedBlockHeightV
                }
              } <- ask
 
         runLogging $ $(logInfo) $ "received new current tip height: " <> (tshow $ blockHeaderHeight header)
         liftIO $ do
-          STM.atomically $ TVar.writeTVar latestConfirmedBlockV (Just header) -- blocktime and guesses create handlers will need this info
+          STM.atomically $ do
+            TVar.writeTVar latestConfirmedBlockV (Just header) -- blocktime and guesses create handlers will need this info
+            TVar.writeTVar latestUnconfirmedBlockHeightV (Just unconfirmedBlockHeight)
           MVar.putMVar blockTimeStrikeCurrentTipV header -- this way we will notify handler about new current tip
