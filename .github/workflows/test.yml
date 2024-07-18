@@ -19,6 +19,7 @@ jobs:
     - run: git clone ssh://git@github.com/op-energy-foundation/op-energy-dev-instance.git ../op-energy-dev-instance --recursive --remote -b devel
     # current repo's use case is to be submodule in 80% of cases, so we need to copy content of op-energy repo into a proper submodule location
     - run: rm -rf oe-blockspan-service && cp -rf ../op-energy-dev-instance/overlays/op-energy/oe-blockspan-service ./
+    - run: git submodule update --remote
     - run: rm -rf ../op-energy-dev-instance/overlays/op-energy/* && cp -r $(pwd)/* ../op-energy-dev-instance/overlays/op-energy/
     - run: echo \"ci-host\" > ../op-energy-dev-instance/local_hostname.nix
     # ci-tests.nix should be on the same level as op-energy-dev-instance
