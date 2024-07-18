@@ -32,8 +32,8 @@ maybeCreateStrikes
      )
   => BlockHeader
   -> AppT m ()
-maybeCreateStrikes currentTip = do
-  ensureGuessableStrikeExistsAhead currentTip
+maybeCreateStrikes confirmedTip = do
+  ensureGuessableStrikeExistsAhead confirmedTip
 
 -- | this function creates necessary guessable strikes if they haven't been created yet as it tries to be idempotent.
 -- NOTE: currently, we use latest unconfirmed block height + Config.configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip as the minimum block height for a future strike.
@@ -43,7 +43,7 @@ ensureGuessableStrikeExistsAhead
      )
   => BlockHeader
   -> AppT m ()
-ensureGuessableStrikeExistsAhead currentTip = profile "ensureGuessableStrikeExistsAhead" $ do
+ensureGuessableStrikeExistsAhead confirmedTip = profile "ensureGuessableStrikeExistsAhead" $ do
   Account.State{ config = Config
          { configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip = configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
          , configBlockTimeStrikeShouldExistsAheadCurrentTip = configBlockTimeStrikeShouldExistsAheadCurrentTip
@@ -59,7 +59,7 @@ ensureGuessableStrikeExistsAhead currentTip = profile "ensureGuessableStrikeExis
       -- respect threshold of allowed guess
       let minimumStrikeHeight = latestUnconfirmedBlockHeight + naturalFromPositive configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
           maximumStrikeHeight = minimumStrikeHeight + naturalFromPositive configBlockTimeStrikeShouldExistsAheadCurrentTip
-      runLogging $ $(logDebug) ("ensureStrikeExistsAhead: currentTip: " <> tshow currentTip <>  ", min/max: " <> tshow [minimumStrikeHeight, maximumStrikeHeight])
+      runLogging $ $(logDebug) ("ensureStrikeExistsAhead: confirmedTip: " <> tshow confirmedTip <>  ", min/max: " <> tshow [minimumStrikeHeight, maximumStrikeHeight])
       nonExistentBlockHeights <- do
         now <- liftIO getCurrentTime
         withDBTransaction "" $ do
@@ -75,8 +75,8 @@ ensureGuessableStrikeExistsAhead currentTip = profile "ensureGuessableStrikeExis
             insert (BlockTimeStrike { blockTimeStrikeBlock = height
                                     , blockTimeStrikeStrikeMediantime =
                                       fromIntegral
-                                      $ blockHeaderMediantime currentTip
-                                      + fromIntegral ((fromNatural (height - blockHeaderHeight currentTip)) * 600) -- assume 10 minutes time slices for strike mediantime
+                                      $ blockHeaderMediantime confirmedTip
+                                      + fromIntegral ((fromNatural (height - blockHeaderHeight confirmedTip)) * 600) -- assume 10 minutes time slices for strike mediantime
                                     , blockTimeStrikeCreationTime = utcTimeToPOSIXSeconds now
                                     , blockTimeStrikeObservedResult = Nothing
                                     , blockTimeStrikeObservedBlockMediantime = Nothing
