@@ -74,7 +74,7 @@ type BlockTimeV1API
   :<|> "strikes"
     :> "page"
     :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
-    :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter. Available filter options are listed in the format of current field. Meaning of fields' suffixes: 'GTE' - 'great-than-or-equal', 'LTE'- 'less-than-or-equal', 'EQ' - equal, 'NEQ' - 'not equal'. 'sort' field can have those values: 'descend', 'ascend'. 'class' field can have those values: 'guessable', 'outcomeKnown', 'outcomeUnknown'" ] "filter" (FilterRequest BlockTimeStrike BlockTimeStrikeFilter)
+    :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter. Available filter options are listed in the format of current field. Meaning of fields' suffixes: 'GTE' - 'great-than-or-equal', 'LTE'- 'less-than-or-equal', 'EQ' - equal, 'NEQ' - 'not equal'. 'sort' field can have those values: 'descend', 'ascend', 'ascend_guesses_count' or 'descend_guesses_count'. '*_guesses_count' options changes sort orders by guesses count instead of block strike id. 'class' field can have those values: 'guessable', 'outcomeKnown', 'outcomeUnknown'" ] "filter" (FilterRequest BlockTimeStrike BlockTimeStrikeFilter)
     :> Description "returns list of strikes. By default, results are ordered by strike id in descending order. (ie, from newer to older)"
     :> Get '[JSON] (PagingResult BlockTimeStrikePublic)
 

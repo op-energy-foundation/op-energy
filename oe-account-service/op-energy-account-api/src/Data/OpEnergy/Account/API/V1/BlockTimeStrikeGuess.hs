@@ -44,6 +44,7 @@ import           Data.OpEnergy.Account.API.V1.Common
 import           Data.OpEnergy.Account.API.V1.FilterRequest
 import           Data.OpEnergy.API.V1.Block(BlockHeight)
 import           Data.OpEnergy.API.V1.Positive(Positive)
+import           Data.OpEnergy.API.V1.Natural(Natural)
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
 
 share [mkPersist sqlSettings, mkMigrate "migrateBlockTimeStrikeGuess"] [persistLowerCase|
@@ -57,6 +58,14 @@ BlockTimeStrikeGuess
   person PersonId
   -- constraints
   UniqueBlockTimeStrikeGuessPersonStrike person strike -- only 1 guess per strike is allowed for person
+  deriving Eq Show Generic
+
+-- this table's goal is to contain precalculated guesses count for a given strike. The reason
+-- it exists is to eliminate a need of walking through the db in order to return a result
+-- sorted by guesses count
+CalculatedBlockTimeStrikeGuessesCount
+  strike BlockTimeStrikeId
+  guessesCount (Natural Int)
   deriving Eq Show Generic
 |]
 
