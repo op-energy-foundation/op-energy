@@ -210,27 +210,29 @@ getBlockTimeStrikesGuessesPage
   -> Maybe (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
   -> AppM (PagingResult BlockTimeStrikeGuessPublic)
 getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuessesPage" $ do
+  latestUnconfirmedBlockHeightV <- asks (BlockTime.latestUnconfirmedBlockHeight . blockTimeState)
+  mlatestUnconfirmedBlockHeight <- liftIO $ TVar.readTVarIO latestUnconfirmedBlockHeightV
+  configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip <- asks (configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip . config)
   recordsPerReply <- asks (configRecordsPerReply . config)
-  latestConfirmedBlockV <- asks (BlockTime.latestConfirmedBlock . blockTimeState)
-  mlatestConfirmedBlock <- liftIO $ TVar.readTVarIO latestConfirmedBlockV
-  averageBlockDiscoverSecs <- asks (configAverageBlockDiscoverSecs . config)
-  minimumBlocksAhead <- asks (configBlockTimeStrikeMinimumBlockAheadCurrentTip . config)
   let
       linesPerPage = maybe recordsPerReply (maybe recordsPerReply id . blockTimeStrikeGuessResultPublicFilterLinesPerPage . fst . unFilterRequest ) mfilter
-  case mlatestConfirmedBlock of
+  case mlatestUnconfirmedBlockHeight of
     Nothing -> do
       let msg = "getBlockTimeStrikesGuessesPage: no confirmed block found yet"
       runLogging $  $(logError) msg
       throwJSON err500 msg
-    Just confirmedBlock -> do
+    Just latestUnconfirmedBlockHeight -> do
       let finalFilter =
             case maybe Nothing (blockTimeStrikeGuessResultPublicFilterClass . fst . unFilterRequest) mfilter of
               Nothing -> filter
               Just BlockTimeStrikeFilterClassGuessable ->
-                ( (BlockTimeStrikeBlock >=. (blockHeaderHeight confirmedBlock + naturalFromPositive minimumBlocksAhead))
-                 :(BlockTimeStrikeStrikeMediantime >=. (fromIntegral (blockHeaderMediantime confirmedBlock) + (fromIntegral $ minimumBlocksAhead * averageBlockDiscoverSecs)))
-                 :filter
-                )
+                let
+                    minimumGuessableBlock = latestUnconfirmedBlockHeight + naturalFromPositive configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
+                in
+                  ( (BlockTimeStrikeBlock >=. minimumGuessableBlock) -- block height should match threshold
+                  : (BlockTimeStrikeObservedResult ==. Nothing) -- and it should not be discovered yet
+                  :filter
+                  )
               Just BlockTimeStrikeFilterClassOutcomeKnown ->
                 ( (BlockTimeStrikeObservedResult !=. Nothing)
                  :filter

@@ -75,7 +75,7 @@ schedulerIteration = return ()
 
 
 -- | This function is the entry point for websocket client with which blocktime strike service will receive
--- notifications about discover new current tip
+-- notifications about discover new confirmed tip
 runBlockSpanClient :: MonadIO m => AppT m ()
 runBlockSpanClient = do
   state@State{ config = Config { configBlockTimeStrikeBlockSpanWebsocketAPIURL = burl}
@@ -88,28 +88,31 @@ runBlockSpanClient = do
     clientMain :: State-> Connection-> IO ()
     clientMain state conn = do
       WS.sendTextData conn $! ActionInit -- send initial message to backend
-      receiveCurrentTipInLoop state conn
-    -- | receive new current tip notifications from backend
-    receiveCurrentTipInLoop :: State -> Connection-> IO ()
-    receiveCurrentTipInLoop state conn = do
+      receiveConfirmedTipInLoop state conn
+    -- | receive new confirmed tip notifications from backend
+    receiveConfirmedTipInLoop :: State -> Connection-> IO ()
+    receiveConfirmedTipInLoop state conn = do
       (tmsg :: Text) <- WS.receiveData conn
       let (mmsg :: Maybe Message) = Aeson.decode $ BS.fromStrict $ Text.encodeUtf8 tmsg
       case mmsg of
         Just msg -> handleMessage state msg
         Nothing -> return ()
-      receiveCurrentTipInLoop state conn
+      receiveConfirmedTipInLoop state conn
     -- | handle new message
     handleMessage _ MessagePong = return () -- ignore pong message
-    handleMessage state (MessageNewestBlockHeader header) = -- update current tip
+    handleMessage state (MessageNewestBlockHeader header unconfirmedBlockHeight) = -- update confirmed tip
       runAppT state $ do
         State{ blockTimeState =
                BlockTime.State
                { latestConfirmedBlock = latestConfirmedBlockV
-               , blockTimeStrikeCurrentTip = blockTimeStrikeCurrentTipV
+               , blockTimeStrikeConfirmedTip = blockTimeStrikeConfirmedTipV
+               , latestUnconfirmedBlockHeight = latestUnconfirmedBlockHeightV
                }
              } <- ask
 
-        runLogging $ $(logInfo) $ "received new current tip height: " <> (tshow $ blockHeaderHeight header)
+        runLogging $ $(logInfo) $ "received new confirmed tip height: " <> (tshow $ blockHeaderHeight header)
         liftIO $ do
-          STM.atomically $ TVar.writeTVar latestConfirmedBlockV (Just header) -- blocktime and guesses create handlers will need this info
-          MVar.putMVar blockTimeStrikeCurrentTipV header -- this way we will notify handler about new current tip
+          STM.atomically $ do
+            TVar.writeTVar latestConfirmedBlockV (Just header) -- blocktime and guesses create handlers will need this info
+            TVar.writeTVar latestUnconfirmedBlockHeightV (Just unconfirmedBlockHeight)
+          MVar.putMVar blockTimeStrikeConfirmedTipV header -- this way we will notify handler about new confirmed tip

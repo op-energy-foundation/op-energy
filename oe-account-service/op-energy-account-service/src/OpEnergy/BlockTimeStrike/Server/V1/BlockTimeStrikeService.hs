@@ -82,21 +82,21 @@ getBlockTimeStrikeFuturePage mpage mfilter = profile "getBlockTimeStrikeFuturePa
 createBlockTimeStrikeFuture :: AccountToken-> BlockHeight-> Natural Int-> AppM ()
 createBlockTimeStrikeFuture token blockHeight strikeMediantime = profile "createBlockTimeStrike" $ do
   State{ config = Config{ configBlockTimeStrikeMinimumBlockAheadCurrentTip = configBlockTimeStrikeMinimumBlockAheadCurrentTip}
-       , blockTimeState = BlockTime.State{ latestConfirmedBlock = latestConfirmedBlockV }
+       , blockTimeState = BlockTime.State{ latestUnconfirmedBlockHeight = latestUnconfirmedBlockHeightV }
        } <- ask
-  mlatestConfirmedBlock <- liftIO $ TVar.readTVarIO latestConfirmedBlockV
-  case mlatestConfirmedBlock of
+  mlatestUnconfirmedBlockHeight <- liftIO $ TVar.readTVarIO latestUnconfirmedBlockHeightV
+  case mlatestUnconfirmedBlockHeight of
     Nothing -> do
-      let err = "ERROR: createBlockTimeStrike: there is no current tip yet"
+      let err = "ERROR: createBlockTimeStrike: there is no current observed tip yet"
       runLogging $ $(logError) err
       throwJSON err400 err
     Just tip
-      | blockHeaderMediantime tip > fromIntegral strikeMediantime -> do
+      | tip > fromIntegral strikeMediantime -> do
         let err = "ERROR: strikeMediantime is in the past, which is not expected"
         runLogging $ $(logError) err
         throwJSON err400 err
     Just tip
-      | blockHeaderHeight tip + naturalFromPositive configBlockTimeStrikeMinimumBlockAheadCurrentTip > blockHeight -> do
+      | tip + naturalFromPositive configBlockTimeStrikeMinimumBlockAheadCurrentTip > blockHeight -> do
         let msg = "ERROR: createBlockTimeStrike: block height for new block time strike should be in the future + minimum configBlockTimeStrikeMinimumBlockAheadCurrentTip"
         runLogging $ $(logError) msg
         throwJSON err400 msg
@@ -160,16 +160,16 @@ getBlockTimeStrikePastPage mpage mfilter = profile "getBlockTimeStrikePastPage" 
 newTipHandlerLoop :: (MonadIO m, MonadMonitor m) => AppT m ()
 newTipHandlerLoop = forever $ do
   State{ blockTimeState = BlockTime.State
-         { blockTimeStrikeCurrentTip = currentTipV
+         { blockTimeStrikeConfirmedTip = confirmedTipV
          }
        } <- ask
-  -- get new current tip notification from upstream handler
-  currentTip <- liftIO $ MVar.takeMVar currentTipV
-  runLogging $ $(logInfo) $ "BlockTimeStrikeService: tipHandler: received new current tip height: " <> (tshow $ blockHeaderHeight currentTip)
-  -- find out any future strikes <= new current tip
+  -- get new confirmed tip notification from upstream handler
+  confirmedTip <- liftIO $ MVar.takeMVar confirmedTipV
+  runLogging $ $(logInfo) $ "BlockTimeStrikeService: tipHandler: received new confirmed tip height: " <> (tshow $ blockHeaderHeight confirmedTip)
+  -- find out any future strikes <= new confirmed tip
   profile "newTipHandlerIteration" $ do
-    _ <- observeStrikes currentTip
-    BlockTimeScheduledStrikeCreation.maybeCreateStrikes currentTip
+    _ <- observeStrikes confirmedTip
+    BlockTimeScheduledStrikeCreation.maybeCreateStrikes confirmedTip
   where
     observeStrikes confirmedBlock = profile "moveFutureStrikesToPastStrikes" $ do
       configBlockspanURL <- asks (configBlockspanURL . config)
@@ -213,32 +213,37 @@ newTipHandlerLoop = forever $ do
                         loop $! (cnt + 1)
               loop 0
             )
-      blockTimeStrikeMinimumBlockAheadCurrentTip <- asks (configBlockTimeStrikeMinimumBlockAheadCurrentTip . config)
-      _ <- withDBTransaction "byTime" $ do
-        C.runConduit
-          $ streamEntities
-            [ BlockTimeStrikeStrikeMediantime <=. (fromIntegral $ blockHeaderMediantime confirmedBlock)
-            , BlockTimeStrikeBlock >. blockHeaderHeight confirmedBlock + naturalFromPositive blockTimeStrikeMinimumBlockAheadCurrentTip -- don't resolve blocks, that had already discovered, but haven't been confirmed yet. It which will be observed soon and the result will be calculated by it's mediantime
-            , BlockTimeStrikeObservedResult ==. Nothing
-            ]
-            BlockTimeStrikeId
-            (PageSize (fromPositive recordsPerReply))
-            Descend
-            (Range Nothing Nothing)
-          .| ( do
-              let
-                  loop (cnt::Int) = do
-                    mv <- C.await
-                    case mv of
-                      Nothing -> do
-                        liftIO $ runLoggingIO state $ $(logDebug) ("calculated results for " <> tshow cnt <> " strikes by reaching time")
-                      Just (Entity strikeId _) -> do
-                        lift $ update strikeId -- we only get result, as no block had been observed yet
-                          [ BlockTimeStrikeObservedResult =. Just Slow
-                          ]
-                        loop $! (cnt + 1)
-              loop 0
-            )
+      latestUnconfirmedBlockHeightV <- asks (BlockTime.latestUnconfirmedBlockHeight . blockTimeState)
+      mlatestUnconfirmedBlockHeight <- liftIO $ TVar.readTVarIO latestUnconfirmedBlockHeightV
+      _ <- case mlatestUnconfirmedBlockHeight of
+        Nothing -> return ()
+        Just latestUnconfirmedBlockHeight -> do
+          _ <- withDBTransaction "byTime" $ do
+            C.runConduit
+              $ streamEntities
+                [ BlockTimeStrikeStrikeMediantime <=. (fromIntegral $ blockHeaderMediantime confirmedBlock)
+                , BlockTimeStrikeBlock >. latestUnconfirmedBlockHeight -- don't resolve blocks, that had already discovered, but haven't been confirmed yet. It which will be observed soon and the result will be calculated by it's mediantime
+                , BlockTimeStrikeObservedResult ==. Nothing
+                ]
+                BlockTimeStrikeId
+                (PageSize (fromPositive recordsPerReply))
+                Descend
+                (Range Nothing Nothing)
+              .| ( do
+                  let
+                      loop (cnt::Int) = do
+                        mv <- C.await
+                        case mv of
+                          Nothing -> do
+                            liftIO $ runLoggingIO state $ $(logDebug) ("calculated results for " <> tshow cnt <> " strikes by reaching time")
+                          Just (Entity strikeId _) -> do
+                            lift $ update strikeId -- we only get result, as no block had been observed yet
+                              [ BlockTimeStrikeObservedResult =. Just Slow
+                              ]
+                            loop $! (cnt + 1)
+                  loop 0
+                )
+          return ()
       return ()
 
 -- | returns list of BlockTimeStrikePublic records
@@ -247,24 +252,22 @@ getBlockTimeStrikesPage
   -> Maybe (FilterRequest BlockTimeStrike BlockTimeStrikeFilter)
   -> AppM (PagingResult BlockTimeStrikePublic)
 getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
-  latestConfirmedBlockV <- asks (BlockTime.latestConfirmedBlock . blockTimeState)
-  mlatestConfirmedBlock <- liftIO $ TVar.readTVarIO latestConfirmedBlockV
-  averageBlockDiscoverSecs <- asks (configAverageBlockDiscoverSecs . config)
-  minimumBlocksAhead <- asks (configBlockTimeStrikeMinimumBlockAheadCurrentTip . config)
-  case mlatestConfirmedBlock of
-    Nothing -> do
-      let msg = "getBlockTimeStrikesPage: no confirmed block found yet"
-      runLogging $  $(logError) msg
-      throwJSON err500 msg
-    Just confirmedBlock -> do
+  latestUnconfirmedBlockHeightV <- asks (BlockTime.latestUnconfirmedBlockHeight . blockTimeState)
+  mlatestUnconfirmedBlockHeight <- liftIO $ TVar.readTVarIO latestUnconfirmedBlockHeightV
+  configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip <- asks (configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip . config)
+  case mlatestUnconfirmedBlockHeight of
+    Just latestUnconfirmedBlockHeight -> do
       let finalFilter =
             case maybe Nothing (blockTimeStrikeFilterClass . fst . unFilterRequest) mfilter of
               Nothing -> filter
               Just BlockTimeStrikeFilterClassGuessable ->
-                ( (BlockTimeStrikeBlock >=. blockHeaderHeight confirmedBlock + naturalFromPositive minimumBlocksAhead)
-                 :(BlockTimeStrikeStrikeMediantime >=. (fromIntegral (blockHeaderMediantime confirmedBlock) + (fromIntegral $ minimumBlocksAhead * averageBlockDiscoverSecs)))
-                 :filter
-                )
+                let
+                    minimumGuessableBlock = latestUnconfirmedBlockHeight + naturalFromPositive configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
+                in
+                  ( (BlockTimeStrikeBlock >=. minimumGuessableBlock) -- block height should match threshold
+                  : (BlockTimeStrikeObservedResult ==. Nothing) -- and it should not be discovered yet
+                  :filter
+                  )
               Just BlockTimeStrikeFilterClassOutcomeKnown ->
                 ( (BlockTimeStrikeObservedResult !=. Nothing)
                  :filter
@@ -278,6 +281,10 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
         Nothing -> do
           throwJSON err500 ("something went wrong"::Text)
         Just ret -> return ret
+    _ -> do
+      let msg = "getBlockTimeStrikesPage: no confirmed block found yet"
+      runLogging $  $(logError) msg
+      throwJSON err500 msg
   where
     sort = maybe Descend (sortOrder . unFilterRequest) mfilter
     filter = (maybe [] (buildFilter . unFilterRequest) mfilter)
