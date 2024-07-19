@@ -66,6 +66,7 @@ BlockTimeStrikeGuess
 CalculatedBlockTimeStrikeGuessesCount
   strike BlockTimeStrikeId
   guessesCount (Natural Int)
+  UniqueCalculatedBlockTimeStrikeGuessesCountStrike strike -- allow only one record per strike
   deriving Eq Show Generic
 |]
 

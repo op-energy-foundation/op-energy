@@ -126,7 +126,7 @@ createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess = prof
             update guessesCountId
               [ CalculatedBlockTimeStrikeGuessesCountGuessesCount +=. verifyNatural 1
               ]
-          Nothing -> do -- no record exist yet, recalculate to be idemponent TODO: maybe it is a bad place to recalculate and we need some kind of scheduled task for this
+          Nothing -> do -- no record exist yet, recalculate to be idempotent TODO: maybe it is a bad place to recalculate and we need some kind of scheduled task for this
             guessesCount <- count [ BlockTimeStrikeGuessStrike ==. strikeKey ]
             void $! insert $! CalculatedBlockTimeStrikeGuessesCount
               { calculatedBlockTimeStrikeGuessesCountGuessesCount = verifyNatural guessesCount
