@@ -20,6 +20,7 @@ import           Control.Monad.Logger( logError)
 import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
 import qualified Control.Concurrent.STM.TVar as TVar
+import           Control.Monad(void)
 import qualified Data.List as List
 import           Data.Text(Text)
 
@@ -119,6 +120,18 @@ createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess = prof
               , blockTimeStrikeGuessStrike = strikeKey
               }
         _ <- insert value
+        mguessesCount <- selectFirst [ CalculatedBlockTimeStrikeGuessesCountStrike ==. strikeKey ][]
+        case mguessesCount of
+          Just (Entity guessesCountId _) -> -- there is a record of precalculated counts, update it
+            update guessesCountId
+              [ CalculatedBlockTimeStrikeGuessesCountGuessesCount +=. verifyNatural 1
+              ]
+          Nothing -> do -- no record exist yet, recalculate to be idempotent TODO: maybe it is a bad place to recalculate and we need some kind of scheduled task for this
+            guessesCount <- count [ BlockTimeStrikeGuessStrike ==. strikeKey ]
+            void $! insert $! CalculatedBlockTimeStrikeGuessesCount
+              { calculatedBlockTimeStrikeGuessesCountGuessesCount = verifyNatural guessesCount
+              , calculatedBlockTimeStrikeGuessesCountStrike = strikeKey
+              }
         return value
 
 -- | O(ln accounts) + O(BlockTimeStrikePast).
@@ -313,7 +326,7 @@ getBlockTimeStrikeGuessesPage
   -> Maybe (Natural Int)
   -> Maybe (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
   -> AppM (PagingResult BlockTimeStrikeGuessPublic)
-getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilter = profile "getBlockTimeStrikesGuessesPage" $ do
+getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilter = profile "getBlockTimeStrikeGuessesPage" $ do
   recordsPerReply <- asks (configRecordsPerReply . config)
   let
       linesPerPage = maybe recordsPerReply (maybe recordsPerReply id . blockTimeStrikeGuessResultPublicFilterLinesPerPage . fst . unFilterRequest ) mfilter

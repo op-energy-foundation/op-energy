@@ -74,7 +74,7 @@ data BlockTimeStrikeFilter = BlockTimeStrikeFilter
   , blockTimeStrikeFilterStrikeBlockHeightNEQ       :: Maybe BlockHeight
   , blockTimeStrikeFilterObservedBlockHashEQ        :: Maybe BlockHash
   , blockTimeStrikeFilterObservedBlockHashNEQ       :: Maybe BlockHash
-  , blockTimeStrikeFilterSort                       :: Maybe SortOrder
+  , blockTimeStrikeFilterSort                       :: Maybe StrikeSortOrder
   , blockTimeStrikeFilterClass                      :: Maybe BlockTimeStrikeFilterClass
   , blockTimeStrikeFilterLinesPerPage               :: Maybe (Positive Int)
   }
@@ -106,7 +106,7 @@ defaultBlockTimeStrikeFilter = BlockTimeStrikeFilter
   , blockTimeStrikeFilterStrikeBlockHeightNEQ  = Just 1
   , blockTimeStrikeFilterObservedBlockHashEQ   = Just BlockHash.defaultHash
   , blockTimeStrikeFilterObservedBlockHashNEQ  = Just BlockHash.defaultHash
-  , blockTimeStrikeFilterSort                  = Just Descend
+  , blockTimeStrikeFilterSort                  = Just StrikeSortOrderDescend
   , blockTimeStrikeFilterClass                 = Just BlockTimeStrikeFilterClassGuessable
   , blockTimeStrikeFilterLinesPerPage          = Just 100
   }
@@ -204,7 +204,7 @@ instance FromHttpApiData BlockTimeStrikeFilter where
     Left some -> Left (Text.pack some)
     Right some -> Right some
 instance BuildFilter BlockTimeStrike BlockTimeStrikeFilter where
-  sortOrder (filter, _) = maybe Descend id (blockTimeStrikeFilterSort filter)
+  sortOrder (filter, _) = maybe Descend sortOrderFromStrikeSortOrder (blockTimeStrikeFilterSort filter)
   buildFilter ( BlockTimeStrikeFilter
                 mstrikeMediantimeGTE
                 mstrikeMediantimeLTE
@@ -232,3 +232,53 @@ instance BuildFilter BlockTimeStrike BlockTimeStrikeFilter where
     , maybe [] (\v-> [BlockTimeStrikeObservedBlockHash ==. Just v]) mobservedBlockHashEQ
     , maybe [] (\v-> [BlockTimeStrikeObservedBlockHash !=. Just v]) mobservedBlockHashNEQ
     ]
+
+-- | we need to use separate sort order as we can sort strikes by guesses count
+data StrikeSortOrder
+  = StrikeSortOrderAscend
+  | StrikeSortOrderDescend
+  | StrikeSortOrderAscendGuessesCount
+  | StrikeSortOrderDescendGuessesCount
+  deriving (Eq, Generic, Bounded, Enum)
+
+instance ToJSON StrikeSortOrder where
+  toJSON = toJSON . Text.pack . show
+instance FromJSON StrikeSortOrder where
+  parseJSON = withText "SortOrder" $! pure . verifyStrikeSortOrder
+instance ToSchema StrikeSortOrder where
+  declareNamedSchema _ = pure $ NamedSchema (Just "SortOrder") $ mempty
+    & type_ ?~ SwaggerString
+instance ToParamSchema StrikeSortOrder where
+  toParamSchema _ = mempty
+    & type_ ?~ SwaggerString
+    & enum_ ?~ (map toJSON $ enumFrom Ascend)
+instance ToHttpApiData StrikeSortOrder where
+  toUrlPiece = Text.pack . show
+instance FromHttpApiData StrikeSortOrder where
+  parseUrlPiece = verifyStrikeSortOrderEither
+
+instance Show StrikeSortOrder where
+  show StrikeSortOrderAscend = "ascend"
+  show StrikeSortOrderAscendGuessesCount = "ascend_guesses_count"
+  show StrikeSortOrderDescend = "descend"
+  show StrikeSortOrderDescendGuessesCount = "descend_guesses_count"
+
+sortOrderFromStrikeSortOrder :: StrikeSortOrder -> SortOrder
+sortOrderFromStrikeSortOrder StrikeSortOrderAscend = Ascend
+sortOrderFromStrikeSortOrder StrikeSortOrderAscendGuessesCount = Ascend
+sortOrderFromStrikeSortOrder StrikeSortOrderDescend = Descend
+sortOrderFromStrikeSortOrder StrikeSortOrderDescendGuessesCount = Descend
+
+verifyStrikeSortOrderEither :: Text -> Either Text StrikeSortOrder
+verifyStrikeSortOrderEither t =
+  case found of
+    [] -> Left "verifyStrikeSortOrderEither: wrong value"
+    ((v, _):_) -> Right v
+  where
+    found = List.dropWhile (\(_, v)-> v /= t) $ List.map (\v -> (v, Text.pack (show v))) $ enumFrom minBound
+
+verifyStrikeSortOrder :: Text-> StrikeSortOrder
+verifyStrikeSortOrder v =
+  case verifyStrikeSortOrderEither v of
+    Right some -> some
+    Left some -> error $ Text.unpack some

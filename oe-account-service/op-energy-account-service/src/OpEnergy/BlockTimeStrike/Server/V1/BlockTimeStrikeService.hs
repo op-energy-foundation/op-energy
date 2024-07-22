@@ -292,11 +292,49 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
       recordsPerReply <- asks (configRecordsPerReply . config)
       let
           linesPerPage = maybe recordsPerReply (maybe recordsPerReply id . blockTimeStrikeFilterLinesPerPage . fst . unFilterRequest ) mfilter
-      pagingResult mpage linesPerPage finalFilter sort BlockTimeStrikeId
-        $ ( C.awaitForever $ \(Entity strikeId strike) -> do
-            resultsCnt <- lift $ count [ BlockTimeStrikeGuessStrike ==. strikeId ]
-            C.yield (BlockTimeStrikePublic {blockTimeStrikePublicStrike = strike, blockTimeStrikePublicGuessesCount = fromIntegral resultsCnt})
-          )
+      let
+          eGuessesCount = case (maybe StrikeSortOrderDescend (maybe StrikeSortOrderDescend id . blockTimeStrikeFilterSort . fst . unFilterRequest) mfilter) of
+            StrikeSortOrderAscend -> Left ()
+            StrikeSortOrderDescend -> Left ()
+            StrikeSortOrderAscendGuessesCount ->  Right ()
+            StrikeSortOrderDescendGuessesCount -> Right ()
+      case eGuessesCount of
+        Left () -> pagingResult mpage linesPerPage finalFilter sort BlockTimeStrikeId
+          $ ( C.awaitForever $ \(Entity strikeId strike) -> do
+              mguessesCount <- lift $ selectFirst
+                [ CalculatedBlockTimeStrikeGuessesCountStrike ==. strikeId]
+                []
+              guessesCount <- case mguessesCount of
+                Just (Entity _ guessesCount) -> -- results are already calculated
+                  return (calculatedBlockTimeStrikeGuessesCountGuessesCount guessesCount)
+                Nothing -> do -- fallback mode, recount online, which maybe a bad thing to do here TODO decide if it should be removed
+                  guessesCount <- lift $ verifyNatural <$> count [ BlockTimeStrikeGuessStrike ==. strikeId ]
+                  _ <- lift $ insert $! CalculatedBlockTimeStrikeGuessesCount
+                    { calculatedBlockTimeStrikeGuessesCountStrike = strikeId
+                    , calculatedBlockTimeStrikeGuessesCountGuessesCount = guessesCount
+                    }
+                  return guessesCount
+              C.yield (BlockTimeStrikePublic
+                       { blockTimeStrikePublicStrike = strike
+                       , blockTimeStrikePublicGuessesCount = fromIntegral guessesCount
+                       }
+                      )
+            )
+        Right () -> pagingResult mpage linesPerPage [] sort CalculatedBlockTimeStrikeGuessesCountGuessesCount
+          $ ( C.awaitForever $ \(Entity _ guessesCount) -> do
+              mstrike <- lift $ selectFirst
+                ((BlockTimeStrikeId ==. calculatedBlockTimeStrikeGuessesCountStrike guessesCount)
+                 :finalFilter
+                )
+                []
+              case mstrike of
+                Just (Entity _ strike) -> C.yield (BlockTimeStrikePublic
+                        { blockTimeStrikePublicStrike = strike
+                        , blockTimeStrikePublicGuessesCount = fromIntegral (calculatedBlockTimeStrikeGuessesCountGuessesCount guessesCount)
+                        }
+                       )
+                Nothing -> return ()
+            )
 
 -- | returns BlockTimeStrikePublic records
 getBlockTimeStrike
