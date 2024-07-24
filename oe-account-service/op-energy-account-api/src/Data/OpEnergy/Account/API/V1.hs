@@ -56,7 +56,7 @@ type BlockTimeV1API
     :> WebSocket
 
   :<|> "strike"
-    :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "AccountToken" AccountToken -- require authentication
+    :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "Authorization" AccountToken -- require authentication
     :> Capture "BlockHeight" BlockHeight
     :> Capture "StrikeMediantime" (Natural Int)
     :> Description "Creates new time strike by given BlockHeight and strike mediantime. Requires authentication. Where: BlockHeight - height of the block in the future. It is expected, that it should be at least at 12 block in the future than current confirmed tip. StrikeMediantime is a POSIX time in the future."
@@ -64,7 +64,7 @@ type BlockTimeV1API
 
   :<|> "strike"
     :> "guess"
-    :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "AccountToken" AccountToken -- require authentication
+    :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "Authorization" AccountToken -- require authentication
     :> Capture "BlockHeight" BlockHeight
     :> Capture "StrikeMediantime" (Natural Int)
     :> Capture "guess" SlowFast
@@ -104,7 +104,7 @@ type BlockTimeV1API
 
   :<|> "strike"
     :> "guess"
-    :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "AccountToken" AccountToken -- require authentication
+    :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "Authorization" AccountToken -- require authentication
     :> Capture "BlockHeight" BlockHeight
     :> Capture "StrikeMediantime" (Natural Int)
     :> Description "returns user's guess for the given blocktime strike."
