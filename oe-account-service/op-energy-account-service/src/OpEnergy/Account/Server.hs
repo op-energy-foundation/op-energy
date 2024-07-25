@@ -74,6 +74,7 @@ runServer = do
           :<|> OpEnergy.Account.Server.V1.accountServer
           :<|> (return blockTimeApiSwagger)
           :<|> OpEnergy.BlockTimeStrike.Server.V1.blockTimeServer
+          :<|> (return internalBlockTimeApiSwagger) -- serve swagger for internal block time API
 
 -- | tasks, that should be running during start
 bootstrapTasks :: (MonadLoggerIO m, MonadMonitor m) => State -> m ()

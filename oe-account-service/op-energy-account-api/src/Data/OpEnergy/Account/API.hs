@@ -54,6 +54,7 @@ type API
   :<|> AccountAPI
   :<|> BlockTimeSwaggerAPI
   :<|> BlockTimeAPI
+  :<|> "api" :> "v1" :> "blocktime" :> "internal" :> InternalBlockTimeSwaggerAPI -- serve swagger internal API with public API
 
 -- | Combined internal API
 type InternalSwaggerBlockTimeAPI
