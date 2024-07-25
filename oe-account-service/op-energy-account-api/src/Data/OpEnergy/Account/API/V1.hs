@@ -15,6 +15,7 @@ import           Control.Lens
 import           GHC.Generics
 import           Data.Typeable              (Typeable)
 import           Data.Aeson
+import           Data.Default
 
 import           Servant.API
 import           Servant.API.WebSocket (WebSocket)
@@ -22,6 +23,7 @@ import           Servant.API.WebSocket (WebSocket)
 import           Data.OpEnergy.API.V1(GitHashResponse)
 import           Data.OpEnergy.API.V1.Block
 import           Data.OpEnergy.API.V1.Natural
+import           Data.OpEnergy.API.V1.Positive(Positive, verifyPositive)
 import           Data.OpEnergy.Account.API.V1.Account
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
@@ -122,6 +124,38 @@ type BlockTimeV1API
   :<|> "git-hash"
     :> Description "returns short hash of commit of the op-energy git repo that had been used to build backend"
     :> Get '[JSON] GitHashResponse
+
+type InternalBlockTimeV1API
+  = "currenttip"
+    :> Description "returns current confirmed block header tip, unconfirmed block height and amount of minimum blocks ahead of unconfirmed block that can be considered as guessable strike"
+    :> Get '[JSON] CurrentTipResponse
+
+  :<|> "strike"
+    :> Capture "BlockHeight" BlockHeight
+    :> Capture "StrikeMediantime" (Natural Int)
+    :> Description "Creates new time strike by given BlockHeight and strike mediantime. Where: BlockHeight - height of the block in the future. It is expected, that it should be at least at 12 block in the future than current confirmed tip. StrikeMediantime is a POSIX time in the future."
+    :> Post '[JSON] ()
+
+data CurrentTipResponse = CurrentTipResponse
+  { confirmedTip :: BlockHeader
+  , unconfirmedBlockHeight :: BlockHeight
+  , minimumGuessBlockAheadCurrentTip :: Positive Int
+  }
+  deriving (Show,Generic)
+instance ToJSON CurrentTipResponse
+instance FromJSON CurrentTipResponse
+instance Default CurrentTipResponse where
+  def = defaultCurrentTipResponse
+instance ToSchema CurrentTipResponse where
+  declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
+    & mapped.schema.description ?~ "CurrentTipResponse schema"
+    & mapped.schema.example ?~ toJSON defaultCurrentTipResponse
+defaultCurrentTipResponse :: CurrentTipResponse
+defaultCurrentTipResponse = CurrentTipResponse
+  { confirmedTip = defaultBlockHeader
+  , unconfirmedBlockHeight = defaultBlockHeight
+  , minimumGuessBlockAheadCurrentTip = verifyPositive 6
+  }
 
 type FakeWSAPI = Get '[JSON] ()
 

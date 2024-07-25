@@ -34,9 +34,9 @@ jsonCommonOptions singleton = defaultOptions
       (\s -> case s of
           [] -> []
           (first:rest)-> (Char.toLower first):rest
-      ) . (List.drop $ List.length $ List.takeWhile (not . Char.isSpace) $ show singleton)
+      ) . (List.drop $ List.length $ List.takeWhile (Char.isAlphaNum) $ show singleton)
     , constructorTagModifier = \v ->
-      case (List.drop $ List.length $ List.takeWhile (not . Char.isSpace) $ show singleton) v of
+      case (List.drop $ List.length $ List.takeWhile (Char.isAlphaNum) $ show singleton) v of
         [] -> List.map Char.toLower v
         (first:rest)-> (Char.toLower first):rest
     }

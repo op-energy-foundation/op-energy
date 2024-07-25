@@ -20,6 +20,9 @@ accountAPI = Proxy
 blockTimeAPI :: Proxy BlockTimeAPI
 blockTimeAPI = Proxy
 
+internalBlockTimeAPI :: Proxy InternalBlockTimeAPI
+internalBlockTimeAPI = Proxy
+
 accountBlockTimeAPI :: Proxy AccountBlockTimeAPI
 accountBlockTimeAPI = Proxy
 
@@ -28,6 +31,9 @@ type AccountAPI
 
 type BlockTimeAPI
   = "api" :> "v1" :> "blocktime" :> BlockTimeV1API {- V1 API -}
+
+type InternalBlockTimeAPI
+  = "api" :> "v1" :> "blocktime" :> InternalBlockTimeV1API {- V1 API -}
 
 -- | Composition of Account and Blocktime APIs
 type AccountBlockTimeAPI
@@ -39,12 +45,20 @@ type AccountSwaggerAPI
 type BlockTimeSwaggerAPI
   = "api" :> "v1" :> "blocktime" :> "swagger.json" :> Get '[JSON] Swagger
 
+type InternalBlockTimeSwaggerAPI
+  = "api" :> "v1" :> "blocktime" :> "swagger.json" :> Get '[JSON] Swagger
+
 -- | Combined API of a Account, BlockTime services with Swagger documentation.
 type API
   = AccountSwaggerAPI
   :<|> AccountAPI
   :<|> BlockTimeSwaggerAPI
   :<|> BlockTimeAPI
+
+-- | Combined internal API
+type InternalSwaggerBlockTimeAPI
+  =    InternalBlockTimeSwaggerAPI
+  :<|> InternalBlockTimeAPI
 
 -- | Swagger spec for Todo API.
 accountApiSwagger :: Swagger
@@ -57,6 +71,13 @@ accountApiSwagger = toSwagger accountAPI
 blockTimeApiSwagger :: Swagger
 blockTimeApiSwagger = toSwagger blockTimeAPI
   & info.title   .~ "OpEnergy BlockTime API"
+  & info.version .~ "1.0"
+  & info.description ?~ "OpEnergy"
+  & info.license ?~ ("MIT" & url ?~ URL "http://mit.com")
+
+internalBlockTimeApiSwagger :: Swagger
+internalBlockTimeApiSwagger = toSwagger internalBlockTimeAPI
+  & info.title   .~ "OpEnergy Internal BlockTime API"
   & info.version .~ "1.0"
   & info.description ?~ "OpEnergy"
   & info.license ?~ ("MIT" & url ?~ URL "http://mit.com")
