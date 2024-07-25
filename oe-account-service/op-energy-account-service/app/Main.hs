@@ -44,6 +44,9 @@ main = withSocketsDo {- needed for websocket client -} $ runStdoutLoggingT $ do
   blockTimeStrikeWebsocketClientA <- liftIO $ asyncBound $ runAppT state $ do -- this thread is for serving HTTP/websockets requests
     runLogging $ $(logInfo) "block time strike websocket client API"
     BlockTimeStrike.runBlockSpanClient
+  internalServerA <- liftIO $ asyncBound $ runAppT state $ do -- this thread is for serving HTTP/websockets requests
+    runLogging $ $(logInfo) "serving internal API"
+    BlockTimeStrike.runInternalServer
   serverA <- liftIO $ asyncBound $ runAppT state $ do -- this thread is for serving HTTP/websockets requests
     runLogging $ $(logInfo) "serving API"
     runServer
@@ -52,6 +55,7 @@ main = withSocketsDo {- needed for websocket client -} $ runStdoutLoggingT $ do
     BlockTimeStrike.newTipHandlerLoop
   liftIO $ waitAnyCancel $ -- waits for any of threads to shutdown in order to shutdown the rest
     [ serverA
+    , internalServerA
     , schedulerA
     , prometheusA
     , schedulerBlockTimeStrikeA

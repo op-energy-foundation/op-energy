@@ -12,6 +12,7 @@
 {-# LANGUAGE DuplicateRecordFields      #-}
 module OpEnergy.BlockTimeStrike.Server.V1
   ( blockTimeServer
+  , internalBlockTimeServer
   , schedulerIteration
   , runBlockSpanClient
   , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.newTipHandlerLoop
@@ -116,3 +117,8 @@ runBlockSpanClient = do
             TVar.writeTVar latestConfirmedBlockV (Just header) -- blocktime and guesses create handlers will need this info
             TVar.writeTVar latestUnconfirmedBlockHeightV (Just unconfirmedBlockHeight)
           MVar.putMVar blockTimeStrikeConfirmedTipV header -- this way we will notify handler about new confirmed tip
+
+internalBlockTimeServer :: ServerT InternalBlockTimeV1API (AppT Handler)
+internalBlockTimeServer = getCurrentTips
+  :<|> createBlockTimeStrikeUnauth
+

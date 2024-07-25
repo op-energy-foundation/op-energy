@@ -6,15 +6,18 @@
 {-# LANGUAGE GADTs                     #-}
 module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
   ( getBlockTimeStrikeFuturePage
+  , createBlockTimeStrikeUnauth
   , createBlockTimeStrikeFuture
   , newTipHandlerLoop
   , getBlockTimeStrikePastPage
   , getBlockTimeStrikesPage
   , getBlockTimeStrike
+  , getCurrentTips
   ) where
 
 import           Servant (err400, err500)
 import           Control.Monad.Trans.Reader (ask, asks)
+import           Control.Monad.Trans.Maybe(runMaybeT, MaybeT(..))
 import           Control.Monad.Logger(logDebug, logError, logInfo)
 import           Control.Monad(forever, when)
 import           Data.Time.Clock(getCurrentTime)
@@ -46,6 +49,7 @@ import           Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic
 import           Data.OpEnergy.Account.API.V1.PagingResult
 import           Data.OpEnergy.Account.API.V1.FilterRequest
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
+import           Data.OpEnergy.Account.API.V1(CurrentTipResponse(..))
 import           Data.OpEnergy.API.V1.Error(throwJSON)
 import           OpEnergy.Account.Server.V1.Config (Config(..))
 import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging, profile, withDBTransaction, runLoggingIO, withDBNOTransactionROUnsafe )
@@ -81,6 +85,18 @@ getBlockTimeStrikeFuturePage mpage mfilter = profile "getBlockTimeStrikeFuturePa
 -- Tries to create future block time strike. Requires authenticated user and blockheight should be in the future
 createBlockTimeStrikeFuture :: AccountToken-> BlockHeight-> Natural Int-> AppM ()
 createBlockTimeStrikeFuture token blockHeight strikeMediantime = profile "createBlockTimeStrike" $ do
+      mperson <- mgetPersonByAccountToken token
+      case mperson of
+        Nothing -> do
+          let err = "ERROR: createBlockTimeStrike: person was not able to authenticate itself"
+          runLogging $ $(logError) err
+          throwJSON err400 err
+        Just _ -> createBlockTimeStrikeUnauth blockHeight strikeMediantime
+
+-- | O(ln accounts).
+-- Tries to create future block time strike. Requires authenticated user and blockheight should be in the future
+createBlockTimeStrikeUnauth :: BlockHeight-> Natural Int-> AppM ()
+createBlockTimeStrikeUnauth blockHeight strikeMediantime = profile "createBlockTimeStrikeUnauth" $ do
   State{ config = Config{ configBlockTimeStrikeMinimumBlockAheadCurrentTip = configBlockTimeStrikeMinimumBlockAheadCurrentTip}
        , blockTimeState = BlockTime.State{ latestUnconfirmedBlockHeight = latestUnconfirmedBlockHeightV }
        } <- ask
@@ -101,21 +117,14 @@ createBlockTimeStrikeFuture token blockHeight strikeMediantime = profile "create
         runLogging $ $(logError) msg
         throwJSON err400 msg
     _ -> do
-      mperson <- mgetPersonByAccountToken token
-      case mperson of
+      mret <- createBlockTimeStrikeEnsuredConditions
+      case mret of
+        Just ret -> return ret
         Nothing -> do
-          let err = "ERROR: createBlockTimeStrike: person was not able to authenticate itself"
-          runLogging $ $(logError) err
-          throwJSON err400 err
-        Just person -> do
-          mret <- createBlockTimeStrikeEnsuredConditions person
-          case mret of
-            Just ret -> return ret
-            Nothing -> do
-              throwJSON err500 (("something went wrong")::Text)
+          throwJSON err500 (("something went wrong")::Text)
   where
-    createBlockTimeStrikeEnsuredConditions :: (MonadIO m, MonadMonitor m) => (Entity Person) -> AppT m (Maybe ())
-    createBlockTimeStrikeEnsuredConditions _ = do
+    createBlockTimeStrikeEnsuredConditions :: (MonadIO m, MonadMonitor m) => AppT m (Maybe ())
+    createBlockTimeStrikeEnsuredConditions = do
       nowUTC <- liftIO getCurrentTime
       let now = utcTimeToPOSIXSeconds nowUTC
       withDBTransaction "" $ insert_ $! BlockTimeStrike
@@ -369,3 +378,27 @@ getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $
                        Nothing -> return acc
                in loop Nothing
              )
+
+-- | returns current confirmed tip, unconfirmed block height and minimum blocks ahead to guess
+getCurrentTips :: AppM CurrentTipResponse
+getCurrentTips = profile "getCurrentTips" $ do
+  State{ config = Config{ configBlockTimeStrikeMinimumBlockAheadCurrentTip = configBlockTimeStrikeMinimumBlockAheadCurrentTip}
+       , blockTimeState = BlockTime.State{ latestUnconfirmedBlockHeight = latestUnconfirmedBlockHeightV
+                                         , latestConfirmedBlock = latestConfirmedBlockV
+                                         }
+       } <- ask
+  mret <- runMaybeT $ do
+    latestUnconfirmedBlockHeight <- MaybeT $ liftIO $ TVar.readTVarIO latestUnconfirmedBlockHeightV
+    latestConfirmedBlock <- MaybeT $ liftIO $ TVar.readTVarIO latestConfirmedBlockV
+    return (latestConfirmedBlock, latestUnconfirmedBlockHeight)
+  case mret of
+    Nothing -> do
+      let err = "ERROR: getCurrentTips: there is no tips yet"
+      runLogging $ $(logError) err
+      throwJSON err400 err
+    Just (tip, blockHeight)->
+      return $ CurrentTipResponse
+        { confirmedTip = tip
+        , unconfirmedBlockHeight = blockHeight
+        , minimumGuessBlockAheadCurrentTip  = configBlockTimeStrikeMinimumBlockAheadCurrentTip
+        }
