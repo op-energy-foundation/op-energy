@@ -61,15 +61,26 @@ BlockTimeStrike
 
 BlockTimeStrikeObserved
   -- data
-  result SlowFast
-  blockMediantime POSIXTime Maybe -- mediantime of the observed block. we decided to have this field redudancy
-  blockHash BlockHash Maybe -- hash of the observed block. BlockHash can be missing when strike observed by reaching desired strikeMediantime instead of observing block itself. In this case, block hash will be filled when block will be observed. we decided to have this field redudancy
+  blockMediantime POSIXTime -- mediantime of the observed block. we decided to have this field redudancy
+  blockHash BlockHash -- hash of the observed block.
   -- metadata
   creationTime POSIXTime
   -- reflinks
   strike BlockTimeStrikeId
   -- constraints
   UniqueBlocktimeStrikeObservationStrike strike -- unique per strike
+  deriving Eq Show Generic
+
+-- this table contains
+BlockTimeStrikeResult
+  -- data
+  result SlowFast
+  -- metadata
+  creationTime POSIXTime
+  -- reflinks
+  strike BlockTimeStrikeId
+  -- constraints
+  UniqueBlocktimeStrikeResultStrike strike -- unique per strike
   deriving Eq Show Generic
 |]
 
@@ -280,8 +291,8 @@ instance BuildFilter BlockTimeStrikeObserved BlockTimeStrikeFilter where
                 _ -- linesPerPage
               , _
               ) = List.concat
-    [ maybe [] (\v-> [BlockTimeStrikeObservedBlockHash ==. Just v]) mobservedBlockHashEQ
-    , maybe [] (\v-> [BlockTimeStrikeObservedBlockHash !=. Just v]) mobservedBlockHashNEQ
+    [ maybe [] (\v-> [BlockTimeStrikeObservedBlockHash ==. v]) mobservedBlockHashEQ
+    , maybe [] (\v-> [BlockTimeStrikeObservedBlockHash !=. v]) mobservedBlockHashNEQ
     ]
 
 -- | we need to use separate sort order as we can sort strikes by guesses count

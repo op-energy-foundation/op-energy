@@ -76,7 +76,7 @@ data BlockTimeStrikeGuessPublic = BlockTimeStrikeGuessPublic
   , creationTime :: POSIXTime
   , guess :: SlowFast
   }
-  deriving (Eq, Show, Generic)
+  deriving (Show, Generic)
 instance ToJSON BlockTimeStrikeGuessPublic
 instance ToSchema BlockTimeStrikeGuessPublic where
   declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikeGuessPublic") $ mempty
@@ -98,7 +98,7 @@ data BlockTimeStrikeGuessResultPublic = BlockTimeStrikeGuessResultPublic
   , strike :: BlockTimeStrike
   , creationTime :: POSIXTime
   , guess :: SlowFast
-  , observedResult :: SlowFast
+  , observedResult :: Maybe SlowFast
   }
   deriving (Eq, Show, Generic)
 instance ToJSON BlockTimeStrikeGuessResultPublic
@@ -114,7 +114,7 @@ defaultBlockTimeStrikeGuessResultPublic = BlockTimeStrikeGuessResultPublic
   , strike = defaultBlockTimeStrike
   , creationTime = defaultPOSIXTime
   , guess = defaultSlowFast
-  , observedResult = defaultSlowFast
+  , observedResult = Just defaultSlowFast
   }
 
 data BlockTimeStrikeGuessResultPublicFilter = BlockTimeStrikeGuessResultPublicFilter
@@ -275,7 +275,7 @@ instance BuildFilter BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter wher
     , maybe [] (\v -> [ BlockTimeStrikeStrikeMediantime ==. v]) mStrikeMediantimeEQ
     , maybe [] (\v -> [ BlockTimeStrikeStrikeMediantime !=. v]) mStrikeMediantimeNEQ
     ]
-instance BuildFilter BlockTimeStrikeObserved BlockTimeStrikeGuessResultPublicFilter where
+instance BuildFilter BlockTimeStrikeResult BlockTimeStrikeGuessResultPublicFilter where
   sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultPublicFilterSort filter)
   buildFilter ( BlockTimeStrikeGuessResultPublicFilter
                 -- person
@@ -304,8 +304,8 @@ instance BuildFilter BlockTimeStrikeObserved BlockTimeStrikeGuessResultPublicFil
               , _
               ) = List.concat
         -- strike observed result
-    [ maybe [] (\v -> [ BlockTimeStrikeObservedResult ==. v]) mObservedResultEQ
-    , maybe [] (\v -> [ BlockTimeStrikeObservedResult !=. v]) mObservedResultNEQ
+    [ maybe [] (\v -> [ BlockTimeStrikeResultResult ==. v]) mObservedResultEQ
+    , maybe [] (\v -> [ BlockTimeStrikeResultResult !=. v]) mObservedResultNEQ
     ]
 
 defaultBlockTimeStrikeGuessResultPublicFilter :: BlockTimeStrikeGuessResultPublicFilter
