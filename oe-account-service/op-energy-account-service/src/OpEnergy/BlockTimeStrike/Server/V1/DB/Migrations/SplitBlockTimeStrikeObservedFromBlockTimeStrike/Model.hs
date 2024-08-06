@@ -74,14 +74,25 @@ share [mkPersist sqlSettings, mkMigrate "createBlockTimeStrikeObserved"] [persis
 -- fields' types of this table 
 BlockTimeStrikeObserved
   -- data
-  result Int64
-  blockMediantime Word64 Maybe -- mediantime of the observed block. we decided to have this field redudancy
-  blockHash Text Maybe -- hash of the observed block. BlockHash can be missing when strike observed by reaching desired strikeMediantime instead of observing block itself. In this case, block hash will be filled when block will be observed. we decided to have this field redudancy
+  blockMediantime Word64 -- mediantime of the observed block. we decided to have this field redudancy
+  blockHash Text -- hash of the observed block. BlockHash can be missing when strike observed by reaching desired strikeMediantime instead of observing block itself. In this case, block hash will be filled when block will be observed. we decided to have this field redudancy
   -- metadata
   creationTime Word64
   -- reflinks
   strike BlockTimeStrikeId
   -- constraints
   UniqueBlocktimeStrikeObservationStrike strike -- unique per strike
+  deriving Eq Show Generic
+
+-- this model should contain only strike outcome
+BlockTimeStrikeResult
+  -- data
+  result Int64
+  -- metadata
+  creationTime Word64
+  -- reflinks
+  strike BlockTimeStrikeId
+  -- constraints
+  UniqueBlocktimeStrikeResultStrike strike -- unique per strike
   deriving Eq Show Generic
 |]

@@ -26,6 +26,7 @@ module OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.SplitBlockTimeStrikeObse
 
 import           Control.Monad.Trans.Reader(ReaderT)
 import           Control.Monad.Logger    ( NoLoggingT )
+import           Control.Monad(void)
 import           Data.Text(Text)
 import qualified Data.Text as Text
 import           Control.Monad.Trans
@@ -65,7 +66,7 @@ splitBlockTimeStrikeObservedFromBlockTimeStrike
 splitBlockTimeStrikeObservedFromBlockTimeStrike config = do
   -- 1. create block_time_strike_observed table
   runMigration createBlockTimeStrikeObserved
-  -- 2. fill up new table
+  -- 2. fill up new results table
   C.runConduit
     $ streamEntities
       [ BlockTimeStrikeObservedResult1 !=. Nothing ]
@@ -75,13 +76,29 @@ splitBlockTimeStrikeObservedFromBlockTimeStrike config = do
       (Range Nothing Nothing)
     .| ( C.awaitForever $ \(Entity strikeId strike) -> do
          now <- liftIO getPOSIXTime
-         lift $ insert $! BlockTimeStrikeObserved
-           { blockTimeStrikeObservedResult = observedResultToInt strike
-           , blockTimeStrikeObservedBlockMediantime = blockTimeStrikeObservedBlockMediantime1 strike
-           , blockTimeStrikeObservedBlockHash = blockTimeStrikeObservedBlockHash1 strike
-           , blockTimeStrikeObservedCreationTime = floor now
-           , blockTimeStrikeObservedStrike = strikeId
-           }
+         case ( blockTimeStrikeObservedResult1 strike
+              , do -- ensure that either both fields exist or none
+                hash <- blockTimeStrikeObservedBlockHash1 strike
+                mediantime <- blockTimeStrikeObservedBlockMediantime1 strike
+                return (hash, mediantime)
+              ) of
+           (Nothing, _) -> return () -- do nothing
+           (Just result, mObserved) -> do -- any result exist
+             -- move result
+             void $ lift $ insert $! BlockTimeStrikeResult
+               { blockTimeStrikeResultResult = slowFastToInt result
+               , blockTimeStrikeResultCreationTime = floor now
+               , blockTimeStrikeResultStrike = strikeId
+               }
+             case mObserved of
+               Nothing -> return ()
+               Just (hash, mediantime) -> do -- if observed, then move into BlockTimeStrikeObserved
+                 void $ lift $ insert $! BlockTimeStrikeObserved
+                   { blockTimeStrikeObservedBlockMediantime = mediantime
+                   , blockTimeStrikeObservedBlockHash = hash
+                   , blockTimeStrikeObservedCreationTime = floor now
+                   , blockTimeStrikeObservedStrike = strikeId
+                   }
        )
     .| C.sinkNull
   -- 3. remove old columns
@@ -93,10 +110,6 @@ splitBlockTimeStrikeObservedFromBlockTimeStrike config = do
              ) []
   where
     recordsPerReply = configRecordsPerReply config
-    observedResultToInt strike
-      | blockTimeStrikeObservedResult1 strike == Just "slow" = 0
-      | blockTimeStrikeObservedResult1 strike == Just "fast" = 1
-      | otherwise = error $ "observedResultToInt: unsupported value: " ++ show (blockTimeStrikeObservedResult1 strike)
 
 transformBlockTimeStrikeGuessGuessFromTextToInt
   :: Config
@@ -129,8 +142,10 @@ transformBlockTimeStrikeGuessGuessFromTextToInt config = do
     ]) []
   where
     recordsPerReply = configRecordsPerReply config
-    slowFastToInt :: Text-> Int64
-    slowFastToInt v
-      | v == "slow" = 0
-      | v == "fast" = 1
-      | otherwise = error $ "slowFastToInt: unsupported value: " ++ show v
+
+-- | convert text SlowFast into int
+slowFastToInt :: Text-> Int64
+slowFastToInt v
+  | v == "slow" = 0
+  | v == "fast" = 1
+  | otherwise = error $ "slowFastToInt: unsupported value: " ++ show v
