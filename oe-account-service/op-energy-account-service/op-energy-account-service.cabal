@@ -58,6 +58,8 @@ library
                    , OpEnergy.Account.Server.V1.AccountService
                    , OpEnergy.BlockTimeStrike.Server
                    , OpEnergy.BlockTimeStrike.Server.V1
+                   , OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.SplitBlockTimeStrikeObservedFromBlockTimeStrike
+                   , OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.SplitBlockTimeStrikeObservedFromBlockTimeStrike.Model
                    , OpEnergy.BlockTimeStrike.Server.V1.Class
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService

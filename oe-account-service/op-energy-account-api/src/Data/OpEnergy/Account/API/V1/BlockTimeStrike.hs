@@ -29,6 +29,7 @@ import qualified Data.Text.Encoding as Text
 import           Data.Time.Clock.POSIX(POSIXTime)
 import qualified Data.List as List
 import qualified Data.ByteString.Lazy as BS
+import           Data.Int(Int64)
 
 import           Servant.API(ToHttpApiData(..), FromHttpApiData(..))
 import           Database.Persist.TH
@@ -52,15 +53,24 @@ BlockTimeStrike
   -- data
   block BlockHeight
   strikeMediantime POSIXTime
-  observedResult SlowFast Maybe
-  observedBlockMediantime POSIXTime Maybe
-  observedBlockHash BlockHash Maybe
   -- metadata
   creationTime POSIXTime
   -- constraints
   UniqueBlockTimeStrikeBlockStrikeMediantime block strikeMediantime -- for now it is forbidden to have multiple strikes of the same (block,strikeMediantime) values
   deriving Eq Show Generic
 
+BlockTimeStrikeObserved
+  -- data
+  result SlowFast
+  blockMediantime POSIXTime Maybe -- mediantime of the observed block. we decided to have this field redudancy
+  blockHash BlockHash Maybe -- hash of the observed block. BlockHash can be missing when strike observed by reaching desired strikeMediantime instead of observing block itself. In this case, block hash will be filled when block will be observed. we decided to have this field redudancy
+  -- metadata
+  creationTime POSIXTime
+  -- reflinks
+  strike BlockTimeStrikeId
+  -- constraints
+  UniqueBlocktimeStrikeObservationStrike strike -- unique per strike
+  deriving Eq Show Generic
 |]
 
 data BlockTimeStrikeFilter = BlockTimeStrikeFilter
@@ -116,9 +126,6 @@ defaultBlockTimeStrike = BlockTimeStrike
   { blockTimeStrikeBlock = defaultBlockHeight
   , blockTimeStrikeStrikeMediantime = defaultPOSIXTime
   , blockTimeStrikeCreationTime = defaultPOSIXTime
-  , blockTimeStrikeObservedResult = Just Slow
-  , blockTimeStrikeObservedBlockMediantime = Just 1
-  , blockTimeStrikeObservedBlockHash = Just BlockHash.defaultHash
   }
 instance ToSchema BlockTimeStrike where
   declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrike") $ mempty
@@ -132,10 +139,36 @@ instance FromJSON BlockTimeStrike where
 instance Default BlockTimeStrike where
   def = defaultBlockTimeStrike
 
+data BlockTimeStrikeObservedPublic =  BlockTimeStrikeObservedPublic
+  { blockTimeStrikeObservedPublicBlockHash :: Maybe BlockHash
+  , blockTimeStrikeObservedPublicCreationTime :: POSIXTime
+  , blockTimeStrikeObservedPublicResult :: SlowFast
+  , blockTimeStrikeObservedPublicBlockMediantime :: Maybe POSIXTime
+  }
+  deriving (Eq, Show, Generic)
+defaultBlockTimeStrikeObservedPublic :: BlockTimeStrikeObservedPublic
+defaultBlockTimeStrikeObservedPublic =  BlockTimeStrikeObservedPublic
+  { blockTimeStrikeObservedPublicBlockHash = Just BlockHash.defaultHash
+  , blockTimeStrikeObservedPublicCreationTime = defaultPOSIXTime
+  , blockTimeStrikeObservedPublicResult = Slow
+  , blockTimeStrikeObservedPublicBlockMediantime = Just 1
+  }
+instance ToSchema BlockTimeStrikeObservedPublic where
+  declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikeObservedPublic") $ mempty
+    & type_ ?~ SwaggerObject
+    & example ?~ toJSON defaultBlockTimeStrikeObservedPublic
+instance ToJSON BlockTimeStrikeObservedPublic where
+  toJSON = commonToJSON genericToJSON
+  toEncoding = commonToJSON genericToEncoding
+instance FromJSON BlockTimeStrikeObservedPublic where
+  parseJSON = commonParseJSON
+instance Default BlockTimeStrikeObservedPublic where
+  def = defaultBlockTimeStrikeObservedPublic
+
 data SlowFast
   = Slow
   | Fast
-  deriving (Eq, Enum, Show, Generic)
+  deriving (Eq, Enum, Show, Bounded, Ord, Generic)
 
 instance ToJSON SlowFast where
   toJSON Slow = toJSON ("slow" :: Text)
@@ -143,13 +176,12 @@ instance ToJSON SlowFast where
 instance FromJSON SlowFast where
   parseJSON = withText "SlowFast" $! pure . verifySlowFast
 instance PersistField SlowFast where
-  toPersistValue Slow = toPersistValue ("slow"::Text)
-  toPersistValue Fast = toPersistValue ("fast"::Text)
-  fromPersistValue (PersistText "slow") = Prelude.Right $! Slow
-  fromPersistValue (PersistText "fast") = Prelude.Right $! Fast
-  fromPersistValue _ = Left $ "fromPersistValue SlowFastGuess, expected Text"
+  toPersistValue v = toPersistValue ((fromIntegral (fromEnum v))::Int64)
+  fromPersistValue (PersistInt64 v)
+    | fromIntegral v <= (fromEnum (maxBound::SlowFast)) = Prelude.Right $! toEnum (fromIntegral v)
+  fromPersistValue _ = Left $ "fromPersistValue SlowFastGuess, unsupported value"
 instance PersistFieldSql SlowFast where
-  sqlType _ = SqlString
+  sqlType _ = SqlInt64
 
 instance ToSchema SlowFast where
   declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
@@ -214,8 +246,8 @@ instance BuildFilter BlockTimeStrike BlockTimeStrikeFilter where
                 mstrikeBlockHeightLTE
                 mstrikeBlockHeightEQ
                 mstrikeBlockHeightNEQ
-                mobservedBlockHashEQ
-                mobservedBlockHashNEQ
+                _  -- mobservedBlockHashEQ
+                _  -- mobservedBlockHashNEQ
                 _ -- sort
                 _ -- class
                 _ -- linesPerPage
@@ -229,7 +261,26 @@ instance BuildFilter BlockTimeStrike BlockTimeStrikeFilter where
     , maybe [] (\v-> [BlockTimeStrikeBlock <=. v]) mstrikeBlockHeightLTE
     , maybe [] (\v-> [BlockTimeStrikeBlock ==. v]) mstrikeBlockHeightEQ
     , maybe [] (\v-> [BlockTimeStrikeBlock !=. v]) mstrikeBlockHeightNEQ
-    , maybe [] (\v-> [BlockTimeStrikeObservedBlockHash ==. Just v]) mobservedBlockHashEQ
+    ]
+instance BuildFilter BlockTimeStrikeObserved BlockTimeStrikeFilter where
+  sortOrder (filter, _) = maybe Descend sortOrderFromStrikeSortOrder (blockTimeStrikeFilterSort filter)
+  buildFilter ( BlockTimeStrikeFilter
+                _
+                _
+                _
+                _
+                _
+                _
+                _
+                _
+                mobservedBlockHashEQ
+                mobservedBlockHashNEQ
+                _ -- sort
+                _ -- class
+                _ -- linesPerPage
+              , _
+              ) = List.concat
+    [ maybe [] (\v-> [BlockTimeStrikeObservedBlockHash ==. Just v]) mobservedBlockHashEQ
     , maybe [] (\v-> [BlockTimeStrikeObservedBlockHash !=. Just v]) mobservedBlockHashNEQ
     ]
 

@@ -247,8 +247,8 @@ instance BuildFilter BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter wher
                 _
                 _
                 -- observedResult
-                mObservedResultEQ
-                mObservedResultNEQ
+                _
+                _
                 -- strike block height
                 mStrikeBlockHeightGTE
                 mStrikeBlockHeightLTE
@@ -274,9 +274,38 @@ instance BuildFilter BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter wher
     , maybe [] (\v -> [ BlockTimeStrikeStrikeMediantime <=. v]) mStrikeMediantimeLTE
     , maybe [] (\v -> [ BlockTimeStrikeStrikeMediantime ==. v]) mStrikeMediantimeEQ
     , maybe [] (\v -> [ BlockTimeStrikeStrikeMediantime !=. v]) mStrikeMediantimeNEQ
+    ]
+instance BuildFilter BlockTimeStrikeObserved BlockTimeStrikeGuessResultPublicFilter where
+  sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultPublicFilterSort filter)
+  buildFilter ( BlockTimeStrikeGuessResultPublicFilter
+                -- person
+                _
+                _
+                -- guess
+                _
+                _
+                -- observedResult
+                mObservedResultEQ
+                mObservedResultNEQ
+                -- strike block height
+                _
+                _
+                _
+                _
+                -- strike strikeMediantime
+                _
+                _
+                _
+                _
+                -- sort
+                _
+                _
+                _ -- lines per page
+              , _
+              ) = List.concat
         -- strike observed result
-    , maybe [] (\v -> [ BlockTimeStrikeObservedResult ==. Just v]) mObservedResultEQ
-    , maybe [] (\v -> [ BlockTimeStrikeObservedResult !=. Just v]) mObservedResultNEQ
+    [ maybe [] (\v -> [ BlockTimeStrikeObservedResult ==. v]) mObservedResultEQ
+    , maybe [] (\v -> [ BlockTimeStrikeObservedResult !=. v]) mObservedResultNEQ
     ]
 
 defaultBlockTimeStrikeGuessResultPublicFilter :: BlockTimeStrikeGuessResultPublicFilter
