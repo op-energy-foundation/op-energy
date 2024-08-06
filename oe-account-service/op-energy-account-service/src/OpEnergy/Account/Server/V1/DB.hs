@@ -44,6 +44,11 @@ import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
 import           Data.OpEnergy.API.V1.Positive(fromPositive)
 import           Data.OpEnergy.API.V1.Natural(verifyNatural, fromNatural)
 import           OpEnergy.Account.Server.V1.DB.Migrations
+import           OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.SplitBlockTimeStrikeObservedFromBlockTimeStrike
+                   ( transformBlockTimeStrikeGuessGuessFromTextToInt
+                   , splitBlockTimeStrikeObservedFromBlockTimeStrike
+                   , createBlockTimeStrikeObservedTable
+                   )
 
 
 
@@ -70,7 +75,14 @@ getConnection config = do
     migrateAccountDBSchema config
     migrateBlockTimeStrikeDBSchema config
 
-    -- actually run migrations by persistent
+    -- print migrations once again to see the difference after custom migrations had been
+    -- completed to stdout just for information to get of schema difference
+    printMigration migrateAccount
+    printMigration migrateBlockTimeStrike
+    printMigration migrateBlockTimeStrikeGuess
+    printMigration migrateBlockTimeStrikeDB
+
+    -- actually run target migrations by persistent
     runMigration migrateAccount -- perform necessary migrations. currently only BlockHeader table's migrations
     runMigration migrateBlockTimeStrike
     runMigration migrateBlockTimeStrikeGuess
@@ -101,7 +113,7 @@ accountDBMigrations :: [( Config -> ReaderT
                                 )
                                ]
 accountDBMigrations =
-  [ (\_-> runMigration migrateAccount) -- perform initial migration of schema
+  [ (\_-> return ()) -- dummy, for compatibility reasons
   ]
 
 -- | custom migration procedure
@@ -165,14 +177,19 @@ blockTimeStrikeDBMigrations :: [( Config -> ReaderT
 blockTimeStrikeDBMigrations =
   -- the very start of the list is a persistent schema migration as it will be applied on a
   -- clean db
-  [ (\_-> runMigration migrateBlockTimeStrike)
-  , (\_-> runMigration migrateBlockTimeStrikeGuess)
-  , (\_-> runMigration migrateBlockTimeStrikeDB) -- create BlockTimeStrikeDB first
+  [ (\_-> return ()) -- dummy, for compatibility reasons
+  , (\_-> return ()) -- dummy, for compatibility reasons
+  , (\_-> return ()) -- dummy, for compatibility reasons
     -- here persistent migrations are done and we have an initial schema had been deployed
     -- the rest is expected to be a migrations, that should handle incompatible migrations over some DB schema versions that are already running
 
     -- initial calculations of the block strike guesses count
   , calculateBlockTimeStrikeCalculateGuessesCount
+    -- create BlockTimeStrikeObserved from BlockTimeStrike
+  , createBlockTimeStrikeObservedTable
+  , splitBlockTimeStrikeObservedFromBlockTimeStrike
+    -- block_time_strike_guess.guess field need to be migrated from text into int
+  , transformBlockTimeStrikeGuessGuessFromTextToInt
   ]
   where
     -- | this migration perform calculation of guesses count for existing strike in order to

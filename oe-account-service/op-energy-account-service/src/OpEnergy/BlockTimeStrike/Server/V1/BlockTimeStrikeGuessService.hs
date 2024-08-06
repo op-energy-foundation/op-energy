@@ -243,29 +243,22 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
                     minimumGuessableBlock = latestUnconfirmedBlockHeight + naturalFromPositive configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
                 in
                   ( (BlockTimeStrikeBlock >=. minimumGuessableBlock) -- block height should match threshold
-                  : (BlockTimeStrikeObservedResult ==. Nothing) -- and it should not be discovered yet
                   :filter
                   )
-              Just BlockTimeStrikeFilterClassOutcomeKnown ->
-                ( (BlockTimeStrikeObservedResult !=. Nothing)
-                 :filter
-                )
-              Just BlockTimeStrikeFilterClassOutcomeUnknown ->
-                ( (BlockTimeStrikeObservedResult ==. Nothing)
-                 :filter
-                )
+              Just BlockTimeStrikeFilterClassOutcomeKnown -> filter
+              Just BlockTimeStrikeFilterClassOutcomeUnknown -> filter
       mret <- withDBNOTransactionROUnsafe "" $ do
         res <- C.runConduit
           $ filters finalFilter linesPerPage
           .| (C.drop (fromNatural page * fromPositive linesPerPage) >> C.awaitForever C.yield) -- navigate to page
-          .| ( C.awaitForever $ \((Entity _ guess, Entity _ strike), Entity _ person) -> do
+          .| ( C.awaitForever $ \((Entity _ guess, Entity _ strike, _mObserved), Entity _ person) -> do
               C.yield $ BlockTimeStrikeGuessPublic
                         { person = personUuid person
                         , strike = strike
                         , creationTime = blockTimeStrikeGuessCreationTime guess
                         , guess = blockTimeStrikeGuessGuess guess
                         }
-            )
+             )
           .| C.take (fromPositive linesPerPage + 1) -- we take +1 to understand if there is a next page available
         return (res)
       case mret of
@@ -307,7 +300,21 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
               (Range Nothing Nothing)
             )
          )
-      .| ( C.awaitForever $ \v@( Entity _ guess, _ )-> do
+      .| ( C.awaitForever $ \(guess, strikeE@(Entity strikeId _)) -> do
+           mObserved <- lift $ selectFirst [ BlockTimeStrikeObservedStrike ==. strikeId ][]
+           case maybe Nothing (blockTimeStrikeGuessResultPublicFilterClass . fst . unFilterRequest) mfilter of
+             Nothing -> C.yield (guess, strikeE, mObserved) -- don't care about existence of observed data
+             Just BlockTimeStrikeFilterClassGuessable-> case mObserved of
+               Nothing -> C.yield (guess, strikeE, mObserved) -- strike have not been observed and finalFilter should ensure, that it is in the future with proper guess threshold
+               _ -> return () -- otherwise, block haven't matched the criteria and should be ignored
+             Just BlockTimeStrikeFilterClassOutcomeUnknown-> case mObserved of
+               Nothing-> C.yield (guess, strikeE, mObserved) -- haven't been observed
+               _ -> return ()
+             Just BlockTimeStrikeFilterClassOutcomeKnown-> case mObserved of
+               Just _ -> C.yield (guess, strikeE, mObserved) -- had been observed
+               _ -> return ()
+         )
+      .| ( C.awaitForever $ \v@( Entity _ guess, _, _ )-> do
           C.toProducer $ C.zipSources
             (repeatC v)
             ( streamEntities
