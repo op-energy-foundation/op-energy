@@ -76,7 +76,7 @@ data BlockTimeStrikeGuessPublic = BlockTimeStrikeGuessPublic
   , creationTime :: POSIXTime
   , guess :: SlowFast
   }
-  deriving (Eq, Show, Generic)
+  deriving (Show, Generic)
 instance ToJSON BlockTimeStrikeGuessPublic
 instance ToSchema BlockTimeStrikeGuessPublic where
   declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikeGuessPublic") $ mempty
@@ -98,7 +98,7 @@ data BlockTimeStrikeGuessResultPublic = BlockTimeStrikeGuessResultPublic
   , strike :: BlockTimeStrike
   , creationTime :: POSIXTime
   , guess :: SlowFast
-  , observedResult :: SlowFast
+  , observedResult :: Maybe SlowFast
   }
   deriving (Eq, Show, Generic)
 instance ToJSON BlockTimeStrikeGuessResultPublic
@@ -114,7 +114,7 @@ defaultBlockTimeStrikeGuessResultPublic = BlockTimeStrikeGuessResultPublic
   , strike = defaultBlockTimeStrike
   , creationTime = defaultPOSIXTime
   , guess = defaultSlowFast
-  , observedResult = defaultSlowFast
+  , observedResult = Just defaultSlowFast
   }
 
 data BlockTimeStrikeGuessResultPublicFilter = BlockTimeStrikeGuessResultPublicFilter
@@ -247,8 +247,8 @@ instance BuildFilter BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter wher
                 _
                 _
                 -- observedResult
-                mObservedResultEQ
-                mObservedResultNEQ
+                _
+                _
                 -- strike block height
                 mStrikeBlockHeightGTE
                 mStrikeBlockHeightLTE
@@ -274,9 +274,38 @@ instance BuildFilter BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter wher
     , maybe [] (\v -> [ BlockTimeStrikeStrikeMediantime <=. v]) mStrikeMediantimeLTE
     , maybe [] (\v -> [ BlockTimeStrikeStrikeMediantime ==. v]) mStrikeMediantimeEQ
     , maybe [] (\v -> [ BlockTimeStrikeStrikeMediantime !=. v]) mStrikeMediantimeNEQ
+    ]
+instance BuildFilter BlockTimeStrikeResult BlockTimeStrikeGuessResultPublicFilter where
+  sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultPublicFilterSort filter)
+  buildFilter ( BlockTimeStrikeGuessResultPublicFilter
+                -- person
+                _
+                _
+                -- guess
+                _
+                _
+                -- observedResult
+                mObservedResultEQ
+                mObservedResultNEQ
+                -- strike block height
+                _
+                _
+                _
+                _
+                -- strike strikeMediantime
+                _
+                _
+                _
+                _
+                -- sort
+                _
+                _
+                _ -- lines per page
+              , _
+              ) = List.concat
         -- strike observed result
-    , maybe [] (\v -> [ BlockTimeStrikeObservedResult ==. Just v]) mObservedResultEQ
-    , maybe [] (\v -> [ BlockTimeStrikeObservedResult !=. Just v]) mObservedResultNEQ
+    [ maybe [] (\v -> [ BlockTimeStrikeResultResult ==. v]) mObservedResultEQ
+    , maybe [] (\v -> [ BlockTimeStrikeResultResult !=. v]) mObservedResultNEQ
     ]
 
 defaultBlockTimeStrikeGuessResultPublicFilter :: BlockTimeStrikeGuessResultPublicFilter

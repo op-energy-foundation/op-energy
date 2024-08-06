@@ -18,6 +18,8 @@ data BlockTimeStrikePublic = BlockTimeStrikePublic
     -- ^ past strike
   , blockTimeStrikePublicGuessesCount :: Word32
     -- ^ amount of guesses
+  , blockTimeStrikePublicObserved :: Maybe BlockTimeStrikeObservedPublic
+    -- ^ possible observed data
   }
   deriving (Show, Generic)
 instance FromJSON BlockTimeStrikePublic where
@@ -36,4 +38,5 @@ defaultBlockTimeStrikePublic :: BlockTimeStrikePublic
 defaultBlockTimeStrikePublic = BlockTimeStrikePublic
   { blockTimeStrikePublicStrike = defaultBlockTimeStrike
   , blockTimeStrikePublicGuessesCount = 0
+  , blockTimeStrikePublicObserved = Just defaultBlockTimeStrikeObservedPublic
   }

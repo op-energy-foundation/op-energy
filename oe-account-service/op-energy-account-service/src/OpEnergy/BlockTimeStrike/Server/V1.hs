@@ -37,11 +37,19 @@ import qualified Data.Aeson as Aeson
 import           Prometheus(MonadMonitor)
 
 import           Data.OpEnergy.Account.API.V1
+import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
+import           Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic
+import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
+import           Data.OpEnergy.Account.API.V1.FilterRequest
+import           Data.OpEnergy.Account.API.V1.PagingResult
+import           Data.OpEnergy.Account.API.V1.UUID
+import           Data.OpEnergy.Account.API.V1.Account
 import           Data.OpEnergy.API.V1.Block
+import           Data.OpEnergy.API.V1.Natural(Natural)
 import           Data.OpEnergy.API.V1(GitHashResponse(..))
 import           Data.OpEnergy.API.V1.WebSocketService.Message
 import qualified OpEnergy.Account.Server.GitCommitHash as Server
-import           OpEnergy.Account.Server.V1.Class (AppT, State(..), runAppT, runLogging)
+import           OpEnergy.Account.Server.V1.Class (AppM, AppT, State(..), runAppT, runLogging)
 import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
 import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
@@ -49,16 +57,55 @@ import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime(State(..)
 
 blockTimeServer :: ServerT BlockTimeV1API (AppT Handler)
 blockTimeServer = websocketHandler
-  :<|> createBlockTimeStrikeFuture
-  :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.createBlockTimeStrikeFutureGuess
-  :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.getBlockTimeStrikesPage
-  :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikesGuessesPage
-  :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessesPage
+  :<|> ((createBlockTimeStrikeFuture
+        ) :: AccountToken
+          -> BlockHeight
+          -> Natural Int
+          -> AppM ()
+       )
+  :<|>((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.createBlockTimeStrikeFutureGuess
+       ) :: AccountToken
+         -> BlockHeight
+         -> Natural Int
+         -> SlowFast
+         -> AppM BlockTimeStrikeGuessPublic
+      )
+  :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.getBlockTimeStrikesPage
+        ) :: Maybe (Natural Int)
+          -> Maybe (FilterRequest BlockTimeStrike BlockTimeStrikeFilter)
+          -> AppM (PagingResult BlockTimeStrikePublic)
+       )
+  :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikesGuessesPage
+        ) :: Maybe (Natural Int)
+          -> Maybe (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
+          -> AppM (PagingResult BlockTimeStrikeGuessResultPublic)
+       )
+  :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessesPage
+        ) :: BlockHeight
+          -> Natural Int
+          -> Maybe (Natural Int)
+          -> Maybe (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
+          -> AppM (PagingResult BlockTimeStrikeGuessResultPublic)
+       )
 
-  :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.getBlockTimeStrike
-  :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuess
-  :<|> OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessPerson
-  :<|> oeGitHashGet
+  :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.getBlockTimeStrike
+        ) :: BlockHeight
+          -> Natural Int
+          -> AppM BlockTimeStrikePublic
+       )
+  :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuess
+        ) :: AccountToken
+          -> BlockHeight
+          -> Natural Int
+          -> AppM BlockTimeStrikeGuessResultPublic
+       )
+  :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessPerson
+        ) :: UUID Person
+          -> BlockHeight
+          -> Natural Int
+          -> AppM BlockTimeStrikeGuessResultPublic
+       )
+  :<|>  oeGitHashGet
   where
     websocketHandler :: MonadIO m => Connection-> AppT m ()
     websocketHandler = undefined
