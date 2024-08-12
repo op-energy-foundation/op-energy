@@ -73,7 +73,7 @@ blockTimeServer = websocketHandler
   :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.getBlockTimeStrikesPage
         ) :: Maybe (Natural Int)
           -> Maybe (FilterRequest BlockTimeStrike BlockTimeStrikeFilter)
-          -> AppM (PagingResult BlockTimeStrikePublic)
+          -> AppM (PagingResult BlockTimeStrikeWithGuessesCountPublic)
        )
   :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikesGuessesPage
         ) :: Maybe (Natural Int)
@@ -91,7 +91,7 @@ blockTimeServer = websocketHandler
   :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.getBlockTimeStrike
         ) :: BlockHeight
           -> Natural Int
-          -> AppM BlockTimeStrikePublic
+          -> AppM BlockTimeStrikeWithGuessesCountPublic
        )
   :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuess
         ) :: AccountToken

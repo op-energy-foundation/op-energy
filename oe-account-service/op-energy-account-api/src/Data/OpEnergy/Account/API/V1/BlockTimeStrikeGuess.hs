@@ -39,6 +39,7 @@ import           Servant.API(ToHttpApiData(..), FromHttpApiData(..))
 
 import           Data.OpEnergy.Account.API.V1.Account
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
+import           Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic
 import           Data.OpEnergy.Account.API.V1.UUID
 import           Data.OpEnergy.Account.API.V1.Common
 import           Data.OpEnergy.Account.API.V1.FilterRequest
@@ -76,7 +77,7 @@ data BlockTimeStrikeGuessPublic = BlockTimeStrikeGuessPublic
   , creationTime :: POSIXTime
   , guess :: SlowFast
   }
-  deriving (Show, Generic)
+  deriving (Eq, Show, Generic)
 instance ToJSON BlockTimeStrikeGuessPublic
 instance ToSchema BlockTimeStrikeGuessPublic where
   declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikeGuessPublic") $ mempty
@@ -95,12 +96,11 @@ defaultBlockTimeStrikeGuessPublic = BlockTimeStrikeGuessPublic
 
 data BlockTimeStrikeGuessResultPublic = BlockTimeStrikeGuessResultPublic
   { person :: UUID Person
-  , strike :: BlockTimeStrike
+  , strike :: BlockTimeStrikePublic
   , creationTime :: POSIXTime
   , guess :: SlowFast
-  , observedResult :: Maybe SlowFast
   }
-  deriving (Eq, Show, Generic)
+  deriving (Show, Generic)
 instance ToJSON BlockTimeStrikeGuessResultPublic
 instance ToSchema BlockTimeStrikeGuessResultPublic where
   declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikeGuessResultPublic") $ mempty
@@ -111,10 +111,9 @@ instance Default BlockTimeStrikeGuessResultPublic where
 defaultBlockTimeStrikeGuessResultPublic :: BlockTimeStrikeGuessResultPublic
 defaultBlockTimeStrikeGuessResultPublic = BlockTimeStrikeGuessResultPublic
   { person = defaultUUID
-  , strike = defaultBlockTimeStrike
+  , strike = defaultBlockTimeStrikePublic
   , creationTime = defaultPOSIXTime
   , guess = defaultSlowFast
-  , observedResult = Just defaultSlowFast
   }
 
 data BlockTimeStrikeGuessResultPublicFilter = BlockTimeStrikeGuessResultPublicFilter

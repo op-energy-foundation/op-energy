@@ -221,7 +221,7 @@ newTipHandlerLoop = forever $ do
 getBlockTimeStrikesPage
   :: Maybe (Natural Int)
   -> Maybe (FilterRequest BlockTimeStrike BlockTimeStrikeFilter)
-  -> AppM (PagingResult BlockTimeStrikePublic)
+  -> AppM (PagingResult BlockTimeStrikeWithGuessesCountPublic)
 getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
   latestUnconfirmedBlockHeightV <- asks (BlockTime.latestUnconfirmedBlockHeight . blockTimeState)
   mlatestUnconfirmedBlockHeight <- liftIO $ TVar.readTVarIO latestUnconfirmedBlockHeightV
@@ -303,20 +303,25 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
                     , calculatedBlockTimeStrikeGuessesCountGuessesCount = guessesCount
                     }
                   return guessesCount
-              C.yield (BlockTimeStrikePublic
-                       { blockTimeStrikePublicStrike = strike
-                       , blockTimeStrikePublicGuessesCount = fromIntegral guessesCount
-                       , blockTimeStrikePublicObserved =
-                         maybe Nothing (\(Entity _ observed, Entity _ result)-> Just $! BlockTimeStrikeObservedPublic
-                                          { blockTimeStrikeObservedPublicBlockHash = Just (blockTimeStrikeObservedBlockHash observed)
-                                          , blockTimeStrikeObservedPublicCreationTime = blockTimeStrikeObservedCreationTime observed
-                                          , blockTimeStrikeObservedPublicResult = blockTimeStrikeResultResult result
-                                          , blockTimeStrikeObservedPublicBlockMediantime = Just (blockTimeStrikeObservedBlockMediantime observed)
-                                          }
-                                       ) $ do
-                                       observed <- mObserved
-                                       result <- mResult
-                                       return (observed, result)
+              C.yield (BlockTimeStrikeWithGuessesCountPublic
+                       { blockTimeStrikeWithGuessesCountPublicStrike = BlockTimeStrikePublic
+                         { blockTimeStrikePublicObservedResult = maybe
+                           Nothing
+                           (\(Entity _ v)-> Just $! blockTimeStrikeResultResult v)
+                           mResult
+                         , blockTimeStrikePublicObservedBlockMediantime = maybe
+                           Nothing
+                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedBlockMediantime v)
+                           mObserved
+                         , blockTimeStrikePublicObservedBlockHash = maybe
+                           Nothing
+                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedBlockHash v)
+                           mObserved
+                         , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
+                         , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
+                         , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
+                         }
+                       , blockTimeStrikeWithGuessesCountPublicGuessesCount = fromIntegral guessesCount
                        }
                       )
             )
@@ -336,22 +341,28 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
                 : []
                 )[]
               case mstrike of
-                Just (Entity _ strike) -> C.yield (BlockTimeStrikePublic
-                        { blockTimeStrikePublicStrike = strike
-                        , blockTimeStrikePublicGuessesCount = fromIntegral (calculatedBlockTimeStrikeGuessesCountGuessesCount guessesCount)
-                        , blockTimeStrikePublicObserved =
-                         maybe Nothing (\(Entity _ observed, Entity _ result)-> Just $! BlockTimeStrikeObservedPublic
-                                          { blockTimeStrikeObservedPublicBlockHash = Just (blockTimeStrikeObservedBlockHash observed)
-                                          , blockTimeStrikeObservedPublicCreationTime = blockTimeStrikeObservedCreationTime observed
-                                          , blockTimeStrikeObservedPublicResult = blockTimeStrikeResultResult result
-                                          , blockTimeStrikeObservedPublicBlockMediantime = Just (blockTimeStrikeObservedBlockMediantime observed)
-                                          }
-                                       ) $ do
-                                         observed <- mObserved
-                                         result <- mResult
-                                         return (observed, result)
+                Just (Entity _ strike) -> C.yield (BlockTimeStrikeWithGuessesCountPublic
+                       { blockTimeStrikeWithGuessesCountPublicStrike = BlockTimeStrikePublic
+                         { blockTimeStrikePublicObservedResult = maybe
+                           Nothing
+                           (\(Entity _ v)-> Just $! blockTimeStrikeResultResult v)
+                           mResult
+                         , blockTimeStrikePublicObservedBlockMediantime = maybe
+                           Nothing
+                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedBlockMediantime v)
+                           mObserved
+                         , blockTimeStrikePublicObservedBlockHash = maybe
+                           Nothing
+                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedBlockHash v)
+                           mObserved
+                         , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
+                         , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
+                         , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
+                         }
+                       , blockTimeStrikeWithGuessesCountPublicGuessesCount =
+                         fromIntegral (calculatedBlockTimeStrikeGuessesCountGuessesCount guessesCount)
                        }
-                       )
+                      )
                 Nothing -> return ()
             )
 
@@ -359,7 +370,7 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
 getBlockTimeStrike
   :: BlockHeight
   -> Natural Int
-  -> AppM BlockTimeStrikePublic
+  -> AppM BlockTimeStrikeWithGuessesCountPublic
 getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $ do
   mret <- actualGetBlockTimeStrike
   case mret of
@@ -383,29 +394,46 @@ getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $
                      mv <- C.await
                      case mv of
                        Just (Entity strikeId strike) -> do
-                         resultsCnt <- lift $ count [ BlockTimeStrikeGuessStrike ==. strikeId ]
+                         mguessesCount <- lift $ selectFirst
+                           [ CalculatedBlockTimeStrikeGuessesCountStrike ==. strikeId]
+                           []
+                         guessesCount <- case mguessesCount of
+                           Just (Entity _ guessesCount) -> -- results are already calculated
+                             return (calculatedBlockTimeStrikeGuessesCountGuessesCount guessesCount)
+                           Nothing -> do -- fallback mode, recount online, which maybe a bad thing to do here TODO decide if it should be removed
+                             guessesCount <- lift $ verifyNatural <$> count [ BlockTimeStrikeGuessStrike ==. strikeId ]
+                             _ <- lift $ insert $! CalculatedBlockTimeStrikeGuessesCount
+                               { calculatedBlockTimeStrikeGuessesCountStrike = strikeId
+                               , calculatedBlockTimeStrikeGuessesCountGuessesCount = guessesCount
+                               }
+                             return guessesCount
                          mObserved <- lift $ selectFirst
                            [ BlockTimeStrikeObservedStrike ==. strikeId ]
                            []
                          mResult <- lift $ selectFirst
                            [ BlockTimeStrikeResultStrike ==. strikeId ]
                            []
-                         return ( Just ( BlockTimeStrikePublic
-                                        { blockTimeStrikePublicStrike = strike
-                                        , blockTimeStrikePublicGuessesCount = fromIntegral resultsCnt
-                                        , blockTimeStrikePublicObserved = maybe
-                                            Nothing
-                                            (\(Entity _ observed, Entity _ result)-> Just $! BlockTimeStrikeObservedPublic
-                                              { blockTimeStrikeObservedPublicBlockHash = Just (blockTimeStrikeObservedBlockHash observed)
-                                              , blockTimeStrikeObservedPublicCreationTime = blockTimeStrikeObservedCreationTime observed
-                                              , blockTimeStrikeObservedPublicResult = blockTimeStrikeResultResult result
-                                              , blockTimeStrikeObservedPublicBlockMediantime = Just (blockTimeStrikeObservedBlockMediantime observed)
-                                              }
-                                            ) $ do
-                                          observed <- mObserved
-                                          result <- mResult
-                                          return (observed, result)
-                                        }
+                         return ( Just ( BlockTimeStrikeWithGuessesCountPublic
+                                         { blockTimeStrikeWithGuessesCountPublicStrike = BlockTimeStrikePublic
+                                           { blockTimeStrikePublicObservedResult = maybe
+                                             Nothing
+                                             (\(Entity _ v)-> Just $! blockTimeStrikeResultResult v)
+                                             mResult
+                                           , blockTimeStrikePublicObservedBlockMediantime = maybe
+                                             Nothing
+                                             (\(Entity _ v)-> Just $! blockTimeStrikeObservedBlockMediantime v)
+                                             mObserved
+                                           , blockTimeStrikePublicObservedBlockHash = maybe
+                                             Nothing
+                                             (\(Entity _ v)-> Just $! blockTimeStrikeObservedBlockHash v)
+                                             mObserved
+                                           , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
+                                           , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
+                                           , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
+                                           }
+                                         , blockTimeStrikeWithGuessesCountPublicGuessesCount =
+                                           fromIntegral guessesCount
+                                         }
                                        )
                                 )
                        Nothing -> return acc
