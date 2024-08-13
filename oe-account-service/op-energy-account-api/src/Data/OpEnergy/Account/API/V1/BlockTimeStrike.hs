@@ -60,7 +60,10 @@ BlockTimeStrike
 
 BlockTimeStrikeObserved
   -- data
-  blockMediantime POSIXTime -- mediantime of the observed block. we decided to have this field redudancy
+  -- those fields are being kept as a sanity check in case of block chain
+  -- reorganization as a last prove of the outcome. Though, we use confirmation
+  -- algorithm, which goal is to reduce a possibility of hitting this case
+  blockMediantime POSIXTime -- mediantime of the observed block.
   blockHash BlockHash -- hash of the observed block.
   -- metadata
   creationTime POSIXTime
