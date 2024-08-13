@@ -45,7 +45,7 @@ import           Data.OpEnergy.API.V1.Positive(fromPositive)
 import           Data.OpEnergy.API.V1.Natural(verifyNatural, fromNatural)
 import           OpEnergy.Account.Server.V1.DB.Migrations
 import           OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.SplitBlockTimeStrikeObservedFromBlockTimeStrike
-                   ( transformBlockTimeStrikeGuessGuessFromTextToInt
+                   ( transformBlockTimeStrikeGuessGuessFromTextToBool
                    , splitBlockTimeStrikeObservedFromBlockTimeStrike
                    , createBlockTimeStrikeObservedTable
                    )
@@ -189,7 +189,7 @@ blockTimeStrikeDBMigrations =
   , createBlockTimeStrikeObservedTable
   , splitBlockTimeStrikeObservedFromBlockTimeStrike
     -- block_time_strike_guess.guess field need to be migrated from text into int
-  , transformBlockTimeStrikeGuessGuessFromTextToInt
+  , transformBlockTimeStrikeGuessGuessFromTextToBool
   ]
   where
     -- | this migration perform calculation of guesses count for existing strike in order to

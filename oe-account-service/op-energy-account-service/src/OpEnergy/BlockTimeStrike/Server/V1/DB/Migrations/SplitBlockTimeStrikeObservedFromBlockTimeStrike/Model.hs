@@ -23,7 +23,6 @@ module OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.SplitBlockTimeStrikeObse
 
 import           GHC.Generics
 import           Data.Text(Text)
-import           Data.Int(Int64)
 import           Data.Word(Word64)
 
 import           Database.Persist.TH
@@ -58,7 +57,7 @@ BlockTimeStrikeGuess
   -- about any other field now
   -- data
   guessOld Text sql=guess_text
-  guess Int64 Maybe
+  guess Bool Maybe
   -- metadata
   -- constraints
   deriving Eq Show Generic
@@ -71,7 +70,7 @@ BlockTimeStrikeGuess
 share [mkPersist sqlSettings, mkMigrate "createBlockTimeStrikeObserved"] [persistLowerCase|
 -- it expected, that this table will be created from migration above. So
 -- we try to define it with basic types as we don't know the current state of
--- fields' types of this table 
+-- fields' types of this table
 BlockTimeStrikeObserved
   -- data
   blockMediantime Word64 -- mediantime of the observed block. we decided to have this field redudancy
@@ -87,7 +86,7 @@ BlockTimeStrikeObserved
 -- this model should contain only strike outcome
 BlockTimeStrikeResult
   -- data
-  result Int64
+  result Bool
   -- metadata
   creationTime Word64
   -- reflinks

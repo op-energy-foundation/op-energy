@@ -21,7 +21,7 @@
 module OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.SplitBlockTimeStrikeObservedFromBlockTimeStrike
   ( splitBlockTimeStrikeObservedFromBlockTimeStrike
   , createBlockTimeStrikeObservedTable
-  , transformBlockTimeStrikeGuessGuessFromTextToInt
+  , transformBlockTimeStrikeGuessGuessFromTextToBool
   )where
 
 import           Control.Monad.Trans.Reader(ReaderT)
@@ -31,7 +31,6 @@ import           Data.Text(Text)
 import qualified Data.Text as Text
 import           Control.Monad.Trans
 import           Data.Time.Clock.POSIX( getPOSIXTime)
-import           Data.Int(Int64)
 
 import           Database.Persist
 import           Database.Persist.Postgresql
@@ -49,10 +48,10 @@ import           OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.SplitBlockTime
 -- ALTER TABLE "block_time_strike" DROP COLUMN "observed_result";
 -- ALTER TABLE "block_time_strike" DROP COLUMN "observed_block_mediantime";
 -- ALTER TABLE "block_time_strike" DROP COLUMN "observed_block_hash";
--- CREATe TABLE "block_time_strike_observed"("id" SERIAL8  PRIMARY KEY UNIQUE,"result" INT8 NOT NULL,"block_mediantime" INT8 NULL,"block_hash" VARCHAR NULL,"creation_time" INT8 NOT NULL,"strike" INT8 NOT NULL);
+-- CREATe TABLE "block_time_strike_observed"("id" SERIAL8  PRIMARY KEY UNIQUE,"result" BOOLEAN;
 -- ALTER TABLE "block_time_strike_observed" ADD CONSTRAINT "unique_blocktime_strike_observation_strike" UNIQUE("strike");
 -- ALTER TABLE "block_time_strike_observed" ADD CONSTRAINT "block_time_strike_observed_strike_fkey" FOREIGN KEY("strike") REFERENCES "block_time_strike"("id") ON DELETE RESTRICT  ON UPDATE RESTRICT;
--- ALTER TABLE "block_time_strike_guess" ALTER COLUMN "guess" TYPE INT8;
+-- ALTER TABLE "block_time_strike_guess" ALTER COLUMN "guess" TYPE BOOLEAN;
 
 createBlockTimeStrikeObservedTable
   :: Config
@@ -86,7 +85,7 @@ splitBlockTimeStrikeObservedFromBlockTimeStrike config = do
            (Just result, mObserved) -> do -- any result exist
              -- move result
              void $ lift $ insert $! BlockTimeStrikeResult
-               { blockTimeStrikeResultResult = slowFastToInt result
+               { blockTimeStrikeResultResult = slowFastToBool result
                , blockTimeStrikeResultCreationTime = floor now
                , blockTimeStrikeResultStrike = strikeId
                }
@@ -111,14 +110,14 @@ splitBlockTimeStrikeObservedFromBlockTimeStrike config = do
   where
     recordsPerReply = configRecordsPerReply config
 
-transformBlockTimeStrikeGuessGuessFromTextToInt
+transformBlockTimeStrikeGuessGuessFromTextToBool
   :: Config
   -> ReaderT SqlBackend (NoLoggingT (ResourceT IO)) ()
-transformBlockTimeStrikeGuessGuessFromTextToInt config = do
+transformBlockTimeStrikeGuessGuessFromTextToBool config = do
   -- 1. rename old column and create new one. For now it will be NULLable
   rawExecute (Text.unlines $
     [ "ALTER TABLE \"block_time_strike_guess\" RENAME COLUMN \"guess\" TO \"guess_text\";" -- rename old lfield
-    , "ALTER TABLE \"block_time_strike_guess\" ADD COLUMN \"guess\" INT8 NULL;" -- we need it to be optional first
+    , "ALTER TABLE \"block_time_strike_guess\" ADD COLUMN \"guess\" BOOLEAN NULL;" -- we need it to be optional first
     ]) []
 
   -- 2. migrate the data
@@ -131,21 +130,21 @@ transformBlockTimeStrikeGuessGuessFromTextToInt config = do
       (Range Nothing Nothing)
     .| ( C.awaitForever $ \(Entity guessId guess) -> do
          lift $ update guessId
-           [ BlockTimeStrikeGuessGuess =. (Just $! slowFastToInt $! blockTimeStrikeGuessGuessOld guess)
+           [ BlockTimeStrikeGuessGuess =. (Just $! slowFastToBool $! blockTimeStrikeGuessGuessOld guess)
            ]
        )
     .| C.sinkNull
   -- 3. make it non nullable and remove old column
   rawExecute (Text.unlines $
-    [ "ALTER TABLE \"block_time_strike_guess\" ALTER COLUMN \"guess\" TYPE INT8;" -- we need it to be optional first
+    [ "ALTER TABLE \"block_time_strike_guess\" ALTER COLUMN \"guess\" TYPE BOOLEAN;" -- we need it to be optional first
     , "ALTER TABLE \"block_time_strike_guess\" DROP COLUMN \"guess_text\";" -- rename old lfield
     ]) []
   where
     recordsPerReply = configRecordsPerReply config
 
 -- | convert text SlowFast into int
-slowFastToInt :: Text-> Int64
-slowFastToInt v
-  | v == "slow" = 0
-  | v == "fast" = 1
-  | otherwise = error $ "slowFastToInt: unsupported value: " ++ show v
+slowFastToBool :: Text-> Bool
+slowFastToBool v
+  | v == "slow" = False
+  | v == "fast" = True
+  | otherwise = error $ "slowFastToBool: unsupported value: " ++ show v

@@ -29,7 +29,6 @@ import qualified Data.Text.Encoding as Text
 import           Data.Time.Clock.POSIX(POSIXTime)
 import qualified Data.List as List
 import qualified Data.ByteString.Lazy as BS
-import           Data.Int(Int64)
 
 import           Servant.API(ToHttpApiData(..), FromHttpApiData(..))
 import           Database.Persist.TH
@@ -187,12 +186,13 @@ instance ToJSON SlowFast where
 instance FromJSON SlowFast where
   parseJSON = withText "SlowFast" $! pure . verifySlowFast
 instance PersistField SlowFast where
-  toPersistValue v = toPersistValue ((fromIntegral (fromEnum v))::Int64)
-  fromPersistValue (PersistInt64 v)
-    | fromIntegral v <= (fromEnum (maxBound::SlowFast)) = Prelude.Right $! toEnum (fromIntegral v)
+  toPersistValue Slow = toPersistValue False
+  toPersistValue Fast = toPersistValue True
+  fromPersistValue (PersistBool False) = Prelude.Right Slow
+  fromPersistValue (PersistBool True) = Prelude.Right Fast
   fromPersistValue _ = Left $ "fromPersistValue SlowFastGuess, unsupported value"
 instance PersistFieldSql SlowFast where
-  sqlType _ = SqlInt64
+  sqlType _ = SqlBool
 
 instance ToSchema SlowFast where
   declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
