@@ -63,8 +63,10 @@ BlockTimeStrikeObserved
   -- those fields are being kept as a sanity check in case of block chain
   -- reorganization as a last prove of the outcome. Though, we use confirmation
   -- algorithm, which goal is to reduce a possibility of hitting this case
-  blockMediantime POSIXTime -- mediantime of the observed block.
-  blockHash BlockHash -- hash of the observed block.
+  judgementBlockMediantime POSIXTime -- mediantime of the judgement block.
+  judgementBlockHash BlockHash -- hash of the judgement block.
+  judgementBlockHeight BlockHeight -- height of the judgement block.
+  isFast SlowFast
   -- metadata
   creationTime POSIXTime
   -- reflinks
@@ -73,17 +75,6 @@ BlockTimeStrikeObserved
   UniqueBlocktimeStrikeObservationStrike strike -- unique per strike
   deriving Eq Show Generic
 
--- this table contains
-BlockTimeStrikeResult
-  -- data
-  result SlowFast
-  -- metadata
-  creationTime POSIXTime
-  -- reflinks
-  strike BlockTimeStrikeId
-  -- constraints
-  UniqueBlocktimeStrikeResultStrike strike -- unique per strike
-  deriving Eq Show Generic
 |]
 
 data BlockTimeStrikeFilter = BlockTimeStrikeFilter
@@ -294,8 +285,8 @@ instance BuildFilter BlockTimeStrikeObserved BlockTimeStrikeFilter where
                 _ -- linesPerPage
               , _
               ) = List.concat
-    [ maybe [] (\v-> [BlockTimeStrikeObservedBlockHash ==. v]) mobservedBlockHashEQ
-    , maybe [] (\v-> [BlockTimeStrikeObservedBlockHash !=. v]) mobservedBlockHashNEQ
+    [ maybe [] (\v-> [BlockTimeStrikeObservedJudgementBlockHash ==. v]) mobservedBlockHashEQ
+    , maybe [] (\v-> [BlockTimeStrikeObservedJudgementBlockHash !=. v]) mobservedBlockHashNEQ
     ]
 
 -- | we need to use separate sort order as we can sort strikes by guesses count

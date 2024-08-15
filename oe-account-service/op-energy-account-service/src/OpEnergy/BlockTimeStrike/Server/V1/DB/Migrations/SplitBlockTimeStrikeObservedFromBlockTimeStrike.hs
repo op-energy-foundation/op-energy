@@ -44,15 +44,6 @@ import qualified Data.Conduit.List as C
 import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.SplitBlockTimeStrikeObservedFromBlockTimeStrike.Model
 
--- |
--- ALTER TABLE "block_time_strike" DROP COLUMN "observed_result";
--- ALTER TABLE "block_time_strike" DROP COLUMN "observed_block_mediantime";
--- ALTER TABLE "block_time_strike" DROP COLUMN "observed_block_hash";
--- CREATe TABLE "block_time_strike_observed"("id" SERIAL8  PRIMARY KEY UNIQUE,"result" BOOLEAN;
--- ALTER TABLE "block_time_strike_observed" ADD CONSTRAINT "unique_blocktime_strike_observation_strike" UNIQUE("strike");
--- ALTER TABLE "block_time_strike_observed" ADD CONSTRAINT "block_time_strike_observed_strike_fkey" FOREIGN KEY("strike") REFERENCES "block_time_strike"("id") ON DELETE RESTRICT  ON UPDATE RESTRICT;
--- ALTER TABLE "block_time_strike_guess" ALTER COLUMN "guess" TYPE BOOLEAN;
-
 createBlockTimeStrikeObservedTable
   :: Config
   -> ReaderT SqlBackend (NoLoggingT (ResourceT IO)) ()
@@ -66,38 +57,38 @@ splitBlockTimeStrikeObservedFromBlockTimeStrike config = do
   -- 1. create block_time_strike_observed table
   runMigration createBlockTimeStrikeObserved
   -- 2. fill up new results table
+  let isStrikeOutcomeAlreadyCalculated =
+        BlockTimeStrikeObservedResult1 !=. Nothing
   C.runConduit
     $ streamEntities
-      [ BlockTimeStrikeObservedResult1 !=. Nothing ]
+      [ isStrikeOutcomeAlreadyCalculated ]
       BlockTimeStrikeId
       (PageSize (fromPositive recordsPerReply))
       Ascend
       (Range Nothing Nothing)
     .| ( C.awaitForever $ \(Entity strikeId strike) -> do
-         now <- liftIO getPOSIXTime
          case ( blockTimeStrikeObservedResult1 strike
               , do -- ensure that either both fields exist or none
                 hash <- blockTimeStrikeObservedBlockHash1 strike
                 mediantime <- blockTimeStrikeObservedBlockMediantime1 strike
                 return (hash, mediantime)
               ) of
-           (Nothing, _) -> return () -- do nothing
-           (Just result, mObserved) -> do -- any result exist
+           (Just result, Just (judgementBlockHash, judgementBlockMediantime)) -> do -- any result exist
              -- move result
-             void $ lift $ insert $! BlockTimeStrikeResult
-               { blockTimeStrikeResultResult = slowFastToBool result
-               , blockTimeStrikeResultCreationTime = floor now
-               , blockTimeStrikeResultStrike = strikeId
+             now <- liftIO getPOSIXTime
+             void $ lift $ insert $! BlockTimeStrikeObserved
+               { blockTimeStrikeObservedIsFast = slowFastToBool result
+               , blockTimeStrikeObservedCreationTime = floor now
+               , blockTimeStrikeObservedStrike = strikeId
+               , blockTimeStrikeObservedJudgementBlockMediantime =
+                 judgementBlockMediantime
+               , blockTimeStrikeObservedJudgementBlockHash =
+                 judgementBlockHash
+               , blockTimeStrikeObservedJudgementBlockHeight =
+                 blockTimeStrikeBlock strike
                }
-             case mObserved of
-               Nothing -> return ()
-               Just (hash, mediantime) -> do -- if observed, then move into BlockTimeStrikeObserved
-                 void $ lift $ insert $! BlockTimeStrikeObserved
-                   { blockTimeStrikeObservedBlockMediantime = mediantime
-                   , blockTimeStrikeObservedBlockHash = hash
-                   , blockTimeStrikeObservedCreationTime = floor now
-                   , blockTimeStrikeObservedStrike = strikeId
-                   }
+             return ()
+           _ -> return () -- the rest will be recalculated by the main outcome calculation routine
        )
     .| C.sinkNull
   -- 3. remove old columns
@@ -116,8 +107,7 @@ transformBlockTimeStrikeGuessGuessFromTextToBool
 transformBlockTimeStrikeGuessGuessFromTextToBool config = do
   -- 1. rename old column and create new one. For now it will be NULLable
   rawExecute (Text.unlines $
-    [ "ALTER TABLE \"block_time_strike_guess\" RENAME COLUMN \"guess\" TO \"guess_text\";" -- rename old lfield
-    , "ALTER TABLE \"block_time_strike_guess\" ADD COLUMN \"guess\" BOOLEAN NULL;" -- we need it to be optional first
+    [ "ALTER TABLE \"block_time_strike_guess\" ADD COLUMN \"is_fast\" BOOLEAN NULL;" -- we need it to be optional first
     ]) []
 
   -- 2. migrate the data
@@ -130,14 +120,14 @@ transformBlockTimeStrikeGuessGuessFromTextToBool config = do
       (Range Nothing Nothing)
     .| ( C.awaitForever $ \(Entity guessId guess) -> do
          lift $ update guessId
-           [ BlockTimeStrikeGuessGuess =. (Just $! slowFastToBool $! blockTimeStrikeGuessGuessOld guess)
+           [ BlockTimeStrikeGuessIsFast =. (Just $! slowFastToBool $! blockTimeStrikeGuessGuess guess)
            ]
        )
     .| C.sinkNull
   -- 3. make it non nullable and remove old column
   rawExecute (Text.unlines $
-    [ "ALTER TABLE \"block_time_strike_guess\" ALTER COLUMN \"guess\" TYPE BOOLEAN;" -- we need it to be optional first
-    , "ALTER TABLE \"block_time_strike_guess\" DROP COLUMN \"guess_text\";" -- rename old lfield
+    [ "ALTER TABLE \"block_time_strike_guess\" ALTER COLUMN \"is_fast\" TYPE BOOLEAN;" -- we need it to be optional first
+    , "ALTER TABLE \"block_time_strike_guess\" DROP COLUMN \"guess\";" -- rename old lfield
     ]) []
   where
     recordsPerReply = configRecordsPerReply config

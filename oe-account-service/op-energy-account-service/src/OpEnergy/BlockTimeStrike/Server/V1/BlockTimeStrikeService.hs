@@ -3,6 +3,7 @@
 {-# LANGUAGE TemplateHaskell          #-}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE RecordWildCards          #-}
+{-# LANGUAGE EmptyDataDecls          #-}
 {-# LANGUAGE GADTs                     #-}
 module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
   ( createBlockTimeStrikeFuture
@@ -12,8 +13,8 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
   ) where
 
 import           Servant (err400, err500)
-import           Control.Monad.Trans.Reader (ask, asks)
-import           Control.Monad.Logger(logDebug, logError, logInfo)
+import           Control.Monad.Trans.Reader (ReaderT, ask, asks)
+import           Control.Monad.Logger(NoLoggingT, logDebug, logError, logInfo)
 import           Control.Monad(forever, void, when)
 import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds, getPOSIXTime)
@@ -25,8 +26,11 @@ import qualified Data.Conduit as C
 import           Control.Monad.Trans
 
 import           Database.Persist
+import           Database.Persist.SqlBackend(SqlBackend)
 import           Database.Persist.Pagination
 import           Prometheus(MonadMonitor)
+import           Control.Monad.Trans.Resource(ResourceT)
+import           Servant.Client (BaseUrl)
 
 
 import           Data.Text.Show (tshow)
@@ -96,6 +100,9 @@ createBlockTimeStrikeFuture token blockHeight strikeMediantime = profile "create
         , blockTimeStrikeCreationTime = now
         }
 
+data BlockObserved
+data BlockMediantimeReachedBlockNotObserved
+newtype Context a b = Context b
 -- | this function is an entry point for a process, that creates blocktime past strikes when such block is being
 -- confirmed. After BlockTimeStrikePast creation, it will add record to the BlockTimeStrikeFutureObservedBlock table
 -- in order to notify hndlers in the chain (currently only guess game), which should move appropriate references
@@ -112,110 +119,154 @@ newTipHandlerLoop = forever $ do
   runLogging $ $(logInfo) $ "BlockTimeStrikeService: tipHandler: received new confirmed tip height: " <> (tshow $ blockHeaderHeight confirmedTip)
   -- find out any future strikes <= new confirmed tip
   profile "newTipHandlerIteration" $ do
-    _ <- observeStrikes confirmedTip
+    _ <- observeStrikesByBlockHeight confirmedTip
     BlockTimeScheduledStrikeCreation.maybeCreateStrikes confirmedTip
   where
-    observeStrikes confirmedBlock = profile "moveFutureStrikesToPastStrikes" $ do
-      configBlockspanURL <- asks (configBlockspanURL . config)
+    -- | search strikes with block height < confirmed block and observe them
+    observeStrikesByBlockHeight :: (MonadIO m, MonadMonitor m) => BlockHeader -> AppT m ()
+    observeStrikesByBlockHeight confirmedBlock = profile "observeStrikesByBlockHeight" $ do
+      blockspanURL <- asks (configBlockspanURL . config)
       recordsPerReply <- asks (configRecordsPerReply . config)
       state <- ask
-      _ <- withDBTransaction "byBlock" $ do
+      _ <- withDBTransaction "byBlockHeight" $ do
+        let
+            isStrikeBlockConfirmed =
+              BlockTimeStrikeBlock <=. blockHeaderHeight confirmedBlock
+            isStrikeMediantimeObserved =
+              BlockTimeStrikeStrikeMediantime
+              <=. ( fromIntegral $! blockHeaderMediantime confirmedBlock)
         C.runConduit
           $ streamEntities
-            [ BlockTimeStrikeBlock <=. blockHeaderHeight confirmedBlock
-            ]
+            (   [isStrikeBlockConfirmed]
+            ||. [isStrikeMediantimeObserved]
+            )
             BlockTimeStrikeId
             (PageSize (fromPositive recordsPerReply))
             Descend
             (Range Nothing Nothing)
           .| ( C.awaitForever $ \strikeE@(Entity strikeId _) -> do -- check if there
                                    -- all the data had been discovered already
-               mResult <- lift $ selectFirst
-                 [ BlockTimeStrikeResultStrike ==. strikeId
-                 ][]
-               mObserved <- lift $ selectFirst
-                 [ BlockTimeStrikeObservedStrike ==. strikeId
-                 ][]
-               case (mObserved, mResult) of
-                 (Just _, Just _ )-> return () -- all data already known
-                 (mObserved, mResult) -> C.yield (strikeE, mObserved, mResult)
+               let isStrikeOutcomeObserved =
+                     BlockTimeStrikeObservedStrike ==. strikeId
+               isStrikeOutcomeNotObserved <- fmap not $ lift $ exists
+                 [ isStrikeOutcomeObserved
+                 ]
+               when isStrikeOutcomeNotObserved $ C.yield strikeE
              )
           .| ( do
-              let
-                  loop (cnt::Int) = do
-                    mv <- C.await
-                    case mv of
-                      Nothing -> do
-                        liftIO $ runLoggingIO state $ $(logDebug) ("calculated results for " <> tshow cnt <> " strikes by observing block")
-                      Just (Entity strikeId strike, mObserved, mResult) -> do
-                        blockHeader <-
-                          if blockHeaderHeight confirmedBlock == blockTimeStrikeBlock strike
-                          then return confirmedBlock -- if we already have this block header
-                          else liftIO $! Blockspan.withClient configBlockspanURL $ getBlockByHeight (blockTimeStrikeBlock strike)
-                        -- there are 2 options here : either observed exist or not
-                        when (mObserved == Nothing ) $ do  -- insert
-                            now <- liftIO getPOSIXTime
-                            void $ lift $ insert $ BlockTimeStrikeObserved
-                              { blockTimeStrikeObservedStrike = strikeId
-                              , blockTimeStrikeObservedBlockHash = blockHeaderHash blockHeader
-                              , blockTimeStrikeObservedBlockMediantime = fromIntegral (blockHeaderMediantime blockHeader)
-                              , blockTimeStrikeObservedCreationTime = now
-                              }
-                        -- calculate result
-                        when (mResult == Nothing) $ do -- insert
-                            now <- liftIO getPOSIXTime
-                            void $ lift $ insert $ BlockTimeStrikeResult
-                              { blockTimeStrikeResultResult =
-                                  ( if fromIntegral (blockHeaderMediantime blockHeader) <= blockTimeStrikeStrikeMediantime strike
-                                    then Fast
-                                    else Slow
-                                  )
-                              , blockTimeStrikeResultCreationTime = now
-                              , blockTimeStrikeResultStrike = strikeId
-                              }
-                        loop $! (cnt + 1)
-              loop 0
-            )
-      latestUnconfirmedBlockHeightV <- asks (BlockTime.latestUnconfirmedBlockHeight . blockTimeState)
-      mlatestUnconfirmedBlockHeight <- liftIO $ TVar.readTVarIO latestUnconfirmedBlockHeightV
-      _ <- case mlatestUnconfirmedBlockHeight of
-        Nothing -> return ()
-        Just latestUnconfirmedBlockHeight -> do
-          _ <- withDBTransaction "byTime" $ do
-            C.runConduit
-              $ streamEntities
-                [ BlockTimeStrikeStrikeMediantime <=. (fromIntegral $ blockHeaderMediantime confirmedBlock)
-                , BlockTimeStrikeBlock >. latestUnconfirmedBlockHeight -- don't resolve blocks, that had already discovered, but haven't been confirmed yet. It which will be observed soon and the result will be calculated by it's mediantime
-                ]
-                BlockTimeStrikeId
-                (PageSize (fromPositive recordsPerReply))
-                Descend
-                (Range Nothing Nothing)
-              .| ( C.awaitForever $ \v@(Entity strikeId _) -> do
-                   isExist <- lift $ exists [ BlockTimeStrikeObservedStrike ==. strikeId]
-                   if isExist
-                     then return ()
-                     else C.yield v
-                 )
-              .| ( do
-                  let
-                      loop (cnt::Int) = do
-                        mv <- C.await
-                        case mv of
-                          Nothing -> do
-                            liftIO $ runLoggingIO state $ $(logDebug) ("calculated results for " <> tshow cnt <> " strikes by reaching time")
-                          Just (Entity strikeId _) -> do
-                            now <- liftIO getPOSIXTime
-                            void $ lift $ insert $! BlockTimeStrikeResult
-                              { blockTimeStrikeResultResult = Slow
-                              , blockTimeStrikeResultStrike = strikeId
-                              , blockTimeStrikeResultCreationTime = now
-                              }
-                            loop $! (cnt + 1)
-                  loop 0
-                )
-          return ()
+               let
+                   loop (cnt::Int) = do
+                     mv <- C.await
+                     case mv of
+                       Nothing -> do
+                         liftIO $ runLoggingIO state $ $(logDebug)
+                           ("calculated results for " <> tshow cnt <> " strikes")
+                       Just strikeE -> do
+                         case eitherStrikeObservedByBlockOrMediantime strikeE of
+                           Left blockObserved -> do
+                             observeStrikeByBlockHeight blockspanURL blockObserved
+                             loop $! (cnt + 1)
+                           Right mediantimeReached -> do
+                             observeStrikeByStrikeMediantime blockspanURL mediantimeReached
+                             loop $! (cnt + 1)
+               loop 0
+             )
       return ()
+      where
+      eitherStrikeObservedByBlockOrMediantime
+        :: (Entity BlockTimeStrike)
+        -> Either (Context BlockObserved (Entity BlockTimeStrike))
+                  (Context BlockMediantimeReachedBlockNotObserved (Entity BlockTimeStrike))
+      eitherStrikeObservedByBlockOrMediantime strikeE@(Entity _ strike) =
+        let
+            isStrikeBlockConfirmed =
+              blockTimeStrikeBlock strike
+                <= blockHeaderHeight confirmedBlock
+            isStrikeMediantimeObserved =
+              blockTimeStrikeStrikeMediantime strike
+                <= ( fromIntegral $! blockHeaderMediantime confirmedBlock)
+        in case () of
+          _ | isStrikeBlockConfirmed ->
+              Left (Context strikeE)
+          _ | isStrikeMediantimeObserved ->
+              Right (Context strikeE)
+          _ -> error "eitherStrikeObservedByBlockOrMediantime: impossible happend"
+      observeStrikeByBlockHeight
+        :: BaseUrl
+        -> Context BlockObserved (Entity BlockTimeStrike)
+        -> C.ConduitT
+           (Entity BlockTimeStrike)
+           C.Void
+           (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
+           ()
+      observeStrikeByBlockHeight blockspanURL (Context (Entity strikeId strike)) = do
+        judgementBlock <- do
+          let isWeHaveStrikeBlockHeader = blockHeaderHeight confirmedBlock == blockTimeStrikeBlock strike
+          if isWeHaveStrikeBlockHeader
+            then return confirmedBlock
+            else liftIO $! Blockspan.withClient blockspanURL
+              $ getBlockByHeight (blockTimeStrikeBlock strike)
+        now <- liftIO getPOSIXTime
+        void $ lift $ insert $ BlockTimeStrikeObserved
+          { blockTimeStrikeObservedStrike = strikeId
+          , blockTimeStrikeObservedJudgementBlockHash =
+            blockHeaderHash judgementBlock
+          , blockTimeStrikeObservedJudgementBlockMediantime =
+            fromIntegral (blockHeaderMediantime judgementBlock)
+          , blockTimeStrikeObservedCreationTime = now
+          , blockTimeStrikeObservedIsFast =
+              ( if fromIntegral (blockHeaderMediantime judgementBlock)
+                   <= blockTimeStrikeStrikeMediantime strike
+                then Fast
+                else Slow
+              )
+          , blockTimeStrikeObservedJudgementBlockHeight =
+            blockHeaderHeight judgementBlock
+          }
+      observeStrikeByStrikeMediantime
+        :: BaseUrl
+        -> Context BlockMediantimeReachedBlockNotObserved (Entity BlockTimeStrike)
+        -> C.ConduitT
+           (Entity BlockTimeStrike)
+           C.Void
+           (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
+           ()
+      observeStrikeByStrikeMediantime blockspanURL (Context (Entity strikeId strike)) = do
+        judgementBlock <- do
+          let findFirstBlockWithMediantimeNextAfterStrikeMediantimeInLoop blockWithMediantimeMoreThanStrikeMediantime
+                | blockHeaderHeight blockWithMediantimeMoreThanStrikeMediantime < 1 = return blockWithMediantimeMoreThanStrikeMediantime
+                | otherwise = do
+                  let
+                      prevBlockHeight =
+                        blockHeaderHeight blockWithMediantimeMoreThanStrikeMediantime - 1
+                  prevBlock <- liftIO $! Blockspan.withClient blockspanURL
+                    $ getBlockByHeight prevBlockHeight
+                  let
+                      isPrevBlockMediantimeLessThanStrikeMediantime =
+                        fromIntegral (blockHeaderMediantime prevBlock)
+                          < blockTimeStrikeStrikeMediantime strike
+                      isPrevBlockMediantimeTheSameAsStrikeMediantime =
+                        fromIntegral (blockHeaderMediantime prevBlock)
+                        == blockTimeStrikeStrikeMediantime strike
+                  case () of
+                    _ | isPrevBlockMediantimeLessThanStrikeMediantime -> return blockWithMediantimeMoreThanStrikeMediantime
+                    _ | isPrevBlockMediantimeTheSameAsStrikeMediantime-> return prevBlock
+                    _ -> findFirstBlockWithMediantimeNextAfterStrikeMediantimeInLoop prevBlock
+          findFirstBlockWithMediantimeNextAfterStrikeMediantimeInLoop confirmedBlock
+        now <- liftIO getPOSIXTime
+        let
+            strikeOutcomeWhenStrikeBlockNotObservedYet = Slow
+        void $ lift $ insert $ BlockTimeStrikeObserved
+          { blockTimeStrikeObservedStrike = strikeId
+          , blockTimeStrikeObservedJudgementBlockHash =
+            blockHeaderHash judgementBlock
+          , blockTimeStrikeObservedJudgementBlockMediantime =
+            fromIntegral (blockHeaderMediantime judgementBlock)
+          , blockTimeStrikeObservedCreationTime = now
+          , blockTimeStrikeObservedIsFast = strikeOutcomeWhenStrikeBlockNotObservedYet
+          , blockTimeStrikeObservedJudgementBlockHeight =
+            blockHeaderHeight judgementBlock
+          }
 
 -- | returns list of BlockTimeStrikePublic records
 getBlockTimeStrikesPage
@@ -273,7 +324,7 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
                 []
               -- now get possible calculated outcome data for strike
               mResult <- lift $ selectFirst
-                ( (BlockTimeStrikeResultStrike ==. strikeId)
+                ( (BlockTimeStrikeObservedStrike ==. strikeId)
                 : []
                 )
                 []
@@ -307,15 +358,15 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
                        { blockTimeStrikeWithGuessesCountPublicStrike = BlockTimeStrikePublic
                          { blockTimeStrikePublicObservedResult = maybe
                            Nothing
-                           (\(Entity _ v)-> Just $! blockTimeStrikeResultResult v)
+                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedIsFast v)
                            mResult
                          , blockTimeStrikePublicObservedBlockMediantime = maybe
                            Nothing
-                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedBlockMediantime v)
+                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockMediantime v)
                            mObserved
                          , blockTimeStrikePublicObservedBlockHash = maybe
                            Nothing
-                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedBlockHash v)
+                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockHash v)
                            mObserved
                          , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
                          , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
@@ -336,24 +387,20 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
                 ( (BlockTimeStrikeObservedStrike ==. calculatedBlockTimeStrikeGuessesCountStrike guessesCount)
                 : (maybe [] ( buildFilter . unFilterRequest . mapFilter) mfilter)
                 )[]
-              mResult <- lift $ selectFirst
-                ( (BlockTimeStrikeResultStrike ==. calculatedBlockTimeStrikeGuessesCountStrike guessesCount)
-                : []
-                )[]
               case mstrike of
                 Just (Entity _ strike) -> C.yield (BlockTimeStrikeWithGuessesCountPublic
                        { blockTimeStrikeWithGuessesCountPublicStrike = BlockTimeStrikePublic
                          { blockTimeStrikePublicObservedResult = maybe
                            Nothing
-                           (\(Entity _ v)-> Just $! blockTimeStrikeResultResult v)
-                           mResult
+                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedIsFast v)
+                           mObserved
                          , blockTimeStrikePublicObservedBlockMediantime = maybe
                            Nothing
-                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedBlockMediantime v)
+                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockMediantime v)
                            mObserved
                          , blockTimeStrikePublicObservedBlockHash = maybe
                            Nothing
-                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedBlockHash v)
+                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockHash v)
                            mObserved
                          , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
                          , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
@@ -410,22 +457,19 @@ getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $
                          mObserved <- lift $ selectFirst
                            [ BlockTimeStrikeObservedStrike ==. strikeId ]
                            []
-                         mResult <- lift $ selectFirst
-                           [ BlockTimeStrikeResultStrike ==. strikeId ]
-                           []
                          return ( Just ( BlockTimeStrikeWithGuessesCountPublic
                                          { blockTimeStrikeWithGuessesCountPublicStrike = BlockTimeStrikePublic
                                            { blockTimeStrikePublicObservedResult = maybe
                                              Nothing
-                                             (\(Entity _ v)-> Just $! blockTimeStrikeResultResult v)
-                                             mResult
+                                             (\(Entity _ v)-> Just $! blockTimeStrikeObservedIsFast v)
+                                             mObserved
                                            , blockTimeStrikePublicObservedBlockMediantime = maybe
                                              Nothing
-                                             (\(Entity _ v)-> Just $! blockTimeStrikeObservedBlockMediantime v)
+                                             (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockMediantime v)
                                              mObserved
                                            , blockTimeStrikePublicObservedBlockHash = maybe
                                              Nothing
-                                             (\(Entity _ v)-> Just $! blockTimeStrikeObservedBlockHash v)
+                                             (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockHash v)
                                              mObserved
                                            , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
                                            , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike

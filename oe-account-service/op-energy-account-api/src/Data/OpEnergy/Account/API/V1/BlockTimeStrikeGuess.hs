@@ -51,7 +51,7 @@ import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
 share [mkPersist sqlSettings, mkMigrate "migrateBlockTimeStrikeGuess"] [persistLowerCase|
 BlockTimeStrikeGuess
   -- data
-  guess SlowFast
+  isFast SlowFast
   -- metadata
   creationTime POSIXTime
   -- reflinks
@@ -203,8 +203,8 @@ instance BuildFilter BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter
                 _ -- lines per page
               , _
               ) = List.concat
-    [ maybe [] (\v-> [BlockTimeStrikeGuessGuess ==. v]) mGuessEQ
-    , maybe [] (\v-> [BlockTimeStrikeGuessGuess !=. v]) mGuessNEQ
+    [ maybe [] (\v-> [BlockTimeStrikeGuessIsFast ==. v]) mGuessEQ
+    , maybe [] (\v-> [BlockTimeStrikeGuessIsFast !=. v]) mGuessNEQ
     ]
 instance BuildFilter Person BlockTimeStrikeGuessResultPublicFilter where
   sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultPublicFilterSort filter)
@@ -274,7 +274,7 @@ instance BuildFilter BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter wher
     , maybe [] (\v -> [ BlockTimeStrikeStrikeMediantime ==. v]) mStrikeMediantimeEQ
     , maybe [] (\v -> [ BlockTimeStrikeStrikeMediantime !=. v]) mStrikeMediantimeNEQ
     ]
-instance BuildFilter BlockTimeStrikeResult BlockTimeStrikeGuessResultPublicFilter where
+instance BuildFilter BlockTimeStrikeObserved BlockTimeStrikeGuessResultPublicFilter where
   sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultPublicFilterSort filter)
   buildFilter ( BlockTimeStrikeGuessResultPublicFilter
                 -- person
@@ -303,8 +303,8 @@ instance BuildFilter BlockTimeStrikeResult BlockTimeStrikeGuessResultPublicFilte
               , _
               ) = List.concat
         -- strike observed result
-    [ maybe [] (\v -> [ BlockTimeStrikeResultResult ==. v]) mObservedResultEQ
-    , maybe [] (\v -> [ BlockTimeStrikeResultResult !=. v]) mObservedResultNEQ
+    [ maybe [] (\v -> [ BlockTimeStrikeObservedIsFast ==. v]) mObservedResultEQ
+    , maybe [] (\v -> [ BlockTimeStrikeObservedIsFast !=. v]) mObservedResultNEQ
     ]
 
 defaultBlockTimeStrikeGuessResultPublicFilter :: BlockTimeStrikeGuessResultPublicFilter

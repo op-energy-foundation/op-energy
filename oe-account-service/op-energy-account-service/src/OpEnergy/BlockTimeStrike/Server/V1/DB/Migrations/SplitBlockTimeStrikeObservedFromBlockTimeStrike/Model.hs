@@ -45,6 +45,8 @@ share [mkPersist sqlSettings] [persistLowerCase|
 BlockTimeStrike
   -- in terms of migration, we care only about those fields
   -- data
+  block Int
+  strikeMediantime Word64
   observedResult1 Text Maybe sql=observed_result
   observedBlockMediantime1 Word64 Maybe sql=observed_block_mediantime
   observedBlockHash1 Text Maybe sql=observed_block_hash
@@ -56,8 +58,8 @@ BlockTimeStrikeGuess
   -- we care only about those 2 fields in terms of migration, so we don't care
   -- about any other field now
   -- data
-  guessOld Text sql=guess_text
-  guess Bool Maybe
+  guess Text
+  isFast Bool Maybe
   -- metadata
   -- constraints
   deriving Eq Show Generic
@@ -73,8 +75,10 @@ share [mkPersist sqlSettings, mkMigrate "createBlockTimeStrikeObserved"] [persis
 -- fields' types of this table
 BlockTimeStrikeObserved
   -- data
-  blockMediantime Word64 -- mediantime of the observed block. we decided to have this field redudancy
-  blockHash Text -- hash of the observed block. BlockHash can be missing when strike observed by reaching desired strikeMediantime instead of observing block itself. In this case, block hash will be filled when block will be observed. we decided to have this field redudancy
+  judgementBlockHeight Int -- height of the judgement block.
+  judgementBlockMediantime Word64 -- mediantime of the observed block.
+  judgementBlockHash Text -- hash of the observed block.
+  isFast Bool
   -- metadata
   creationTime Word64
   -- reflinks
@@ -83,15 +87,4 @@ BlockTimeStrikeObserved
   UniqueBlocktimeStrikeObservationStrike strike -- unique per strike
   deriving Eq Show Generic
 
--- this model should contain only strike outcome
-BlockTimeStrikeResult
-  -- data
-  result Bool
-  -- metadata
-  creationTime Word64
-  -- reflinks
-  strike BlockTimeStrikeId
-  -- constraints
-  UniqueBlocktimeStrikeResultStrike strike -- unique per strike
-  deriving Eq Show Generic
 |]

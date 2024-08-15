@@ -124,7 +124,7 @@ createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess = prof
       let now = utcTimeToPOSIXSeconds nowUTC
       withDBTransaction "" $ do
         let value = BlockTimeStrikeGuess
-              { blockTimeStrikeGuessGuess = guess
+              { blockTimeStrikeGuessIsFast = guess
               , blockTimeStrikeGuessCreationTime = now
               , blockTimeStrikeGuessPerson = personKey
               , blockTimeStrikeGuessStrike = strikeKey
@@ -168,28 +168,28 @@ getBlockTimeStrikeGuessResultsPage mpage mfilter = profile "getBlockTimeStrikeGu
         res <- C.runConduit
           $ filters linesPerPage confirmedBlock
           .| (C.drop (fromNatural page * fromPositive linesPerPage) >> C.awaitForever C.yield) -- navigate to page
-          .| ( C.awaitForever $ \(Entity _ strike, Entity _ guess, Entity _ person, mResult, mObserved) -> do
+          .| ( C.awaitForever $ \(Entity _ strike, Entity _ guess, Entity _ person, mObserved) -> do
                C.yield $ BlockTimeStrikeGuessResultPublic
                          { person = personUuid person
                          , strike = BlockTimeStrikePublic
                            { blockTimeStrikePublicObservedResult = maybe
                              Nothing
-                             (\(Entity _ result) -> Just (blockTimeStrikeResultResult result))
-                             mResult
+                             (\(Entity _ result) -> Just (blockTimeStrikeObservedIsFast result))
+                             mObserved
                            , blockTimeStrikePublicObservedBlockMediantime = maybe
                              Nothing
-                             (\(Entity _ result) -> Just (blockTimeStrikeObservedBlockMediantime result))
+                             (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockMediantime result))
                              mObserved
                            , blockTimeStrikePublicObservedBlockHash = maybe
                              Nothing
-                             (\(Entity _ result) -> Just (blockTimeStrikeObservedBlockHash result))
+                             (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockHash result))
                              mObserved
                            , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
                            , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
                            , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
                            }
                          , creationTime = blockTimeStrikeGuessCreationTime guess
-                         , guess = blockTimeStrikeGuessGuess guess
+                         , guess = blockTimeStrikeGuessIsFast guess
                          }
              )
           .| C.take (fromPositive linesPerPage + 1) -- we take +1 to understand if there is a next page available
@@ -243,9 +243,8 @@ getBlockTimeStrikeGuessResultsPage mpage mfilter = profile "getBlockTimeStrikeGu
             )
          )
       .| ( C.awaitForever $ \((strikeE@(Entity strikeId _), guessE), personE) -> do
-           mResult <- lift $ selectFirst [ BlockTimeStrikeResultStrike ==. strikeId][]
            mObserved <- lift $ selectFirst [ BlockTimeStrikeObservedStrike ==. strikeId][]
-           C.yield (strikeE, guessE, personE, mResult, mObserved)
+           C.yield (strikeE, guessE, personE, mObserved)
          )
 
 -- | returns list BlockTimeStrikeGuess records
@@ -282,28 +281,28 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
         res <- C.runConduit
           $ filters finalFilter linesPerPage
           .| (C.drop (fromNatural page * fromPositive linesPerPage) >> C.awaitForever C.yield) -- navigate to page
-          .| ( C.awaitForever $ \((Entity _ guess, Entity _ strike, mObserved, mResult), Entity _ person) -> do
+          .| ( C.awaitForever $ \((Entity _ guess, Entity _ strike, mObserved), Entity _ person) -> do
               C.yield $ BlockTimeStrikeGuessResultPublic
                         { person = personUuid person
                         , strike = BlockTimeStrikePublic
                           { blockTimeStrikePublicObservedResult = maybe
                             Nothing
-                            (\(Entity _ result) -> Just (blockTimeStrikeResultResult result) )
-                            mResult
+                            (\(Entity _ result) -> Just (blockTimeStrikeObservedIsFast result) )
+                            mObserved
                           , blockTimeStrikePublicObservedBlockMediantime = maybe
                             Nothing
-                            (\(Entity _ result) -> Just (blockTimeStrikeObservedBlockMediantime result) )
+                            (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockMediantime result) )
                             mObserved
                           , blockTimeStrikePublicObservedBlockHash = maybe
                             Nothing
-                            (\(Entity _ result) -> Just (blockTimeStrikeObservedBlockHash result) )
+                            (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockHash result) )
                             mObserved
                           , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
                           , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
                           , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
                           }
                         , creationTime = blockTimeStrikeGuessCreationTime guess
-                        , guess = blockTimeStrikeGuessGuess guess
+                        , guess = blockTimeStrikeGuessIsFast guess
                         }
              )
           .| C.take (fromPositive linesPerPage + 1) -- we take +1 to understand if there is a next page available
@@ -349,20 +348,19 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
          )
       .| ( C.awaitForever $ \(guess, strikeE@(Entity strikeId _)) -> do
            mObserved <- lift $ selectFirst [ BlockTimeStrikeObservedStrike ==. strikeId ][]
-           mResult <- lift $ selectFirst [ BlockTimeStrikeResultStrike ==. strikeId ][]
            case maybe Nothing (blockTimeStrikeGuessResultPublicFilterClass . fst . unFilterRequest) mfilter of
-             Nothing -> C.yield (guess, strikeE, mObserved, mResult) -- don't care about existence of observed data
-             Just BlockTimeStrikeFilterClassGuessable-> case mResult of
-               Nothing -> C.yield (guess, strikeE, mObserved, mResult) -- strike have not been observed and finalFilter should ensure, that it is in the future with proper guess threshold
+             Nothing -> C.yield (guess, strikeE, mObserved) -- don't care about existence of observed data
+             Just BlockTimeStrikeFilterClassGuessable-> case mObserved of
+               Nothing -> C.yield (guess, strikeE, mObserved) -- strike have not been observed and finalFilter should ensure, that it is in the future with proper guess threshold
                _ -> return () -- otherwise, block haven't matched the criteria and should be ignored
-             Just BlockTimeStrikeFilterClassOutcomeUnknown-> case mResult of
-               Nothing-> C.yield (guess, strikeE, mObserved, mResult) -- haven't been observed
+             Just BlockTimeStrikeFilterClassOutcomeUnknown-> case mObserved of
+               Nothing-> C.yield (guess, strikeE, mObserved) -- haven't been observed
                _ -> return ()
-             Just BlockTimeStrikeFilterClassOutcomeKnown-> case mResult of
-               Just _ -> C.yield (guess, strikeE, mObserved, mResult) -- had been observed
+             Just BlockTimeStrikeFilterClassOutcomeKnown-> case mObserved of
+               Just _ -> C.yield (guess, strikeE, mObserved) -- had been observed
                _ -> return ()
          )
-      .| ( C.awaitForever $ \v@( Entity _ guess, _, _, _ )-> do
+      .| ( C.awaitForever $ \v@( Entity _ guess, _, _ )-> do
           C.toProducer $ C.zipSources
             (repeatC v)
             ( streamEntities
@@ -389,28 +387,28 @@ getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilter = profi
     res <- C.runConduit
       $ filters linesPerPage
       .| (C.drop (fromNatural page * fromPositive linesPerPage) >> C.awaitForever C.yield) -- navigate to page
-      .| ( C.awaitForever $ \(Entity _ strike, Entity _ guess, Entity _ person, mResult, mObserved) -> do
+      .| ( C.awaitForever $ \(Entity _ strike, Entity _ guess, Entity _ person, mObserved) -> do
            C.yield $ BlockTimeStrikeGuessResultPublic
                      { person = personUuid person
                      , strike = BlockTimeStrikePublic
                        { blockTimeStrikePublicObservedResult = maybe
                          Nothing
-                         (\(Entity _ result)-> Just (blockTimeStrikeResultResult result))
-                         mResult
+                         (\(Entity _ result)-> Just (blockTimeStrikeObservedIsFast result))
+                         mObserved
                        , blockTimeStrikePublicObservedBlockMediantime = maybe
                          Nothing
-                         (\(Entity _ result)-> Just (blockTimeStrikeObservedBlockMediantime result))
+                         (\(Entity _ result)-> Just (blockTimeStrikeObservedJudgementBlockMediantime result))
                          mObserved
                        , blockTimeStrikePublicObservedBlockHash = maybe
                          Nothing
-                         (\(Entity _ result)-> Just (blockTimeStrikeObservedBlockHash result))
+                         (\(Entity _ result)-> Just (blockTimeStrikeObservedJudgementBlockHash result))
                          mObserved
                        , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
                        , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
                        , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
                        }
                      , creationTime = blockTimeStrikeGuessCreationTime guess
-                     , guess = blockTimeStrikeGuessGuess guess
+                     , guess = blockTimeStrikeGuessIsFast guess
                      }
          )
       .| C.take (fromPositive linesPerPage + 1) -- we take +1 to understand if there is a next page available
@@ -465,9 +463,8 @@ getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilter = profi
             )
          )
       .| ( C.awaitForever $ \((strikeE@(Entity strikeId _), guessE), personE)-> do
-           mResult <- lift $ selectFirst [ BlockTimeStrikeResultStrike ==. strikeId ][]
            mObserved <- lift $ selectFirst [ BlockTimeStrikeObservedStrike ==. strikeId ][]
-           C.yield (strikeE, guessE, personE, mResult, mObserved)
+           C.yield (strikeE, guessE, personE, mObserved)
          )
 
 -- | returns BlockTimeStrikeGuessPublic by strike and person, taken from account token
@@ -520,35 +517,34 @@ getBlockTimeStrikeGuess token blockHeight strikeMediantime = profile "getBlockTi
                 )
              )
           .| ( C.awaitForever $ \( strikeE@(Entity strikeId _), guessE)-> do
-               mResult <- lift $ selectFirst [ BlockTimeStrikeResultStrike ==. strikeId ][]
                mObserved <- lift $ selectFirst [ BlockTimeStrikeObservedStrike ==. strikeId ][]
-               C.yield (strikeE, guessE, mResult, mObserved)
+               C.yield (strikeE, guessE, mObserved)
              )
           .| ( let loop = do
                      mv <- C.await
                      case mv of
                        Nothing -> return Nothing
-                       Just (Entity _ strike, Entity _ guess, mResult, mObserved) -> return $ Just $ BlockTimeStrikeGuessResultPublic
+                       Just (Entity _ strike, Entity _ guess, mObserved) -> return $ Just $ BlockTimeStrikeGuessResultPublic
                          { person = personUuid person
                          , strike = BlockTimeStrikePublic
                            { blockTimeStrikePublicObservedResult = maybe
                              Nothing
-                             (\(Entity _ result) -> Just (blockTimeStrikeResultResult result))
-                             mResult
+                             (\(Entity _ result) -> Just (blockTimeStrikeObservedIsFast result))
+                             mObserved
                            , blockTimeStrikePublicObservedBlockMediantime = maybe
                              Nothing
-                             (\(Entity _ result) -> Just (blockTimeStrikeObservedBlockMediantime result))
+                             (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockMediantime result))
                              mObserved
                            , blockTimeStrikePublicObservedBlockHash = maybe
                              Nothing
-                             (\(Entity _ result) -> Just (blockTimeStrikeObservedBlockHash result))
+                             (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockHash result))
                              mObserved
                            , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
                            , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
                            , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
                            }
                          , creationTime = blockTimeStrikeGuessCreationTime guess
-                         , guess = blockTimeStrikeGuessGuess guess
+                         , guess = blockTimeStrikeGuessIsFast guess
                          }
                in loop
              )
@@ -609,38 +605,37 @@ getBlockTimeStrikeGuessPerson uuid blockHeight strikeMediantime = profile "getBl
                 )
              )
           .| ( C.awaitForever $ \(strikeE@(Entity strikeId _), guessE) -> do
-               mResult <- lift $ selectFirst [ BlockTimeStrikeResultStrike ==. strikeId][]
                mObserved <- lift $ selectFirst [ BlockTimeStrikeObservedStrike ==. strikeId][]
-               C.yield (strikeE, guessE, mResult, mObserved)
+               C.yield (strikeE, guessE, mObserved)
              )
           .| ( let loop = do
                      mv <- C.await
                      case mv of
                        Nothing -> return Nothing
-                       Just (Entity _ strike, Entity _ guess, mResult, mObserved) -> return $ Just $ BlockTimeStrikeGuessResultPublic
+                       Just (Entity _ strike, Entity _ guess, mObserved) -> return $ Just $ BlockTimeStrikeGuessResultPublic
                          { person = personUuid person
                          , strike = BlockTimeStrikePublic
                            { blockTimeStrikePublicObservedResult =
                              maybe
                                Nothing
-                               (\(Entity _ result)-> Just (blockTimeStrikeResultResult result))
-                               mResult
+                               (\(Entity _ result)-> Just (blockTimeStrikeObservedIsFast result))
+                               mObserved
                            , blockTimeStrikePublicObservedBlockMediantime =
                              maybe
                                Nothing
-                               (\(Entity _ result)-> Just (blockTimeStrikeObservedBlockMediantime result))
+                               (\(Entity _ result)-> Just (blockTimeStrikeObservedJudgementBlockMediantime result))
                                mObserved
                            , blockTimeStrikePublicObservedBlockHash =
                              maybe
                                Nothing
-                               (\(Entity _ result)-> Just (blockTimeStrikeObservedBlockHash result))
+                               (\(Entity _ result)-> Just (blockTimeStrikeObservedJudgementBlockHash result))
                                mObserved
                            , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
                            , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
                            , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
                            }
                          , creationTime = blockTimeStrikeGuessCreationTime guess
-                         , guess = blockTimeStrikeGuessGuess guess
+                         , guess = blockTimeStrikeGuessIsFast guess
                          }
                in loop
              )
