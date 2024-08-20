@@ -25,6 +25,7 @@ data BlockTimeStrikePublic = BlockTimeStrikePublic
   , blockTimeStrikePublicObservedResult :: Maybe SlowFast
   , blockTimeStrikePublicObservedBlockMediantime :: Maybe POSIXTime
   , blockTimeStrikePublicObservedBlockHash :: Maybe BlockHash
+  , blockTimeStrikePublicObservedBlockHeight :: Maybe BlockHeight
   }
   deriving (Show, Generic)
 instance FromJSON BlockTimeStrikePublic where
@@ -47,6 +48,7 @@ defaultBlockTimeStrikePublic =  BlockTimeStrikePublic
   , blockTimeStrikePublicObservedResult = Just defaultSlowFast
   , blockTimeStrikePublicObservedBlockMediantime = Just 3
   , blockTimeStrikePublicObservedBlockHash = Just BlockHash.defaultHash
+  , blockTimeStrikePublicObservedBlockHeight = Just defaultBlockHeight
   }
 
 data BlockTimeStrikeWithGuessesCountPublic = BlockTimeStrikeWithGuessesCountPublic

@@ -184,6 +184,10 @@ getBlockTimeStrikeGuessResultsPage mpage mfilter = profile "getBlockTimeStrikeGu
                              Nothing
                              (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockHash result))
                              mObserved
+                           , blockTimeStrikePublicObservedBlockHeight = maybe
+                             Nothing
+                             (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockHeight result))
+                             mObserved
                            , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
                            , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
                            , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
@@ -297,6 +301,10 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
                             Nothing
                             (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockHash result) )
                             mObserved
+                          , blockTimeStrikePublicObservedBlockHeight = maybe
+                            Nothing
+                            (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockHeight result) )
+                            mObserved
                           , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
                           , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
                           , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
@@ -402,6 +410,10 @@ getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilter = profi
                        , blockTimeStrikePublicObservedBlockHash = maybe
                          Nothing
                          (\(Entity _ result)-> Just (blockTimeStrikeObservedJudgementBlockHash result))
+                         mObserved
+                       , blockTimeStrikePublicObservedBlockHeight = maybe
+                         Nothing
+                         (\(Entity _ result)-> Just (blockTimeStrikeObservedJudgementBlockHeight result))
                          mObserved
                        , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
                        , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
@@ -539,6 +551,10 @@ getBlockTimeStrikeGuess token blockHeight strikeMediantime = profile "getBlockTi
                              Nothing
                              (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockHash result))
                              mObserved
+                           , blockTimeStrikePublicObservedBlockHeight = maybe
+                             Nothing
+                             (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockHeight result))
+                             mObserved
                            , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
                            , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
                            , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
@@ -629,6 +645,11 @@ getBlockTimeStrikeGuessPerson uuid blockHeight strikeMediantime = profile "getBl
                              maybe
                                Nothing
                                (\(Entity _ result)-> Just (blockTimeStrikeObservedJudgementBlockHash result))
+                               mObserved
+                           , blockTimeStrikePublicObservedBlockHeight =
+                             maybe
+                               Nothing
+                               (\(Entity _ result)-> Just (blockTimeStrikeObservedJudgementBlockHeight result))
                                mObserved
                            , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
                            , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike

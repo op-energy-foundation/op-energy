@@ -368,6 +368,10 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
                            Nothing
                            (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockHash v)
                            mObserved
+                         , blockTimeStrikePublicObservedBlockHeight = maybe
+                           Nothing
+                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockHeight v)
+                           mObserved
                          , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
                          , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
                          , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
@@ -401,6 +405,10 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
                          , blockTimeStrikePublicObservedBlockHash = maybe
                            Nothing
                            (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockHash v)
+                           mObserved
+                         , blockTimeStrikePublicObservedBlockHeight = maybe
+                           Nothing
+                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockHeight v)
                            mObserved
                          , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
                          , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
@@ -470,6 +478,10 @@ getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $
                                            , blockTimeStrikePublicObservedBlockHash = maybe
                                              Nothing
                                              (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockHash v)
+                                             mObserved
+                                           , blockTimeStrikePublicObservedBlockHeight = maybe
+                                             Nothing
+                                             (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockHeight v)
                                              mObserved
                                            , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
                                            , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
