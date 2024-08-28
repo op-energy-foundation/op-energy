@@ -6,15 +6,16 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledStrikeCreation
 
 import qualified Data.List as List
 import Data.Time.Clock (getCurrentTime)
-import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
-import Control.Monad.Reader(ask)
+import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds, getPOSIXTime)
+import Control.Monad.Reader(ask, asks)
 import Control.Monad.IO.Class(MonadIO, liftIO)
-import           Control.Monad.Logger( logInfo, logDebug)
+import           Control.Monad.Logger( logInfo, logDebug, logError)
 import Control.Monad(forM_, when)
 import qualified Control.Concurrent.STM.TVar as TVar
 
 import           Database.Persist.Postgresql
 import           Prometheus(MonadMonitor)
+import           Data.OpEnergy.Client as Blockspan
 
 import           Data.OpEnergy.API.V1.Block
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
@@ -34,6 +35,7 @@ maybeCreateStrikes
   -> AppT m ()
 maybeCreateStrikes confirmedTip = do
   ensureGuessableStrikeExistsAhead confirmedTip
+  ensureNextEpochGuessableStrikeExists confirmedTip
 
 -- | this function creates necessary guessable strikes if they haven't been created yet as it tries to be idempotent.
 -- NOTE: currently, we use latest unconfirmed block height + Config.configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip as the minimum block height for a future strike.
@@ -86,4 +88,67 @@ ensureGuessableStrikeExistsAhead confirmedTip = profile "ensureGuessableStrikeEx
       when (List.length nonExistentBlockHeights > 0) $ do
         runLogging $ $(logInfo) ("ensureStrikeExistsAhead: created future strikes: " <> (tshow nonExistentBlockHeights))
 
+
+ensureNextEpochGuessableStrikeExists
+  :: ( MonadIO m
+     , MonadMonitor m
+     )
+  => BlockHeader
+  -> AppT m ()
+ensureNextEpochGuessableStrikeExists confirmedTip = profile "ensureNextEpochGuessableStrikeExists" $ do
+  Account.State{ config = Config
+         { configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip = configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
+         }
+       , blockTimeState = BlockTime.State
+         { latestUnconfirmedBlockHeight = latestUnconfirmedBlockHeightV
+         }
+       } <- ask
+  anyLatestUnconfirmedBlockHeightExist <- liftIO $ TVar.readTVarIO latestUnconfirmedBlockHeightV
+  case anyLatestUnconfirmedBlockHeightExist of
+    Nothing -> return ()
+    Just latestUnconfirmedBlockHeight -> do
+      configBlockspanURL <- asks (configBlockspanURL . config)
+      let
+          topUnguessableBlockHeight = latestUnconfirmedBlockHeight
+                                    + naturalFromPositive configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip - 1
+          epochBlocks = 2016
+          currentEpochMultiplier = topUnguessableBlockHeight `div` epochBlocks
+          currentEpochBlockHeight = epochBlocks * currentEpochMultiplier
+          nextEpochMultiplier = currentEpochMultiplier + 1
+          nextEpochBlock = epochBlocks * nextEpochMultiplier
+          isCurrentEpochBlockConfirmed =
+            blockHeaderHeight confirmedTip >= currentEpochBlockHeight
+      currentEpochBlockMediantime <-
+        if isCurrentEpochBlockConfirmed
+          then liftIO $! Blockspan.withClient configBlockspanURL $
+            blockHeaderMediantime <$> getBlockByHeight currentEpochBlockHeight
+          else return 0
+      let
+          nextEpochBlockMediantime = currentEpochBlockMediantime
+                                   + (fromIntegral ( fromNatural epochBlocks * 600))
+      mmNextEpochBlockStrikeCreated <- withDBTransaction "" $ do
+        anyNextEpochBlockStrikeExist <- selectFirst
+          [ BlockTimeStrikeBlock ==. nextEpochBlock
+          , BlockTimeStrikeStrikeMediantime ==. fromIntegral nextEpochBlockMediantime
+          ][]
+        case anyNextEpochBlockStrikeExist of
+          Just _ -> return Nothing
+          Nothing -> do
+            now <- liftIO $ getPOSIXTime
+            fmap Just $! insert $! BlockTimeStrike
+              { blockTimeStrikeBlock = nextEpochBlock
+              , blockTimeStrikeStrikeMediantime = fromIntegral nextEpochBlockMediantime
+              , blockTimeStrikeCreationTime = now
+              , blockTimeStrikeObservedResult = Nothing
+              , blockTimeStrikeObservedBlockMediantime = Nothing
+              , blockTimeStrikeObservedBlockHash = Nothing
+              }
+      case mmNextEpochBlockStrikeCreated of
+        Nothing ->
+          runLogging $ $(logError) $ "ensureNextEpochGuessableStrikeExists: DB query failed"
+        Just Nothing -> return ()
+        Just (Just _) ->
+          runLogging $ $(logInfo) $ "ensureNextEpochGuessableStrikeExists: created strike ("
+            <> tshow nextEpochBlock <> " / "
+            <> tshow nextEpochBlockMediantime <> ")"
 
