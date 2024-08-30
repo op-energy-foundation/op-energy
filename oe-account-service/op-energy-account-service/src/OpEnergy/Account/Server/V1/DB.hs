@@ -132,6 +132,8 @@ migrateAccountDBSchema config = do
   runMigration migrateAccountDB -- ensure, that there should exist version-tacing table
   transactionSave -- commit everything, that happend before we start
 
+  let
+      dbVersionAfterMigrations = List.length accountDBMigrations
   (currentDBVersion, currentDBVersionId) <- do -- try to get latest applied
                                                -- migrations' version
     mrecord <- selectFirst [] []
@@ -139,14 +141,13 @@ migrateAccountDBSchema config = do
       Just (Entity currentDBVersionId record)-> return (accountDBVersion record, currentDBVersionId)
       Nothing -> do -- fallback to default version of 0
         let
-            currentDBVersion = verifyNatural 0
+            currentDBVersion = verifyNatural dbVersionAfterMigrations
         currentDBVersionId <- insert $ AccountDB
           { accountDBVersion = currentDBVersion
           }
         return (currentDBVersion, currentDBVersionId)
   let
       unAppliedMigrations = List.drop (fromNatural currentDBVersion) accountDBMigrations
-      dbVersionAfterMigrations = List.length accountDBMigrations
   if dbVersionAfterMigrations < fromNatural currentDBVersion
     then do
       let msg = "migrateAccountDBSchema: unsupported DB schema " ++ show currentDBVersion ++ ", supported DB version up to: " ++ show dbVersionAfterMigrations
@@ -236,6 +237,8 @@ migrateBlockTimeStrikeDBSchema config = do
   runMigration migrateBlockTimeStrikeDB -- ensure, that there should exist version-tacing table
   transactionSave -- commit everything, that happend before we start
 
+  let
+      dbVersionAfterMigrations = List.length blockTimeStrikeDBMigrations
   (currentDBVersion, currentDBVersionId) <- do -- try to get latest applied
                                                -- migrations' version
     mrecord <- selectFirst [] []
@@ -243,14 +246,13 @@ migrateBlockTimeStrikeDBSchema config = do
       Just (Entity currentDBVersionId record)-> return (blockTimeStrikeDBVersion record, currentDBVersionId)
       Nothing -> do -- fallback to default version of 0
         let
-            currentDBVersion = verifyNatural 0
+            currentDBVersion = verifyNatural dbVersionAfterMigrations
         currentDBVersionId <- insert $ BlockTimeStrikeDB
           { blockTimeStrikeDBVersion = currentDBVersion
           }
         return (currentDBVersion, currentDBVersionId)
   let
       unAppliedMigrations = List.drop (fromNatural currentDBVersion) blockTimeStrikeDBMigrations
-      dbVersionAfterMigrations = List.length blockTimeStrikeDBMigrations
   if dbVersionAfterMigrations < fromNatural currentDBVersion
     then do
       let msg = "migrateBlockTimeStrikeDBSchema: unsupported DB schema " ++ show currentDBVersion ++ ", supported DB version up to: " ++ show dbVersionAfterMigrations
