@@ -216,7 +216,7 @@ newTipHandlerLoop = forever $ do
           , blockTimeStrikeObservedCreationTime = now
           , blockTimeStrikeObservedIsFast =
               ( if fromIntegral (blockHeaderMediantime judgementBlock)
-                   <= blockTimeStrikeStrikeMediantime strike
+                   < blockTimeStrikeStrikeMediantime strike
                 then Fast
                 else Slow
               )
