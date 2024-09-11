@@ -21,6 +21,9 @@ import           Data.OpEnergy.Account.API.V1.Common
 import           Data.Default
 import           Data.Proxy(Proxy(..))
 
+-- | this data type defines data structure, that will be used in API to
+-- represent BlockTimeStrike with possible observed result and judgement
+-- block's data
 data BlockTimeStrikePublic = BlockTimeStrikePublic
   { blockTimeStrikePublicBlock :: BlockHeight
   , blockTimeStrikePublicStrikeMediantime :: POSIXTime
