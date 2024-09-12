@@ -66,6 +66,7 @@ library
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledStrikeCreation
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeJudgement
                    , OpEnergy.BlockTimeStrike.Server.V1.Context
+                   , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeObserve
                    , Data.Text.Show
                    , OpEnergy.PagingResult
                    , OpEnergy.Account.Server.V2
