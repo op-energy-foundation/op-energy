@@ -249,6 +249,7 @@ migrateBlockTimeStrikeDBSchema config = do
             currentDBVersion = verifyNatural dbVersionAfterMigrations
         currentDBVersionId <- insert $ BlockTimeStrikeDB
           { blockTimeStrikeDBVersion = currentDBVersion
+          , blockTimeStrikeDBLatestConfirmedHeight = Nothing
           }
         return (currentDBVersion, currentDBVersionId)
   let

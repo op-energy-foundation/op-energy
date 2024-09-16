@@ -27,6 +27,7 @@ import           Database.Persist.TH
 import           Database.Persist.Sql
 
 import           Data.OpEnergy.API.V1.Natural(Natural)
+import           Data.OpEnergy.API.V1.Block(BlockHeight)
 
 
 
@@ -46,6 +47,7 @@ share [mkPersist sqlSettings, mkMigrate "migrateBlockTimeStrikeDB"] [persistLowe
 -- updated at each custom migration
 BlockTimeStrikeDB
   version (Natural Int)
+  latestConfirmedHeight BlockHeight Maybe
   deriving Eq Show
 
 |]
