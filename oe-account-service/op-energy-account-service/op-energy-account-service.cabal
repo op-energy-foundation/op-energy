@@ -64,6 +64,8 @@ library
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledStrikeCreation
                    , Data.Text.Show
                    , OpEnergy.PagingResult
+                   , OpEnergy.Account.Server.V2
+                   , OpEnergy.Account.Server.V2.AccountService
     build-depends:    base ^>=4.15.1.0
                     , aeson
                     , aeson-pretty

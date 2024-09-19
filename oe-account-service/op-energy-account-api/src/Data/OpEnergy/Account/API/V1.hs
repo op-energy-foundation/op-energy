@@ -128,11 +128,12 @@ type FakeWSAPI = Get '[JSON] ()
 data RegisterResult = RegisterResult
   { accountSecret :: AccountSecret
   , accountToken  :: AccountToken
+  , personUUID :: UUID Person
   }
   deriving (Show, Generic, Typeable)
 
 defaultRegisterResult :: RegisterResult
-defaultRegisterResult = RegisterResult defaultAccountSecret defaultAccountToken
+defaultRegisterResult = RegisterResult defaultAccountSecret defaultAccountToken defaultUUID
 
 instance ToJSON RegisterResult
 instance FromJSON RegisterResult

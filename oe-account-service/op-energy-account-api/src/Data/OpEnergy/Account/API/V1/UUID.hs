@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE OverloadedLists            #-}
 {-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
@@ -37,8 +38,11 @@ instance FromJSON (UUID a) where
 instance Show a => ToSchema (UUID a) where
   declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
     & mapped.schema.description ?~ (T.unlines
-      [ "This is the example of the UUID"
+      [ "UUID is an unique id of some resource"
       ])
+    & mapped.schema.type_ ?~ SwaggerString
+    & mapped.schema.properties .~ []
+    & mapped.schema.required .~ []
     & mapped.schema.example ?~ toJSON defaultUUID
 instance ToSchema ShortByteString where
   declareNamedSchema _ = declareNamedSchema (Proxy :: Proxy Text)
