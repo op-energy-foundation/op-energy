@@ -15,7 +15,7 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
 import           Servant (err400, err500)
 import           Control.Monad.Trans.Reader ( ask, asks)
 import           Control.Monad.Logger( logError, logInfo)
-import           Control.Monad(forever, forM )
+import           Control.Monad(forever )
 import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
 import qualified Control.Concurrent.STM.TVar as TVar
@@ -24,7 +24,6 @@ import           Data.Text (Text)
 import           Data.Conduit( (.|) )
 import qualified Data.Conduit as C
 import           Control.Monad.Trans
-import           Control.Monad.Trans.Maybe(runMaybeT, MaybeT(..))
 
 import           Database.Persist
 import           Database.Persist.Pagination
@@ -50,7 +49,7 @@ import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountT
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledStrikeCreation as BlockTimeScheduledStrikeCreation
 import           OpEnergy.PagingResult
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeObserve as Observe
-import           OpEnergy.Account.Server.V1.DB.Migrations
+import qualified OpEnergy.BlockTimeStrike.Server.V1.Context as Context
 
 -- | O(ln accounts).
 -- Tries to create future block time strike. Requires authenticated user and blockheight should be in the future
@@ -99,8 +98,6 @@ createBlockTimeStrikeFuture token blockHeight strikeMediantime = profile "create
         , blockTimeStrikeCreationTime = now
         }
 
-data OrderedConfirmedTip
-
 -- | this function is an entry point for a process, that creates blocktime past strikes when such block is being
 -- confirmed. After BlockTimeStrikePast creation, it will add record to the BlockTimeStrikeFutureObservedBlock table
 -- in order to notify hndlers in the chain (currently only guess game), which should move appropriate references
@@ -115,21 +112,11 @@ newTipHandlerLoop = forever $ do
   -- get new confirmed tip notification from upstream handler
   confirmedTip <- liftIO $ MVar.takeMVar confirmedTipV
   runLogging $ $(logInfo) $ "BlockTimeStrikeService: tipHandler: received new confirmed tip height: " <> (tshow $ blockHeaderHeight confirmedTip)
-  mlatestConfirmedHeight <- withDBNOTransactionROUnsafe "" $ runMaybeT $ do
-    Entity _ record <- MaybeT $ selectFirst [][]
-    MaybeT $ return $ blockTimeStrikeDBLatestConfirmedHeight record
-  let
-      latestConfirmedHeight = maybe (verifyNatural 0) (maybe (verifyNatural 0) id) mlatestConfirmedHeight
-      unobservedTips = [ latestConfirmedHeight .. blockHeaderHeight confirmedTip ]
   -- find out any future strikes <= new confirmed tip
-  forM unobservedTips $ \nextConfirmedHeight-> do
-    nextConfirmedBlock <- undefined nextConfirmedHeight
-    _ <- profile "newTipHandlerIteration" $ do
-      _ <- Observe.observeStrikes nextConfirmedBlock
-      BlockTimeScheduledStrikeCreation.maybeCreateStrikes nextConfirmedBlock
-    persistConfirmedBlock nextConfirmedBlock
-  where
-    persistConfirmedBlock = undefined
+  profile "newTipHandlerIteration" $ do
+    Observe.withLeastUnobservedConfirmedBlock confirmedTip $ \leastUnobservedConfirmedBlock-> do
+      Observe.observeStrikes leastUnobservedConfirmedBlock
+      BlockTimeScheduledStrikeCreation.maybeCreateStrikes $! Context.unContext leastUnobservedConfirmedBlock
 
 -- | returns list of BlockTimeStrikePublic records
 getBlockTimeStrikesPage

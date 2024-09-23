@@ -27,11 +27,24 @@ module OpEnergy.BlockTimeStrike.Server.V1.Context
   ( Context
   , unContext
   , believeme
+  , withContext
   ) where
+
+import           Database.Persist.Sql
+import           Data.Proxy
 
 newtype Context a b = Context
   { unContext :: b
   }
+
+instance (PersistFieldSql b) => PersistFieldSql (Context a b) where
+  sqlType proxy = sqlType (pop proxy)
+    where
+    pop :: Proxy (Context a b) -> Proxy b
+    pop _ = Proxy
+instance (PersistField b) => PersistField (Context a b) where
+  toPersistValue (Context v) = toPersistValue v
+  fromPersistValue v = Context <$> fromPersistValue v
 
 -- | such name is just to have a notion mark in the code where do we decide that
 -- there were enough checks and we can wrap data type in context now.
@@ -43,3 +56,7 @@ newtype Context a b = Context
 -- that use believeme function.
 believeme :: b -> Context a b
 believeme = Context
+
+withContext :: (b -> c) -> Context a b -> Context a c
+withContext foo (Context v) = Context (foo v)
+

@@ -28,6 +28,7 @@ import           Database.Persist.Sql
 
 import           Data.OpEnergy.API.V1.Natural(Natural)
 import           Data.OpEnergy.API.V1.Block(BlockHeight)
+import           OpEnergy.BlockTimeStrike.Server.V1.Context(Context)
 
 
 
@@ -41,13 +42,13 @@ AccountDB
 
 |]
 
+data LatestObservedConfirmedTip
 share [mkPersist sqlSettings, mkMigrate "migrateBlockTimeStrikeDB"] [persistLowerCase|
 
 -- | this table will contain only one record, which contain version of DB, which will be
 -- updated at each custom migration
 BlockTimeStrikeDB
   version (Natural Int)
-  latestConfirmedHeight BlockHeight Maybe
-  deriving Eq Show
+  latestConfirmedHeight (Context LatestObservedConfirmedTip BlockHeight) Maybe
 
 |]
