@@ -25,7 +25,7 @@ import           Data.OpEnergy.Account.API.V1.UUID
 type AccountV2API
   = "login"
     :> ReqBody '[JSON] AccountSecret
-    :> Description "Performs login with given account secret. Returns AccountToken value for being used with the rest API calls. See 'register' API call description for the reference of expected frontend's behavior related to secrets and tokens"
+    :> Description "Performs login with given account secret. Returns LoginResult(token and person UUID) value for being used with the rest API calls. See 'register' API call description for the reference of expected frontend's behavior related to secrets and tokens"
     :> Post '[JSON] LoginResult
 
 data LoginResult = LoginResult
