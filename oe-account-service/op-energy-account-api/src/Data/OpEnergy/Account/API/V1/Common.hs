@@ -9,6 +9,7 @@ module Data.OpEnergy.Account.API.V1.Common
   ( jsonCommonOptions
   , commonParseJSON
   , commonToJSON
+  , commonSchemaOptions
   ) where
 
 import           Data.Aeson as A
@@ -17,6 +18,8 @@ import qualified Data.Char as Char
 import qualified Data.List as List
 import           Data.Default
 import           GHC.Generics
+import           Data.Swagger.SchemaOptions (SchemaOptions)
+import qualified Data.Swagger.SchemaOptions as Swagger
 
 -- | the goal of this function is to provide common options for JSON
 -- generator and parser. This options rely on the Show instance of @a@
@@ -30,12 +33,12 @@ import           GHC.Generics
 -- from the JSON generator/parser and use only "roundedSphere" field
 jsonCommonOptions :: Show a => a-> Options
 jsonCommonOptions singleton = defaultOptions
-    { fieldLabelModifier =
+    { A.fieldLabelModifier =
       (\s -> case s of
           [] -> []
           (first:rest)-> (Char.toLower first):rest
       ) . (List.drop $ List.length $ List.takeWhile (not . Char.isSpace) $ show singleton)
-    , constructorTagModifier = \v ->
+    , A.constructorTagModifier = \v ->
       case (List.drop $ List.length $ List.takeWhile (not . Char.isSpace) $ show singleton) v of
         [] -> List.map Char.toLower v
         (first:rest)-> (Char.toLower first):rest
@@ -51,3 +54,16 @@ commonParseJSON v = ret
 
 commonToJSON :: (Show a)=> (Options-> a-> r)-> a-> r
 commonToJSON f v = f (jsonCommonOptions v) v
+
+commonSchemaOptions :: Show a => a -> SchemaOptions
+commonSchemaOptions singleton = Swagger.defaultSchemaOptions
+  { Swagger.fieldLabelModifier =
+      (\s -> case s of
+          [] -> []
+          (first:rest)-> (Char.toLower first):rest
+      ) . (List.drop $ List.length $ List.takeWhile (not . Char.isSpace) $ show singleton)
+  , Swagger.constructorTagModifier = \v ->
+      case (List.drop $ List.length $ List.takeWhile (not . Char.isSpace) $ show singleton) v of
+        [] -> List.map Char.toLower v
+        (first:rest)-> (Char.toLower first):rest
+  }
