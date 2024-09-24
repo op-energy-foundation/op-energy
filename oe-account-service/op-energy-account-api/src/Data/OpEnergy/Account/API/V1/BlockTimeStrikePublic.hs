@@ -24,6 +24,8 @@ import           Data.Proxy(Proxy(..))
 -- | this data type defines data structure, that will be used in API to
 -- represent BlockTimeStrike with possible observed result and judgement
 -- block's data
+-- Suffix 'Public' here is just for separating datatypes between API (with
+-- Public suffix) and DB (without suffix)
 data BlockTimeStrikePublic = BlockTimeStrikePublic
   { blockTimeStrikePublicBlock :: BlockHeight
   , blockTimeStrikePublicStrikeMediantime :: POSIXTime

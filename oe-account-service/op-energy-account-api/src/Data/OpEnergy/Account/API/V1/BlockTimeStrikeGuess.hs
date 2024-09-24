@@ -71,6 +71,9 @@ CalculatedBlockTimeStrikeGuessesCount
   deriving Eq Show Generic
 |]
 
+-- | This is the datatype for representing strike's guess through API
+-- Suffix 'Public' here is just for separating datatypes between API (with
+-- Public suffix) and DB (without suffix)
 data BlockTimeStrikeGuessPublic = BlockTimeStrikeGuessPublic
   { person :: UUID Person
   , strike ::  BlockTimeStrike
