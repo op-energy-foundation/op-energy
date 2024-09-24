@@ -33,6 +33,8 @@ import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), defaul
 import           OpEnergy.Account.Server.V1.DB
 import           OpEnergy.Account.Server.V1.Metrics
 
+import           OpEnergy.Account.Server.V2
+
 -- required by prometheus-client
 instance MonadMonitor (LoggingT IO)
 instance MonadMonitor (NoLoggingT IO)
@@ -71,7 +73,9 @@ runServer = do
         -- | Combined server of a OpEnergy service with Swagger documentation.
         serverSwaggerBackend :: ServerT API AppM
         serverSwaggerBackend = (return accountApiSwagger)
-          :<|> OpEnergy.Account.Server.V1.accountServer
+          :<|> ( OpEnergy.Account.Server.V1.accountServer
+               :<|> OpEnergy.Account.Server.V2.accountServer
+               )
           :<|> (return blockTimeApiSwagger)
           :<|> OpEnergy.BlockTimeStrike.Server.V1.blockTimeServer
 

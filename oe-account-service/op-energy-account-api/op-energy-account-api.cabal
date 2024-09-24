@@ -55,6 +55,7 @@ library
                    , Data.OpEnergy.Account.API.V1.PagingResult
                    , Data.OpEnergy.Account.API.V1.FilterRequest
                    , Data.OpEnergy.Account.API.V1.Common
+                   , Data.OpEnergy.Account.API.V2
 
     build-depends:    base ^>=4.15.1.0
                     , aeson

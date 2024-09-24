@@ -13,6 +13,7 @@ import           Servant.API
 import           Servant.Swagger
 
 import           Data.OpEnergy.Account.API.V1
+import           Data.OpEnergy.Account.API.V2
 
 accountAPI :: Proxy AccountAPI
 accountAPI = Proxy
@@ -24,7 +25,9 @@ accountBlockTimeAPI :: Proxy AccountBlockTimeAPI
 accountBlockTimeAPI = Proxy
 
 type AccountAPI
-  = "api" :> "v1" :> "account" :> AccountV1API {- V1 API -}
+  = "api" :> ( "v1" :> "account" :> AccountV1API {- V1 API -}
+             :<|> "v2" :> "account" :> AccountV2API {- V2 API -}
+             )
 
 type BlockTimeAPI
   = "api" :> "v1" :> "blocktime" :> BlockTimeV1API {- V1 API -}
