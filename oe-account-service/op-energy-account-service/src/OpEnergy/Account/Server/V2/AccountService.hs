@@ -1,13 +1,4 @@
-{-- | This module implements Account service in terms of OpEnergy.Account.API.V1.AccountV1API API, which you may
- - be insteresting to check for API description.
- -
- - Implementation details are defined in op-energy/README.md
- -
- - TODO: we may consider:
- - 1. using some random value of say [ 0; 10000] as default value for loginsCount instead of 0;
- - 2. increasing loginsCount not by 1, but by random value [1;10000].
- - This way we can increase an entropy in case of worries of lacking of randomness in token. This will reduce the time
- - to overflow the loginsCount accumulator, but it is expected to happen at some point anyway...
+{-- | This module implements Account service in terms of OpEnergy.Account.API.V2.AccountV2API API
  -}
 {-# LANGUAGE TemplateHaskell          #-}
 {-# LANGUAGE OverloadedStrings          #-}
