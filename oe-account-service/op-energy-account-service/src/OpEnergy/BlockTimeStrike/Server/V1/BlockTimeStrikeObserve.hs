@@ -62,7 +62,6 @@ observeStrikes confirmedBlock = profile "observeStrikesByBlockHeight" $ do
     C.runConduit
       $ queryStrikesThatMaybeObserved recordsPerReply
       .| filterUnobservedStrikes
-      .| findJudgementBlock
       .| calculateResult
       .| insertStrikeResult
       .| calculateResultCount
@@ -74,23 +73,11 @@ observeStrikes confirmedBlock = profile "observeStrikesByBlockHeight" $ do
       liftIO $ runLoggingIO state $ $(logDebug)
           ("calculated results for " <> tshow cnt <> " strikes")
   where
-  filterUnobservedStrikes
-    :: C.ConduitT
-       ( Entity BlockTimeStrike)
-       ( Either (Context BlockObserved (Entity BlockTimeStrike))
-                (Context BlockMediantimeReachedBlockNotObserved (Entity BlockTimeStrike))
-       )
-       (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
-       ()
-  filterUnobservedStrikes = C.awaitForever $ \strikeE@(Entity strikeId _) -> do -- check if there
-                               -- all the data had been discovered already
-    let isStrikeOutcomeObserved =
-          BlockTimeStrikeObservedStrike ==. strikeId
-    isStrikeOutcomeNotObserved <- fmap not $ lift $ exists
-      [ isStrikeOutcomeObserved
-      ]
-    when isStrikeOutcomeNotObserved $ do
-      C.yield $! Judgement.eitherBlockOrMediantimeObservedStrike strikeE (unContext confirmedBlock)
+  judgementBlockC :: Context JudgementBlock BlockHeader
+  judgementBlockC = Context.believeme
+    $ unContext
+      -- we are sure, that the least unobserved block IS the judgement block
+      (confirmedBlock :: (Context LeastUnobservedConfirmedTip BlockHeader))
   queryStrikesThatMaybeObserved
     :: Positive Int
     -> C.ConduitT
@@ -113,36 +100,41 @@ observeStrikes confirmedBlock = profile "observeStrikesByBlockHeight" $ do
       (PageSize (fromPositive recordsPerReply))
       Descend
       (Range Nothing Nothing)
-  findJudgementBlock
+  -- | this functions filters out strikes, that have been observed (calculated)
+  -- previously, so only unobserved strikes will be passed further down the
+  -- stream
+  filterUnobservedStrikes
     :: C.ConduitT
+       ( Entity BlockTimeStrike)
        ( Either (Context BlockObserved (Entity BlockTimeStrike))
                 (Context BlockMediantimeReachedBlockNotObserved (Entity BlockTimeStrike))
-       )
-       ( Either (Context BlockObserved (Entity BlockTimeStrike))
-                (Context BlockMediantimeReachedBlockNotObserved (Entity BlockTimeStrike))
-       , Context JudgementBlock BlockHeader
        )
        (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
        ()
-  findJudgementBlock = C.awaitForever $ \estrikeC -> do
-        C.yield (estrikeC, Context.believeme (unContext confirmedBlock))
+  filterUnobservedStrikes = C.awaitForever $ \strikeE@(Entity strikeId _) -> do
+    let isStrikeOutcomeObserved =
+          BlockTimeStrikeObservedStrike ==. strikeId
+    isStrikeOutcomeNotObserved <- fmap not $ lift $ exists
+      [ isStrikeOutcomeObserved
+      ]
+    when isStrikeOutcomeNotObserved $ do
+      C.yield $! Judgement.eitherBlockOrMediantimeObservedStrike
+        strikeE
+        (unContext confirmedBlock)
   calculateResult
     :: C.ConduitT
        ( Either (Context BlockObserved (Entity BlockTimeStrike))
                 (Context BlockMediantimeReachedBlockNotObserved (Entity BlockTimeStrike))
-       , Context JudgementBlock BlockHeader
        )
        ( Either (Context BlockObserved (Entity BlockTimeStrike))
                 (Context BlockMediantimeReachedBlockNotObserved (Entity BlockTimeStrike))
-       , Context JudgementBlock BlockHeader
        , SlowFast
        )
        (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
        ()
-  calculateResult = C.map (\( estrike, judgementBlock)->
+  calculateResult = C.map (\( estrike)->
                               ( estrike
-                              , judgementBlock
-                              , Judgement.judgeStrike estrike judgementBlock
+                              , Judgement.judgeStrike estrike judgementBlockC
                               )
                           )
   calculateResultCount
@@ -163,14 +155,12 @@ observeStrikes confirmedBlock = profile "observeStrikesByBlockHeight" $ do
     :: C.ConduitT
        ( Either (Context BlockObserved (Entity BlockTimeStrike))
                 (Context BlockMediantimeReachedBlockNotObserved (Entity BlockTimeStrike))
-       , Context JudgementBlock BlockHeader
        , SlowFast
        )
        (BlockTimeStrikeObservedId)
        (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
        ()
   insertStrikeResult = C.awaitForever $ \( estrikeC
-                                         , judgementBlockC
                                          , calculatedResult
                                          ) -> do
     let
@@ -193,6 +183,10 @@ observeStrikes confirmedBlock = profile "observeStrikesByBlockHeight" $ do
     C.yield key
 
 data LeastUnobservedConfirmedTip
+-- | this function gets current latest confirmed tip as an argument
+-- and a function, that will receive the least unobserved yet confirmed block,
+-- such that this function will ensure, that we will process each new confirmed
+-- block in a strict order
 withLeastUnobservedConfirmedBlock
   :: ( MonadIO m
      , MonadMonitor m
@@ -222,37 +216,37 @@ withLeastUnobservedConfirmedBlock mpersistedBlockHeightC payload = do
       nextHeight = case mcurrent of
         Nothing -> 0
         Just some -> (Context.unContext some + 1)
+    getLeastUnobservedConfirmedBlockHeader
+      :: (MonadIO m, MonadMonitor m)
+      => (Context LeastUnobservedConfirmedTip BlockHeight)
+      -> AppT m (Context LeastUnobservedConfirmedTip BlockHeader)
+    getLeastUnobservedConfirmedBlockHeader blockHeightC = do
+      blockspanURL <- asks (configBlockspanURL . config)
+      fmap Context.believeme $! liftIO $ Blockspan.withClient blockspanURL
+          $ getBlockByHeight $! unContext blockHeightC
+    persistProcessedConfirmedBlock
+      :: ( MonadIO m
+         , MonadMonitor m
+         )
+      => Context LeastUnobservedConfirmedTip BlockHeader
+      -> AppT m (Maybe ())
+    persistProcessedConfirmedBlock leastUnobservedBlock = do
+      meret <- withDBTransaction "" $ do
+        mrecord <- selectFirst [][]
+        case mrecord of
+          Just (Entity recordId _) -> do
+            update recordId
+              [ BlockTimeStrikeDBLatestConfirmedHeight =. Just (Context.believeme (blockHeaderHeight (unContext leastUnobservedBlock)))
+              ]
+            return (Right ())
+          Nothing -> return (Left "failed to find BlockTimeStrikeDB record, which is not expected, crashing to restart with db migration")
+      case meret of
+        Just (Right ()) -> return (Just ())
+        Nothing -> return Nothing
+        Just (Left reason) -> do
+          runLogging $ $(logError) reason
+          error (Text.unpack reason)
 
 
-getLeastUnobservedConfirmedBlockHeader
-  :: (MonadIO m, MonadMonitor m)
-  => (Context LeastUnobservedConfirmedTip BlockHeight)
-  -> AppT m (Context LeastUnobservedConfirmedTip BlockHeader)
-getLeastUnobservedConfirmedBlockHeader blockHeightC = do
-  blockspanURL <- asks (configBlockspanURL . config)
-  fmap Context.believeme $! liftIO $ Blockspan.withClient blockspanURL
-      $ getBlockByHeight $! unContext blockHeightC
 
-persistProcessedConfirmedBlock
-  :: ( MonadIO m
-     , MonadMonitor m
-     )
-  => Context LeastUnobservedConfirmedTip BlockHeader
-  -> AppT m (Maybe ())
-persistProcessedConfirmedBlock leastUnobservedBlock = do
-  meret <- withDBTransaction "" $ do
-    mrecord <- selectFirst [][]
-    case mrecord of
-      Just (Entity recordId _) -> do
-        update recordId
-          [ BlockTimeStrikeDBLatestConfirmedHeight =. Just (Context.believeme (blockHeaderHeight (unContext leastUnobservedBlock)))
-          ]
-        return (Right ())
-      Nothing -> return (Left "failed to find BlockTimeStrikeDB record, which is not expected, crashing to restart with db migration")
-  case meret of
-    Just (Right ()) -> return (Just ())
-    Nothing -> return Nothing
-    Just (Left reason) -> do
-      runLogging $ $(logError) reason
-      error (Text.unpack reason)
 
