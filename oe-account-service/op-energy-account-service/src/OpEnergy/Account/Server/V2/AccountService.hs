@@ -34,7 +34,8 @@ import           OpEnergy.Account.Server.V1.AccountService(mgetPersonByHashedSec
 login :: AccountSecret -> AppM LoginResult
 login secret = do
   State{ config = Config { configSalt = configSalt
-                         , configAccountTokenEncryptionPrivateKey = configAccountTokenEncryptionPrivateKey
+                         , configAccountTokenEncryptionPrivateKey =
+                           configAccountTokenEncryptionPrivateKey
                          }
        , accountDBPool = pool
        , metrics = MetricsState { accountLogin = accountLogin
@@ -52,10 +53,13 @@ login secret = do
         throwJSON err400 err
       Just (Entity personKey person) -> do
         -- increase loginsCount returning new value
-        loginsCount <- liftIO $! P.observeDuration accountUpdateLoginsCount $ flip runSqlPersistMPool pool $ do
-          update personKey [ PersonLoginsCount =. (personLoginsCount person + 1) ]
-          return (personLoginsCount person + 1)
-        token <- liftIO $ P.observeDuration accountTokenEncrypt $! ClientSession.encryptIO configAccountTokenEncryptionPrivateKey $! LBS.toStrict $! Aeson.encode (personUuid person, loginsCount)
+        loginsCount <- liftIO $! P.observeDuration accountUpdateLoginsCount
+          $ flip runSqlPersistMPool pool $ do
+            update personKey [ PersonLoginsCount =. (personLoginsCount person + 1) ]
+            return (personLoginsCount person + 1)
+        token <- liftIO $ P.observeDuration accountTokenEncrypt
+          $! ClientSession.encryptIO configAccountTokenEncryptionPrivateKey
+          $! LBS.toStrict $! Aeson.encode (personUuid person, loginsCount)
         return $! LoginResult
           { accountToken = verifyAccountToken $! Text.decodeUtf8 token
           , personUUID = personUuid person
