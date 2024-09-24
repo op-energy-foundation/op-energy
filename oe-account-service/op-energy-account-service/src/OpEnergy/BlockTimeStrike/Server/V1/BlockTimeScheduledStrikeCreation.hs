@@ -136,9 +136,6 @@ ensureNextEpochGuessableStrikeExists confirmedTip = profile "ensureNextEpochGues
               { blockTimeStrikeBlock = nextEpochBlock
               , blockTimeStrikeStrikeMediantime = fromIntegral nextEpochBlockMediantime
               , blockTimeStrikeCreationTime = now
-              , blockTimeStrikeObservedResult = Nothing
-              , blockTimeStrikeObservedBlockMediantime = Nothing
-              , blockTimeStrikeObservedBlockHash = Nothing
               }
       case mmNextEpochBlockStrikeCreated of
         Nothing ->

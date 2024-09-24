@@ -43,17 +43,9 @@ instance ToJSON BlockTimeStrikePublic where
   toJSON = commonToJSON genericToJSON
   toEncoding = commonToJSON genericToEncoding
 instance ToSchema BlockTimeStrikePublic where
-  declareNamedSchema v = do
-    blockSchema <- declareSchemaRef (def2 $! blockTimeStrikePublicBlock $! def1 v)
-    strikeMediantimeSchema <- declareSchemaRef (def2 $! blockTimeStrikePublicStrikeMediantime $! def1 v)
-    creationTimeSchema <- declareSchemaRef (def2 $! blockTimeStrikePublicCreationTime $! def1 v)
-    observedResultSchema <- declareSchemaRef (def2 $! blockTimeStrikePublicObservedResult $! def1 v)
-    observedBlockMediantimeSchema <- declareSchemaRef (def2 $! blockTimeStrikePublicObservedBlockMediantime $! def1 v)
-    observedBlockHashSchema <- declareSchemaRef (def2 $! blockTimeStrikePublicObservedBlockHash $! def1 v)
-    observedBlockHeightSchema <- declareSchemaRef (def2 $! blockTimeStrikePublicObservedBlockHeight $! def1 v)
-    return $ NamedSchema (Just "BlockTimeStrikePublic") $ mempty
-      & type_ ?~ SwaggerObject
-      & description ?~(Text.unlines
+  declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
+    & mapped.schema.type_ ?~ SwaggerObject
+    & mapped.schema.description ?~ (Text.unlines
         [ "defines BlockTimeStrike data structure. where:"
         , "- block - block height"
         , "- strikeMediantime - mediantime of a given strike"
@@ -96,26 +88,12 @@ instance ToSchema BlockTimeStrikePublic where
         , "      - observedBlockMediantime = CONFIRMED_MEDIANTIME(judgementBlockHeight)"
         , "      - observedBlockHash = CONFIRMED_BLOCKHASH(judgementBlockHeight)"
         ])
-      & example ?~ toJSON defaultBlockTimeStrikePublic
-      & properties .~
-        [ ( "block", blockSchema)
-        , ( "strikeMediantime", strikeMediantimeSchema)
-        , ( "creationTime", creationTimeSchema)
-        , ( "observedResult", observedResultSchema)
-        , ( "observedBlockMediantime", observedBlockMediantimeSchema)
-        , ( "observedBlockHash", observedBlockHashSchema)
-        , ( "observedBlockHeight", observedBlockHeightSchema)
-        ]
-      & required .~
+    & mapped.schema.example ?~ toJSON defaultBlockTimeStrikePublic
+    & mapped.schema.required .~
         [ "block"
         , "strikeMediantime"
         , "creationTime"
         ]
-    where
-      def2 :: b -> Proxy b
-      def2 _ = Proxy
-      def1 :: Default a => Proxy a -> a
-      def1 _ = def
 instance Default BlockTimeStrikePublic where
   def = defaultBlockTimeStrikePublic
 defaultBlockTimeStrikePublic :: BlockTimeStrikePublic
