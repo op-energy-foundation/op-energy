@@ -29,7 +29,7 @@ import           Data.OpEnergy.API.V1.Error
 import           OpEnergy.Account.Server.V1.AccountService(mgetPersonByHashedSecret)
 
 
--- | see OpEnergy.Account.API.V2.AccountV1API for reference of 'login' API call
+-- | see OpEnergy.Account.API.V2.AccountV2API for reference of 'login' API call
 -- 3 * O(ln n)
 login :: AccountSecret -> AppM LoginResult
 login secret = do
