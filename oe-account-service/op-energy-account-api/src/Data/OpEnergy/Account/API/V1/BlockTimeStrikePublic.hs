@@ -43,7 +43,7 @@ instance ToJSON BlockTimeStrikePublic where
   toJSON = commonToJSON genericToJSON
   toEncoding = commonToJSON genericToEncoding
 instance ToSchema BlockTimeStrikePublic where
-  declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
+  declareNamedSchema proxy = genericDeclareNamedSchema (commonSchemaOptions (def1 proxy)) proxy
     & mapped.schema.type_ ?~ SwaggerObject
     & mapped.schema.description ?~ (Text.unlines
         [ "defines BlockTimeStrike data structure. where:"
@@ -94,6 +94,9 @@ instance ToSchema BlockTimeStrikePublic where
         , "strikeMediantime"
         , "creationTime"
         ]
+    where
+      def1 :: Default a => Proxy a -> a
+      def1 _ = def
 instance Default BlockTimeStrikePublic where
   def = defaultBlockTimeStrikePublic
 defaultBlockTimeStrikePublic :: BlockTimeStrikePublic
@@ -121,26 +124,15 @@ instance ToJSON BlockTimeStrikeWithGuessesCountPublic where
   toJSON = commonToJSON genericToJSON
   toEncoding = commonToJSON genericToEncoding
 instance ToSchema BlockTimeStrikeWithGuessesCountPublic where
-  declareNamedSchema v = do
-    blockTimeStrikeWithGuessesCountPublicStrikeSchema <-
-      declareSchemaRef (def2 $! blockTimeStrikeWithGuessesCountPublicStrike $! def1 v)
-    blockTimeStrikeWithGuessesCountPublicGuessesCountSchema <-
-      declareSchemaRef (def2 $! blockTimeStrikeWithGuessesCountPublicGuessesCount $! def1 v)
-    return $ NamedSchema (Just "BlockTimeStrikeWithGuessesCountPublic") $ mempty
-      & type_ ?~ SwaggerObject
-      & description ?~ "This object defines strike and it's guesses count"
-      & example ?~ toJSON defaultBlockTimeStrikeWithGuessesCountPublic
-      & properties .~
-        [ ( "strike", blockTimeStrikeWithGuessesCountPublicStrikeSchema)
-        , ( "guessesCount", blockTimeStrikeWithGuessesCountPublicGuessesCountSchema)
-        ]
-      & required .~
-        [ "strike"
-        , "guessesCount"
-        ]
+  declareNamedSchema proxy = genericDeclareNamedSchema (commonSchemaOptions (def1 proxy)) proxy
+    & mapped.schema.type_ ?~ SwaggerObject
+    & mapped.schema.description ?~ "This object defines strike and it's guesses count"
+    & mapped.schema.example ?~ toJSON defaultBlockTimeStrikeWithGuessesCountPublic
+    & mapped.schema.required .~
+      [ "strike"
+      , "guessesCount"
+      ]
     where
-      def2 :: b -> Proxy b
-      def2 _ = Proxy
       def1 :: Default a => Proxy a -> a
       def1 _ = def
 

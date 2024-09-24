@@ -83,9 +83,15 @@ data BlockTimeStrikeGuessPublic = BlockTimeStrikeGuessPublic
   deriving (Eq, Show, Generic)
 instance ToJSON BlockTimeStrikeGuessPublic
 instance ToSchema BlockTimeStrikeGuessPublic where
-  declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikeGuessPublic") $ mempty
-    & type_ ?~ SwaggerObject
-    & example ?~ toJSON defaultBlockTimeStrikeGuessPublic
+  declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
+    & mapped.schema.type_ ?~ SwaggerObject
+    & mapped.schema.example ?~ toJSON defaultBlockTimeStrikeGuessPublic
+    & mapped.schema.required .~
+      [ "person"
+      , "strike"
+      , "creationTime"
+      , "guess"
+      ]
 instance Default BlockTimeStrikeGuessPublic where
   def = defaultBlockTimeStrikeGuessPublic
 
@@ -106,9 +112,15 @@ data BlockTimeStrikeGuessResultPublic = BlockTimeStrikeGuessResultPublic
   deriving (Show, Generic)
 instance ToJSON BlockTimeStrikeGuessResultPublic
 instance ToSchema BlockTimeStrikeGuessResultPublic where
-  declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikeGuessResultPublic") $ mempty
-    & type_ ?~ SwaggerObject
-    & example ?~ toJSON defaultBlockTimeStrikeGuessResultPublic
+  declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
+    & mapped.schema.type_ ?~ SwaggerObject
+    & mapped.schema.example ?~ toJSON defaultBlockTimeStrikeGuessResultPublic
+    & mapped.schema.required .~
+      [ "person"
+      , "strike"
+      , "creationTime"
+      , "guess"
+      ]
 instance Default BlockTimeStrikeGuessResultPublic where
   def = defaultBlockTimeStrikeGuessResultPublic
 defaultBlockTimeStrikeGuessResultPublic :: BlockTimeStrikeGuessResultPublic

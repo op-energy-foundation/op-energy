@@ -132,9 +132,17 @@ defaultBlockTimeStrike = BlockTimeStrike
   , blockTimeStrikeCreationTime = defaultPOSIXTime
   }
 instance ToSchema BlockTimeStrike where
-  declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrike") $ mempty
-    & type_ ?~ SwaggerObject
-    & example ?~ toJSON defaultBlockTimeStrike
+  declareNamedSchema proxy = genericDeclareNamedSchema (commonSchemaOptions (def1 proxy)) proxy
+    & mapped.schema.type_ ?~ SwaggerObject
+    & mapped.schema.example ?~ toJSON defaultBlockTimeStrike
+    & mapped.schema.required .~
+      [ "block"
+      , "strikeMediantime"
+      , "creationTime"
+      ]
+    where
+      def1 :: Default a => Proxy a -> a
+      def1 _ = def
 instance ToJSON BlockTimeStrike where
   toJSON = commonToJSON genericToJSON
   toEncoding = commonToJSON genericToEncoding
@@ -158,9 +166,18 @@ defaultBlockTimeStrikeObservedPublic =  BlockTimeStrikeObservedPublic
   , blockTimeStrikeObservedPublicBlockMediantime = Just 1
   }
 instance ToSchema BlockTimeStrikeObservedPublic where
-  declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikeObservedPublic") $ mempty
-    & type_ ?~ SwaggerObject
-    & example ?~ toJSON defaultBlockTimeStrikeObservedPublic
+  declareNamedSchema proxy = genericDeclareNamedSchema (commonSchemaOptions (def1 proxy)) proxy
+    & mapped.schema.type_ ?~ SwaggerObject
+    & mapped.schema.example ?~ toJSON defaultBlockTimeStrikeObservedPublic
+    & mapped.schema.required .~
+      [ "blockHash"
+      , "creationTime"
+      , "result"
+      , "blockMediantime"
+      ]
+    where
+      def1 :: Default a => Proxy a -> a
+      def1 _ = def
 instance ToJSON BlockTimeStrikeObservedPublic where
   toJSON = commonToJSON genericToJSON
   toEncoding = commonToJSON genericToEncoding
