@@ -83,6 +83,10 @@ in
       enable = true;
       virtualHosts.op-energy = {
         extraConfig = ''
+          location /api/v2/account {
+                  limit_req zone=api burst=10 nodelay;
+                  proxy_pass http://127.0.0.1:${toString cfg.api_port}/api/v2/account;
+          }
           location /api/v1/account {
                   limit_req zone=api burst=10 nodelay;
                   proxy_pass http://127.0.0.1:${toString cfg.api_port}/api/v1/account;
