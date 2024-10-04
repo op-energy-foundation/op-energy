@@ -44,6 +44,11 @@ import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
 import           Data.OpEnergy.API.V1.Positive(fromPositive)
 import           Data.OpEnergy.API.V1.Natural(verifyNatural, fromNatural)
 import           OpEnergy.Account.Server.V1.DB.Migrations
+import           OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.SplitBlockTimeStrikeObservedFromBlockTimeStrike
+                   ( transformBlockTimeStrikeGuessGuessFromTextToBool
+                   , splitBlockTimeStrikeObservedFromBlockTimeStrike
+                   , createBlockTimeStrikeObservedTable
+                   )
 
 
 
@@ -70,7 +75,14 @@ getConnection config = do
     migrateAccountDBSchema config
     migrateBlockTimeStrikeDBSchema config
 
-    -- actually run migrations by persistent
+    -- print migrations once again to see the difference after custom migrations had been
+    -- completed to stdout just for information to get of schema difference
+    printMigration migrateAccount
+    printMigration migrateBlockTimeStrike
+    printMigration migrateBlockTimeStrikeGuess
+    printMigration migrateBlockTimeStrikeDB
+
+    -- actually run target migrations by persistent
     runMigration migrateAccount -- perform necessary migrations. currently only BlockHeader table's migrations
     runMigration migrateBlockTimeStrike
     runMigration migrateBlockTimeStrikeGuess
@@ -89,6 +101,9 @@ getConnection config = do
 -- NOTE: this list have to be append only. It is your responsibility to not to delete or change the list after merge. ONLY APPENDS ARE ALLOWED
 -- after running each migration DB version is being increased automatically and transaction being commited. Each migration is running in a separate transcation.
 -- NOTE: it is expected, that migrations will be idempotent
+-- NOTE: if there should be a schema downgrade, it is expected, that "wrong" schema migration
+-- will become 'return ()' and the next migration will perform check of migration requirement
+-- and downgrade in case
 accountDBMigrations :: [( Config -> ReaderT
                                   SqlBackend
                                   (Control.Monad.Logger.NoLoggingT
@@ -98,7 +113,7 @@ accountDBMigrations :: [( Config -> ReaderT
                                 )
                                ]
 accountDBMigrations =
-  [ (\_-> runMigration migrateAccount) -- perform initial migration of schema
+  [ (\_-> return ()) -- dummy, for compatibility reasons
   ]
 
 -- | custom migration procedure
@@ -117,31 +132,51 @@ migrateAccountDBSchema config = do
   runMigration migrateAccountDB -- ensure, that there should exist version-tacing table
   transactionSave -- commit everything, that happend before we start
 
+  let
+      dbVersionAfterMigrations = List.length accountDBMigrations
   (currentDBVersion, currentDBVersionId) <- do -- try to get latest applied
                                                -- migrations' version
     mrecord <- selectFirst [] []
     case mrecord of
       Just (Entity currentDBVersionId record)-> return (accountDBVersion record, currentDBVersionId)
       Nothing -> do -- fallback to default version of 0
+        (mPersonTableExistButVersionUnknown::[Single Bool]) <- rawSql
+          "SELECT EXISTS (SELECT FROM information_schema.tables where table_name = ? and table_schema='public');"
+          [ PersistText $! unEntityNameDB (tableDBName (undefined :: Person))]
         let
-            currentDBVersion = verifyNatural 0
+            currentDBVersion = case mPersonTableExistButVersionUnknown of
+              ((Single True):_)  -> needToApplyCustomMigrations
+                where
+                  needToApplyCustomMigrations = 0
+              ((Single False):_)  -> latestSchemaWillBeCreatedByORM
+                where
+                latestSchemaWillBeCreatedByORM = verifyNatural dbVersionAfterMigrations
+              _ -> error ("migrateAccountDBSchema: got unexpected response from DB: " ++ show mPersonTableExistButVersionUnknown)
         currentDBVersionId <- insert $ AccountDB
           { accountDBVersion = currentDBVersion
           }
         return (currentDBVersion, currentDBVersionId)
   let
       unAppliedMigrations = List.drop (fromNatural currentDBVersion) accountDBMigrations
-  forM_ unAppliedMigrations $ \migration -> do
-    migration config -- call the actual migration procedure
-    update currentDBVersionId
-      [ AccountDBVersion +=. 1
-      ]
-    transactionSave -- keep each migration as one transaction to keep db at the latest successful migration
+  if dbVersionAfterMigrations < fromNatural currentDBVersion
+    then do
+      let msg = "migrateAccountDBSchema: unsupported DB schema " ++ show currentDBVersion ++ ", supported DB version up to: " ++ show dbVersionAfterMigrations
+      error msg
+    else do
+      forM_ unAppliedMigrations $ \migration -> do
+        migration config -- call the actual migration procedure
+        update currentDBVersionId
+          [ AccountDBVersion +=. verifyNatural 1
+          ]
+        transactionSave -- keep each migration as one transaction to keep db at the latest successful migration
 
 -- | this list contains our custom migrations that can't be generated by persistent, like initial calculating of aggregated fields' values
 -- NOTE: this list have to be append only. It is your responsibility to not to delete or change the list after merge. ONLY APPENDS ARE ALLOWED
 -- after running each migration DB version is being increased automatically and transaction being commited. Each migration is running in a separate transcation.
 -- NOTE: it is expected, that migrations will be idempotent
+-- NOTE: if there should be a schema downgrade, it is expected, that "wrong" schema migration
+-- will become 'return ()' and the next migration will perform check of migration requirement
+-- and downgrade in case
 blockTimeStrikeDBMigrations :: [( Config -> ReaderT
                                   SqlBackend
                                   (Control.Monad.Logger.NoLoggingT
@@ -153,14 +188,19 @@ blockTimeStrikeDBMigrations :: [( Config -> ReaderT
 blockTimeStrikeDBMigrations =
   -- the very start of the list is a persistent schema migration as it will be applied on a
   -- clean db
-  [ (\_-> runMigration migrateBlockTimeStrike)
-  , (\_-> runMigration migrateBlockTimeStrikeGuess)
-  , (\_-> runMigration migrateBlockTimeStrikeDB) -- create BlockTimeStrikeDB first
+  [ (\_-> return ()) -- dummy, for compatibility reasons
+  , (\_-> return ()) -- dummy, for compatibility reasons
+  , (\_-> return ()) -- dummy, for compatibility reasons
     -- here persistent migrations are done and we have an initial schema had been deployed
     -- the rest is expected to be a migrations, that should handle incompatible migrations over some DB schema versions that are already running
 
     -- initial calculations of the block strike guesses count
   , calculateBlockTimeStrikeCalculateGuessesCount
+    -- create BlockTimeStrikeObserved from BlockTimeStrike
+  , createBlockTimeStrikeObservedTable
+  , splitBlockTimeStrikeObservedFromBlockTimeStrike
+    -- block_time_strike_guess.guess field need to be migrated from text into int
+  , transformBlockTimeStrikeGuessGuessFromTextToBool
   ]
   where
     -- | this migration perform calculation of guesses count for existing strike in order to
@@ -207,23 +247,41 @@ migrateBlockTimeStrikeDBSchema config = do
   runMigration migrateBlockTimeStrikeDB -- ensure, that there should exist version-tacing table
   transactionSave -- commit everything, that happend before we start
 
+  let
+      dbVersionAfterMigrations = List.length blockTimeStrikeDBMigrations
   (currentDBVersion, currentDBVersionId) <- do -- try to get latest applied
                                                -- migrations' version
     mrecord <- selectFirst [] []
     case mrecord of
       Just (Entity currentDBVersionId record)-> return (blockTimeStrikeDBVersion record, currentDBVersionId)
       Nothing -> do -- fallback to default version of 0
+        (mBlockTimeStrikeTableExistButVersionUnknown::[Single Bool]) <- rawSql
+          "SELECT EXISTS (SELECT FROM information_schema.tables where table_name = ? and table_schema='public');"
+          [ PersistText $! unEntityNameDB (tableDBName (undefined :: BlockTimeStrike))]
         let
-            currentDBVersion = verifyNatural 0
+            currentDBVersion = case mBlockTimeStrikeTableExistButVersionUnknown of
+              ((Single True):_)  -> needToApplyCustomMigrations
+                where
+                  needToApplyCustomMigrations = 0
+              ((Single False):_)  -> latestSchemaWillBeCreatedByORM
+                where
+                latestSchemaWillBeCreatedByORM = verifyNatural dbVersionAfterMigrations
+              _ -> error ("migrateBlockTimeStrikeDBSchema: got unexpected response from DB: " ++ show mBlockTimeStrikeTableExistButVersionUnknown)
         currentDBVersionId <- insert $ BlockTimeStrikeDB
           { blockTimeStrikeDBVersion = currentDBVersion
+          , blockTimeStrikeDBLatestConfirmedHeight = Nothing
           }
         return (currentDBVersion, currentDBVersionId)
   let
       unAppliedMigrations = List.drop (fromNatural currentDBVersion) blockTimeStrikeDBMigrations
-  forM_ unAppliedMigrations $ \migration -> do
-    migration config -- call the actual migration procedure
-    update currentDBVersionId
-      [ BlockTimeStrikeDBVersion +=. 1
-      ]
-    transactionSave -- keep each migration as one transaction to keep db at the latest successful migration
+  if dbVersionAfterMigrations < fromNatural currentDBVersion
+    then do
+      let msg = "migrateBlockTimeStrikeDBSchema: unsupported DB schema " ++ show currentDBVersion ++ ", supported DB version up to: " ++ show dbVersionAfterMigrations
+      error msg
+    else do
+      forM_ unAppliedMigrations $ \migration -> do
+        migration config -- call the actual migration procedure
+        update currentDBVersionId
+          [ BlockTimeStrikeDBVersion +=. 1
+          ]
+        transactionSave -- keep each migration as one transaction to keep db at the latest successful migration

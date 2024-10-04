@@ -39,6 +39,7 @@ import           Servant.API(ToHttpApiData(..), FromHttpApiData(..))
 
 import           Data.OpEnergy.Account.API.V1.Account
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
+import           Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic
 import           Data.OpEnergy.Account.API.V1.UUID
 import           Data.OpEnergy.Account.API.V1.Common
 import           Data.OpEnergy.Account.API.V1.FilterRequest
@@ -50,7 +51,7 @@ import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
 share [mkPersist sqlSettings, mkMigrate "migrateBlockTimeStrikeGuess"] [persistLowerCase|
 BlockTimeStrikeGuess
   -- data
-  guess SlowFast
+  isFast SlowFast
   -- metadata
   creationTime POSIXTime
   -- reflinks
@@ -70,6 +71,9 @@ CalculatedBlockTimeStrikeGuessesCount
   deriving Eq Show Generic
 |]
 
+-- | This is the datatype for representing strike's guess through API
+-- Suffix 'Public' here is just for separating datatypes between API (with
+-- Public suffix) and DB (without suffix)
 data BlockTimeStrikeGuessPublic = BlockTimeStrikeGuessPublic
   { person :: UUID Person
   , strike ::  BlockTimeStrike
@@ -79,9 +83,15 @@ data BlockTimeStrikeGuessPublic = BlockTimeStrikeGuessPublic
   deriving (Eq, Show, Generic)
 instance ToJSON BlockTimeStrikeGuessPublic
 instance ToSchema BlockTimeStrikeGuessPublic where
-  declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikeGuessPublic") $ mempty
-    & type_ ?~ SwaggerObject
-    & example ?~ toJSON defaultBlockTimeStrikeGuessPublic
+  declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
+    & mapped.schema.type_ ?~ SwaggerObject
+    & mapped.schema.example ?~ toJSON defaultBlockTimeStrikeGuessPublic
+    & mapped.schema.required .~
+      [ "person"
+      , "strike"
+      , "creationTime"
+      , "guess"
+      ]
 instance Default BlockTimeStrikeGuessPublic where
   def = defaultBlockTimeStrikeGuessPublic
 
@@ -95,26 +105,30 @@ defaultBlockTimeStrikeGuessPublic = BlockTimeStrikeGuessPublic
 
 data BlockTimeStrikeGuessResultPublic = BlockTimeStrikeGuessResultPublic
   { person :: UUID Person
-  , strike :: BlockTimeStrike
+  , strike :: BlockTimeStrikePublic
   , creationTime :: POSIXTime
   , guess :: SlowFast
-  , observedResult :: SlowFast
   }
-  deriving (Eq, Show, Generic)
+  deriving (Show, Generic)
 instance ToJSON BlockTimeStrikeGuessResultPublic
 instance ToSchema BlockTimeStrikeGuessResultPublic where
-  declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrikeGuessResultPublic") $ mempty
-    & type_ ?~ SwaggerObject
-    & example ?~ toJSON defaultBlockTimeStrikeGuessResultPublic
+  declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
+    & mapped.schema.type_ ?~ SwaggerObject
+    & mapped.schema.example ?~ toJSON defaultBlockTimeStrikeGuessResultPublic
+    & mapped.schema.required .~
+      [ "person"
+      , "strike"
+      , "creationTime"
+      , "guess"
+      ]
 instance Default BlockTimeStrikeGuessResultPublic where
   def = defaultBlockTimeStrikeGuessResultPublic
 defaultBlockTimeStrikeGuessResultPublic :: BlockTimeStrikeGuessResultPublic
 defaultBlockTimeStrikeGuessResultPublic = BlockTimeStrikeGuessResultPublic
   { person = defaultUUID
-  , strike = defaultBlockTimeStrike
+  , strike = defaultBlockTimeStrikePublic
   , creationTime = defaultPOSIXTime
   , guess = defaultSlowFast
-  , observedResult = defaultSlowFast
   }
 
 data BlockTimeStrikeGuessResultPublicFilter = BlockTimeStrikeGuessResultPublicFilter
@@ -204,8 +218,8 @@ instance BuildFilter BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter
                 _ -- lines per page
               , _
               ) = List.concat
-    [ maybe [] (\v-> [BlockTimeStrikeGuessGuess ==. v]) mGuessEQ
-    , maybe [] (\v-> [BlockTimeStrikeGuessGuess !=. v]) mGuessNEQ
+    [ maybe [] (\v-> [BlockTimeStrikeGuessIsFast ==. v]) mGuessEQ
+    , maybe [] (\v-> [BlockTimeStrikeGuessIsFast !=. v]) mGuessNEQ
     ]
 instance BuildFilter Person BlockTimeStrikeGuessResultPublicFilter where
   sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultPublicFilterSort filter)
@@ -247,8 +261,8 @@ instance BuildFilter BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter wher
                 _
                 _
                 -- observedResult
-                mObservedResultEQ
-                mObservedResultNEQ
+                _
+                _
                 -- strike block height
                 mStrikeBlockHeightGTE
                 mStrikeBlockHeightLTE
@@ -274,9 +288,38 @@ instance BuildFilter BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter wher
     , maybe [] (\v -> [ BlockTimeStrikeStrikeMediantime <=. v]) mStrikeMediantimeLTE
     , maybe [] (\v -> [ BlockTimeStrikeStrikeMediantime ==. v]) mStrikeMediantimeEQ
     , maybe [] (\v -> [ BlockTimeStrikeStrikeMediantime !=. v]) mStrikeMediantimeNEQ
+    ]
+instance BuildFilter BlockTimeStrikeObserved BlockTimeStrikeGuessResultPublicFilter where
+  sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultPublicFilterSort filter)
+  buildFilter ( BlockTimeStrikeGuessResultPublicFilter
+                -- person
+                _
+                _
+                -- guess
+                _
+                _
+                -- observedResult
+                mObservedResultEQ
+                mObservedResultNEQ
+                -- strike block height
+                _
+                _
+                _
+                _
+                -- strike strikeMediantime
+                _
+                _
+                _
+                _
+                -- sort
+                _
+                _
+                _ -- lines per page
+              , _
+              ) = List.concat
         -- strike observed result
-    , maybe [] (\v -> [ BlockTimeStrikeObservedResult ==. Just v]) mObservedResultEQ
-    , maybe [] (\v -> [ BlockTimeStrikeObservedResult !=. Just v]) mObservedResultNEQ
+    [ maybe [] (\v -> [ BlockTimeStrikeObservedIsFast ==. v]) mObservedResultEQ
+    , maybe [] (\v -> [ BlockTimeStrikeObservedIsFast !=. v]) mObservedResultNEQ
     ]
 
 defaultBlockTimeStrikeGuessResultPublicFilter :: BlockTimeStrikeGuessResultPublicFilter

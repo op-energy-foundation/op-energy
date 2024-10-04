@@ -52,13 +52,27 @@ BlockTimeStrike
   -- data
   block BlockHeight
   strikeMediantime POSIXTime
-  observedResult SlowFast Maybe
-  observedBlockMediantime POSIXTime Maybe
-  observedBlockHash BlockHash Maybe
   -- metadata
   creationTime POSIXTime
   -- constraints
   UniqueBlockTimeStrikeBlockStrikeMediantime block strikeMediantime -- for now it is forbidden to have multiple strikes of the same (block,strikeMediantime) values
+  deriving Eq Show Generic
+
+BlockTimeStrikeObserved
+  -- data
+  -- those fields are being kept as a sanity check in case of block chain
+  -- reorganization as a last prove of the outcome. Though, we use confirmation
+  -- algorithm, which goal is to reduce a possibility of hitting this case
+  judgementBlockMediantime POSIXTime -- mediantime of the judgement block.
+  judgementBlockHash BlockHash -- hash of the judgement block.
+  judgementBlockHeight BlockHeight -- height of the judgement block.
+  isFast SlowFast
+  -- metadata
+  creationTime POSIXTime
+  -- reflinks
+  strike BlockTimeStrikeId
+  -- constraints
+  UniqueBlocktimeStrikeObservationStrike strike -- unique per strike
   deriving Eq Show Generic
 
 |]
@@ -116,14 +130,19 @@ defaultBlockTimeStrike = BlockTimeStrike
   { blockTimeStrikeBlock = defaultBlockHeight
   , blockTimeStrikeStrikeMediantime = defaultPOSIXTime
   , blockTimeStrikeCreationTime = defaultPOSIXTime
-  , blockTimeStrikeObservedResult = Just Slow
-  , blockTimeStrikeObservedBlockMediantime = Just 1
-  , blockTimeStrikeObservedBlockHash = Just BlockHash.defaultHash
   }
 instance ToSchema BlockTimeStrike where
-  declareNamedSchema _ = return $ NamedSchema (Just "BlockTimeStrike") $ mempty
-    & type_ ?~ SwaggerObject
-    & example ?~ toJSON defaultBlockTimeStrike
+  declareNamedSchema proxy = genericDeclareNamedSchema (commonSchemaOptions (def1 proxy)) proxy
+    & mapped.schema.type_ ?~ SwaggerObject
+    & mapped.schema.example ?~ toJSON defaultBlockTimeStrike
+    & mapped.schema.required .~
+      [ "block"
+      , "strikeMediantime"
+      , "creationTime"
+      ]
+    where
+      def1 :: Default a => Proxy a -> a
+      def1 _ = def
 instance ToJSON BlockTimeStrike where
   toJSON = commonToJSON genericToJSON
   toEncoding = commonToJSON genericToEncoding
@@ -132,10 +151,45 @@ instance FromJSON BlockTimeStrike where
 instance Default BlockTimeStrike where
   def = defaultBlockTimeStrike
 
+data BlockTimeStrikeObservedPublic =  BlockTimeStrikeObservedPublic
+  { blockTimeStrikeObservedPublicBlockHash :: Maybe BlockHash
+  , blockTimeStrikeObservedPublicCreationTime :: POSIXTime
+  , blockTimeStrikeObservedPublicResult :: SlowFast
+  , blockTimeStrikeObservedPublicBlockMediantime :: Maybe POSIXTime
+  }
+  deriving (Eq, Show, Generic)
+defaultBlockTimeStrikeObservedPublic :: BlockTimeStrikeObservedPublic
+defaultBlockTimeStrikeObservedPublic =  BlockTimeStrikeObservedPublic
+  { blockTimeStrikeObservedPublicBlockHash = Just BlockHash.defaultHash
+  , blockTimeStrikeObservedPublicCreationTime = defaultPOSIXTime
+  , blockTimeStrikeObservedPublicResult = Slow
+  , blockTimeStrikeObservedPublicBlockMediantime = Just 1
+  }
+instance ToSchema BlockTimeStrikeObservedPublic where
+  declareNamedSchema proxy = genericDeclareNamedSchema (commonSchemaOptions (def1 proxy)) proxy
+    & mapped.schema.type_ ?~ SwaggerObject
+    & mapped.schema.example ?~ toJSON defaultBlockTimeStrikeObservedPublic
+    & mapped.schema.required .~
+      [ "blockHash"
+      , "creationTime"
+      , "result"
+      , "blockMediantime"
+      ]
+    where
+      def1 :: Default a => Proxy a -> a
+      def1 _ = def
+instance ToJSON BlockTimeStrikeObservedPublic where
+  toJSON = commonToJSON genericToJSON
+  toEncoding = commonToJSON genericToEncoding
+instance FromJSON BlockTimeStrikeObservedPublic where
+  parseJSON = commonParseJSON
+instance Default BlockTimeStrikeObservedPublic where
+  def = defaultBlockTimeStrikeObservedPublic
+
 data SlowFast
   = Slow
   | Fast
-  deriving (Eq, Enum, Show, Generic)
+  deriving (Eq, Enum, Show, Bounded, Ord, Generic)
 
 instance ToJSON SlowFast where
   toJSON Slow = toJSON ("slow" :: Text)
@@ -143,13 +197,13 @@ instance ToJSON SlowFast where
 instance FromJSON SlowFast where
   parseJSON = withText "SlowFast" $! pure . verifySlowFast
 instance PersistField SlowFast where
-  toPersistValue Slow = toPersistValue ("slow"::Text)
-  toPersistValue Fast = toPersistValue ("fast"::Text)
-  fromPersistValue (PersistText "slow") = Prelude.Right $! Slow
-  fromPersistValue (PersistText "fast") = Prelude.Right $! Fast
-  fromPersistValue _ = Left $ "fromPersistValue SlowFastGuess, expected Text"
+  toPersistValue Slow = toPersistValue False
+  toPersistValue Fast = toPersistValue True
+  fromPersistValue (PersistBool False) = Prelude.Right Slow
+  fromPersistValue (PersistBool True) = Prelude.Right Fast
+  fromPersistValue _ = Left $ "fromPersistValue SlowFastGuess, unsupported value"
 instance PersistFieldSql SlowFast where
-  sqlType _ = SqlString
+  sqlType _ = SqlBool
 
 instance ToSchema SlowFast where
   declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
@@ -214,8 +268,8 @@ instance BuildFilter BlockTimeStrike BlockTimeStrikeFilter where
                 mstrikeBlockHeightLTE
                 mstrikeBlockHeightEQ
                 mstrikeBlockHeightNEQ
-                mobservedBlockHashEQ
-                mobservedBlockHashNEQ
+                _  -- mobservedBlockHashEQ
+                _  -- mobservedBlockHashNEQ
                 _ -- sort
                 _ -- class
                 _ -- linesPerPage
@@ -229,8 +283,27 @@ instance BuildFilter BlockTimeStrike BlockTimeStrikeFilter where
     , maybe [] (\v-> [BlockTimeStrikeBlock <=. v]) mstrikeBlockHeightLTE
     , maybe [] (\v-> [BlockTimeStrikeBlock ==. v]) mstrikeBlockHeightEQ
     , maybe [] (\v-> [BlockTimeStrikeBlock !=. v]) mstrikeBlockHeightNEQ
-    , maybe [] (\v-> [BlockTimeStrikeObservedBlockHash ==. Just v]) mobservedBlockHashEQ
-    , maybe [] (\v-> [BlockTimeStrikeObservedBlockHash !=. Just v]) mobservedBlockHashNEQ
+    ]
+instance BuildFilter BlockTimeStrikeObserved BlockTimeStrikeFilter where
+  sortOrder (filter, _) = maybe Descend sortOrderFromStrikeSortOrder (blockTimeStrikeFilterSort filter)
+  buildFilter ( BlockTimeStrikeFilter
+                _
+                _
+                _
+                _
+                _
+                _
+                _
+                _
+                mobservedBlockHashEQ
+                mobservedBlockHashNEQ
+                _ -- sort
+                _ -- class
+                _ -- linesPerPage
+              , _
+              ) = List.concat
+    [ maybe [] (\v-> [BlockTimeStrikeObservedJudgementBlockHash ==. v]) mobservedBlockHashEQ
+    , maybe [] (\v-> [BlockTimeStrikeObservedJudgementBlockHash !=. v]) mobservedBlockHashNEQ
     ]
 
 -- | we need to use separate sort order as we can sort strikes by guesses count

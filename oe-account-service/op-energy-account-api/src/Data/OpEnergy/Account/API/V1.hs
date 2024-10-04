@@ -76,7 +76,7 @@ type BlockTimeV1API
     :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
     :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter. Available filter options are listed in the format of current field. Meaning of fields' suffixes: 'GTE' - 'great-than-or-equal', 'LTE'- 'less-than-or-equal', 'EQ' - equal, 'NEQ' - 'not equal'. 'sort' field can have those values: 'descend', 'ascend', 'ascend_guesses_count' or 'descend_guesses_count'. '*_guesses_count' options changes sort orders by guesses count instead of block strike id. 'class' field can have those values: 'guessable', 'outcomeKnown', 'outcomeUnknown'" ] "filter" (FilterRequest BlockTimeStrike BlockTimeStrikeFilter)
     :> Description "returns list of strikes. By default, results are ordered by strike id in descending order. (ie, from newer to older)"
-    :> Get '[JSON] (PagingResult BlockTimeStrikePublic)
+    :> Get '[JSON] (PagingResult BlockTimeStrikeWithGuessesCountPublic)
 
   :<|> "strikes"
     :> "guesses"
@@ -84,7 +84,7 @@ type BlockTimeV1API
     :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
     :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter. Available filter options are listed in the format of current field. Meaning of fields' suffixes: 'GTE' - 'great-than-or-equal', 'LTE'- 'less-than-or-equal', 'EQ' - equal, 'NEQ' - 'not equal'. 'sort' field can have those values: 'descend', 'ascend'. 'class' field can have those values: 'guessable', 'outcomeKnown', 'outcomeUnknown'" ] "filter" (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
     :> Description "returns guesses for the given blocktime strike. By default, results are order by id in decending order (from new to old)"
-    :> Get '[JSON] (PagingResult BlockTimeStrikeGuessPublic)
+    :> Get '[JSON] (PagingResult BlockTimeStrikeGuessResultPublic)
 
   :<|> "strike"
     :> "guesses"
@@ -94,13 +94,13 @@ type BlockTimeV1API
     :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
     :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter. Available filter options are listed in the format of current field. Meaning of fields' suffixes: 'GTE' - 'great-than-or-equal', 'LTE'- 'less-than-or-equal', 'EQ' - equal, 'NEQ' - 'not equal'. 'sort' field can have those values: 'descend', 'ascend'." ] "filter" (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
     :> Description "returns guesses for the given blocktime strike. By default, results are order by id in decending order (from new to old)"
-    :> Get '[JSON] (PagingResult BlockTimeStrikeGuessPublic)
+    :> Get '[JSON] (PagingResult BlockTimeStrikeGuessResultPublic)
 
   :<|> "strike"
     :> Capture "BlockHeight" BlockHeight
     :> Capture "StrikeMediantime" (Natural Int)
     :> Description "returns strikes"
-    :> Get '[JSON] BlockTimeStrikePublic
+    :> Get '[JSON] BlockTimeStrikeWithGuessesCountPublic
 
   :<|> "strike"
     :> "guess"
@@ -108,7 +108,7 @@ type BlockTimeV1API
     :> Capture "BlockHeight" BlockHeight
     :> Capture "StrikeMediantime" (Natural Int)
     :> Description "returns user's guess for the given blocktime strike."
-    :> Get '[JSON] BlockTimeStrikeGuessPublic
+    :> Get '[JSON] BlockTimeStrikeGuessResultPublic
 
   :<|> "strike"
     :> "guess"
@@ -117,7 +117,7 @@ type BlockTimeV1API
     :> Capture "BlockHeight" BlockHeight
     :> Capture "StrikeMediantime" (Natural Int)
     :> Description "returns user's guess for the given blocktime strike."
-    :> Get '[JSON] BlockTimeStrikeGuessPublic
+    :> Get '[JSON] BlockTimeStrikeGuessResultPublic
 
   :<|> "git-hash"
     :> Description "returns short hash of commit of the op-energy git repo that had been used to build backend"

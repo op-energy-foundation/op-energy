@@ -3,40 +3,35 @@
 {-# LANGUAGE TemplateHaskell          #-}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE RecordWildCards          #-}
+{-# LANGUAGE EmptyDataDecls          #-}
 {-# LANGUAGE GADTs                     #-}
 module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
-  ( getBlockTimeStrikeFuturePage
-  , createBlockTimeStrikeFuture
+  ( createBlockTimeStrikeFuture
   , newTipHandlerLoop
-  , getBlockTimeStrikePastPage
   , getBlockTimeStrikesPage
   , getBlockTimeStrike
   ) where
 
 import           Servant (err400, err500)
-import           Control.Monad.Trans.Reader (ask, asks)
-import           Control.Monad.Logger(logDebug, logError, logInfo)
-import           Control.Monad(forever, when)
+import           Control.Monad.Trans.Reader ( ask, asks)
+import           Control.Monad.Logger( logError, logInfo)
+import           Control.Monad(forever )
 import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
 import qualified Control.Concurrent.STM.TVar as TVar
 import qualified Control.Concurrent.MVar as MVar
 import           Data.Text (Text)
-import qualified Data.Text as Text
 import           Data.Conduit( (.|) )
 import qualified Data.Conduit as C
-import qualified Data.Conduit.List as C
 import           Control.Monad.Trans
-import           Control.Exception.Safe as E
 
-import           Database.Persist.Postgresql
+import           Database.Persist
 import           Database.Persist.Pagination
 import           Prometheus(MonadMonitor)
 
 
 import           Data.Text.Show (tshow)
 import           Data.OpEnergy.Account.API.V1.Account
-import           Data.OpEnergy.Client as Blockspan
 import           Data.OpEnergy.API.V1.Block
 import           Data.OpEnergy.API.V1.Natural
 import           Data.OpEnergy.API.V1.Positive( naturalFromPositive, fromPositive)
@@ -48,34 +43,13 @@ import           Data.OpEnergy.Account.API.V1.FilterRequest
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
 import           Data.OpEnergy.API.V1.Error(throwJSON)
 import           OpEnergy.Account.Server.V1.Config (Config(..))
-import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging, profile, withDBTransaction, runLoggingIO, withDBNOTransactionROUnsafe )
+import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging, profile, withDBTransaction, withDBNOTransactionROUnsafe )
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledStrikeCreation as BlockTimeScheduledStrikeCreation
 import           OpEnergy.PagingResult
-
--- | O(ln users) + O(strike future)
--- returns list BlockTimeStrikeFuture records
-getBlockTimeStrikeFuturePage
-  :: Maybe (Natural Int)
-  -> Maybe (FilterRequest BlockTimeStrike BlockTimeStrikeFilter)
-  -> AppM (PagingResult BlockTimeStrike)
-getBlockTimeStrikeFuturePage mpage mfilter = profile "getBlockTimeStrikeFuturePage" $ do
-  mret <- getBlockTimeStrikeFuture
-  runLogging $ $(logDebug) $ "filter: " <> (Text.pack $ show mfilter)
-  case mret of
-    Nothing -> do
-      throwJSON err500 ("something went wrong"::Text)
-    Just ret -> return ret
-  where
-    filter = (BlockTimeStrikeObservedBlockHash ==. Nothing):(maybe [] (buildFilter . unFilterRequest) mfilter)
-    sort = maybe Descend (sortOrder . unFilterRequest) mfilter
-    getBlockTimeStrikeFuture :: (MonadIO m, MonadMonitor m, MonadCatch m) => AppT m (Maybe (PagingResult BlockTimeStrike))
-    getBlockTimeStrikeFuture = do
-      recordsPerReply <- asks (configRecordsPerReply . config)
-      let
-          linesPerPage = maybe recordsPerReply (maybe recordsPerReply id . blockTimeStrikeFilterLinesPerPage . fst . unFilterRequest ) mfilter
-      pagingResult mpage linesPerPage filter sort BlockTimeStrikeCreationTime $ C.map $ \(Entity _ v) -> v
+import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeObserve as Observe
+import qualified OpEnergy.BlockTimeStrike.Server.V1.Context as Context
 
 -- | O(ln accounts).
 -- Tries to create future block time strike. Requires authenticated user and blockheight should be in the future
@@ -122,35 +96,7 @@ createBlockTimeStrikeFuture token blockHeight strikeMediantime = profile "create
         { blockTimeStrikeBlock = blockHeight
         , blockTimeStrikeStrikeMediantime = fromIntegral strikeMediantime
         , blockTimeStrikeCreationTime = now
-        , blockTimeStrikeObservedResult = Nothing
-        , blockTimeStrikeObservedBlockMediantime = Nothing
-        , blockTimeStrikeObservedBlockHash = Nothing
         }
-
--- | O(ln accounts) + O(BlockTimeStrikePast).
--- returns list of BlockTimeStrikePastPublic records. Do not require authentication.
-getBlockTimeStrikePastPage
-  :: Maybe (Natural Int)
-  -> Maybe (FilterRequest BlockTimeStrike BlockTimeStrikeFilter)
-  -> AppM (PagingResult BlockTimeStrikePublic)
-getBlockTimeStrikePastPage mpage mfilter = profile "getBlockTimeStrikePastPage" $ do
-  mret <- getBlockTimeStrikePast
-  case mret of
-    Nothing -> do
-      throwJSON err500 ("something went wrong" :: Text)
-    Just ret -> return ret
-  where
-    sort = maybe Descend (sortOrder . unFilterRequest) mfilter
-    filter = (BlockTimeStrikeObservedBlockHash !=. Nothing):(maybe [] (buildFilter . unFilterRequest) mfilter)
-    getBlockTimeStrikePast = do
-      recordsPerReply <- asks (configRecordsPerReply . config)
-      let
-          linesPerPage = maybe recordsPerReply (maybe recordsPerReply id . blockTimeStrikeFilterLinesPerPage . fst . unFilterRequest ) mfilter
-      pagingResult mpage linesPerPage filter sort BlockTimeStrikeObservedBlockMediantime
-        $ ( C.awaitForever $ \(Entity strikeId strike) -> do
-            resultsCnt <- lift $ count [ BlockTimeStrikeGuessStrike ==. strikeId ]
-            C.yield (BlockTimeStrikePublic {blockTimeStrikePublicStrike = strike, blockTimeStrikePublicGuessesCount = fromIntegral resultsCnt})
-          )
 
 -- | this function is an entry point for a process, that creates blocktime past strikes when such block is being
 -- confirmed. After BlockTimeStrikePast creation, it will add record to the BlockTimeStrikeFutureObservedBlock table
@@ -168,89 +114,15 @@ newTipHandlerLoop = forever $ do
   runLogging $ $(logInfo) $ "BlockTimeStrikeService: tipHandler: received new confirmed tip height: " <> (tshow $ blockHeaderHeight confirmedTip)
   -- find out any future strikes <= new confirmed tip
   profile "newTipHandlerIteration" $ do
-    _ <- observeStrikes confirmedTip
-    BlockTimeScheduledStrikeCreation.maybeCreateStrikes confirmedTip
-  where
-    observeStrikes confirmedBlock = profile "moveFutureStrikesToPastStrikes" $ do
-      configBlockspanURL <- asks (configBlockspanURL . config)
-      recordsPerReply <- asks (configRecordsPerReply . config)
-      state <- ask
-      _ <- withDBTransaction "byBlock" $ do
-        C.runConduit
-          $ streamEntities
-            [ BlockTimeStrikeBlock <=. blockHeaderHeight confirmedBlock
-            , BlockTimeStrikeObservedBlockHash ==. Nothing
-            ]
-            BlockTimeStrikeId
-            (PageSize (fromPositive recordsPerReply))
-            Descend
-            (Range Nothing Nothing)
-          .| ( do
-              let
-                  loop (cnt::Int) = do
-                    mv <- C.await
-                    case mv of
-                      Nothing -> do
-                        liftIO $ runLoggingIO state $ $(logDebug) ("calculated results for " <> tshow cnt <> " strikes by observing block")
-                      Just (Entity strikeId strike) -> do
-                        blockHeader <-
-                          if blockHeaderHeight confirmedBlock == blockTimeStrikeBlock strike
-                          then return confirmedBlock -- if we already have this block header
-                          else liftIO $! Blockspan.withClient configBlockspanURL $ getBlockByHeight (blockTimeStrikeBlock strike)
-                        when (blockTimeStrikeObservedResult strike == Nothing) $ do -- when haven't been calculated yet
-                          lift $ update strikeId
-                            [ BlockTimeStrikeObservedResult =.
-                              ( Just $!
-                                  if fromIntegral (blockHeaderMediantime blockHeader) <= blockTimeStrikeStrikeMediantime strike
-                                  then Fast
-                                  else Slow
-                              )
-                            ]
-                        lift $ update strikeId
-                          [ BlockTimeStrikeObservedBlockMediantime =. (Just $! fromIntegral $ blockHeaderMediantime blockHeader)
-                          , BlockTimeStrikeObservedBlockHash =. (Just $! blockHeaderHash blockHeader)
-                          ]
-                        loop $! (cnt + 1)
-              loop 0
-            )
-      latestUnconfirmedBlockHeightV <- asks (BlockTime.latestUnconfirmedBlockHeight . blockTimeState)
-      mlatestUnconfirmedBlockHeight <- liftIO $ TVar.readTVarIO latestUnconfirmedBlockHeightV
-      _ <- case mlatestUnconfirmedBlockHeight of
-        Nothing -> return ()
-        Just latestUnconfirmedBlockHeight -> do
-          _ <- withDBTransaction "byTime" $ do
-            C.runConduit
-              $ streamEntities
-                [ BlockTimeStrikeStrikeMediantime <=. (fromIntegral $ blockHeaderMediantime confirmedBlock)
-                , BlockTimeStrikeBlock >. latestUnconfirmedBlockHeight -- don't resolve blocks, that had already discovered, but haven't been confirmed yet. It which will be observed soon and the result will be calculated by it's mediantime
-                , BlockTimeStrikeObservedResult ==. Nothing
-                ]
-                BlockTimeStrikeId
-                (PageSize (fromPositive recordsPerReply))
-                Descend
-                (Range Nothing Nothing)
-              .| ( do
-                  let
-                      loop (cnt::Int) = do
-                        mv <- C.await
-                        case mv of
-                          Nothing -> do
-                            liftIO $ runLoggingIO state $ $(logDebug) ("calculated results for " <> tshow cnt <> " strikes by reaching time")
-                          Just (Entity strikeId _) -> do
-                            lift $ update strikeId -- we only get result, as no block had been observed yet
-                              [ BlockTimeStrikeObservedResult =. Just Slow
-                              ]
-                            loop $! (cnt + 1)
-                  loop 0
-                )
-          return ()
-      return ()
+    Observe.withLeastUnobservedConfirmedBlock confirmedTip $ \leastUnobservedConfirmedBlock-> do
+      Observe.observeStrikes leastUnobservedConfirmedBlock
+      BlockTimeScheduledStrikeCreation.maybeCreateStrikes $! Context.unContext leastUnobservedConfirmedBlock
 
 -- | returns list of BlockTimeStrikePublic records
 getBlockTimeStrikesPage
   :: Maybe (Natural Int)
   -> Maybe (FilterRequest BlockTimeStrike BlockTimeStrikeFilter)
-  -> AppM (PagingResult BlockTimeStrikePublic)
+  -> AppM (PagingResult BlockTimeStrikeWithGuessesCountPublic)
 getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
   latestUnconfirmedBlockHeightV <- asks (BlockTime.latestUnconfirmedBlockHeight . blockTimeState)
   mlatestUnconfirmedBlockHeight <- liftIO $ TVar.readTVarIO latestUnconfirmedBlockHeightV
@@ -265,17 +137,10 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
                     minimumGuessableBlock = latestUnconfirmedBlockHeight + naturalFromPositive configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
                 in
                   ( (BlockTimeStrikeBlock >=. minimumGuessableBlock) -- block height should match threshold
-                  : (BlockTimeStrikeObservedResult ==. Nothing) -- and it should not be discovered yet
                   :filter
                   )
-              Just BlockTimeStrikeFilterClassOutcomeKnown ->
-                ( (BlockTimeStrikeObservedResult !=. Nothing)
-                 :filter
-                )
-              Just BlockTimeStrikeFilterClassOutcomeUnknown ->
-                ( (BlockTimeStrikeObservedResult ==. Nothing)
-                 :filter
-                )
+              Just BlockTimeStrikeFilterClassOutcomeKnown -> filter -- class will be handled inside lookup routine
+              Just BlockTimeStrikeFilterClassOutcomeUnknown -> filter -- class will be handled inside lookup routine
       mret <- getBlockTimeStrikePast finalFilter
       case mret of
         Nothing -> do
@@ -299,8 +164,33 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
             StrikeSortOrderAscendGuessesCount ->  Right ()
             StrikeSortOrderDescendGuessesCount -> Right ()
       case eGuessesCount of
-        Left () -> pagingResult mpage linesPerPage finalFilter sort BlockTimeStrikeId
-          $ ( C.awaitForever $ \(Entity strikeId strike) -> do
+        Left () -> pagingResult mpage linesPerPage finalFilter sort BlockTimeStrikeId -- select strikes with given filter first
+          $ ( C.awaitForever $ \v@(Entity strikeId _) -> do -- class
+              -- now get possible observed data for strike
+              mObserved <- lift $ selectFirst
+                ( (BlockTimeStrikeObservedStrike ==. strikeId)
+                : (maybe [] ( buildFilter . unFilterRequest . mapFilter) mfilter)
+                )
+                []
+              -- now get possible calculated outcome data for strike
+              mResult <- lift $ selectFirst
+                ( (BlockTimeStrikeObservedStrike ==. strikeId)
+                : []
+                )
+                []
+              case maybe Nothing (blockTimeStrikeFilterClass . fst . unFilterRequest) mfilter of
+                Nothing -> C.yield (v, mObserved, mResult) -- don't care about existence of observed data
+                Just BlockTimeStrikeFilterClassGuessable-> case mResult of
+                  Nothing -> C.yield (v, mObserved, mResult) -- strike have not been observed and finalFilter should ensure, that it is in the future with proper guess threshold
+                  _ -> return () -- otherwise, block haven't matched the criteria and should be ignored
+                Just BlockTimeStrikeFilterClassOutcomeUnknown-> case mResult of
+                  Nothing-> C.yield (v, mObserved, mResult) -- haven't been observed
+                  _ -> return ()
+                Just BlockTimeStrikeFilterClassOutcomeKnown-> case mResult of
+                  Just _ -> C.yield (v, mObserved, mResult) -- had been observed
+                  _ -> return ()
+            )
+          .| ( C.awaitForever $ \(Entity strikeId strike, mObserved, mResult) -> do
               mguessesCount <- lift $ selectFirst
                 [ CalculatedBlockTimeStrikeGuessesCountStrike ==. strikeId]
                 []
@@ -314,9 +204,29 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
                     , calculatedBlockTimeStrikeGuessesCountGuessesCount = guessesCount
                     }
                   return guessesCount
-              C.yield (BlockTimeStrikePublic
-                       { blockTimeStrikePublicStrike = strike
-                       , blockTimeStrikePublicGuessesCount = fromIntegral guessesCount
+              C.yield (BlockTimeStrikeWithGuessesCountPublic
+                       { blockTimeStrikeWithGuessesCountPublicStrike = BlockTimeStrikePublic
+                         { blockTimeStrikePublicObservedResult = maybe
+                           Nothing
+                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedIsFast v)
+                           mResult
+                         , blockTimeStrikePublicObservedBlockMediantime = maybe
+                           Nothing
+                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockMediantime v)
+                           mObserved
+                         , blockTimeStrikePublicObservedBlockHash = maybe
+                           Nothing
+                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockHash v)
+                           mObserved
+                         , blockTimeStrikePublicObservedBlockHeight = maybe
+                           Nothing
+                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockHeight v)
+                           mObserved
+                         , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
+                         , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
+                         , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
+                         }
+                       , blockTimeStrikeWithGuessesCountPublicGuessesCount = fromIntegral guessesCount
                        }
                       )
             )
@@ -327,12 +237,37 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
                  :finalFilter
                 )
                 []
+              mObserved <- lift $ selectFirst
+                ( (BlockTimeStrikeObservedStrike ==. calculatedBlockTimeStrikeGuessesCountStrike guessesCount)
+                : (maybe [] ( buildFilter . unFilterRequest . mapFilter) mfilter)
+                )[]
               case mstrike of
-                Just (Entity _ strike) -> C.yield (BlockTimeStrikePublic
-                        { blockTimeStrikePublicStrike = strike
-                        , blockTimeStrikePublicGuessesCount = fromIntegral (calculatedBlockTimeStrikeGuessesCountGuessesCount guessesCount)
-                        }
-                       )
+                Just (Entity _ strike) -> C.yield (BlockTimeStrikeWithGuessesCountPublic
+                       { blockTimeStrikeWithGuessesCountPublicStrike = BlockTimeStrikePublic
+                         { blockTimeStrikePublicObservedResult = maybe
+                           Nothing
+                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedIsFast v)
+                           mObserved
+                         , blockTimeStrikePublicObservedBlockMediantime = maybe
+                           Nothing
+                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockMediantime v)
+                           mObserved
+                         , blockTimeStrikePublicObservedBlockHash = maybe
+                           Nothing
+                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockHash v)
+                           mObserved
+                         , blockTimeStrikePublicObservedBlockHeight = maybe
+                           Nothing
+                           (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockHeight v)
+                           mObserved
+                         , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
+                         , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
+                         , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
+                         }
+                       , blockTimeStrikeWithGuessesCountPublicGuessesCount =
+                         fromIntegral (calculatedBlockTimeStrikeGuessesCountGuessesCount guessesCount)
+                       }
+                      )
                 Nothing -> return ()
             )
 
@@ -340,7 +275,7 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
 getBlockTimeStrike
   :: BlockHeight
   -> Natural Int
-  -> AppM BlockTimeStrikePublic
+  -> AppM BlockTimeStrikeWithGuessesCountPublic
 getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $ do
   mret <- actualGetBlockTimeStrike
   case mret of
@@ -364,8 +299,50 @@ getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $
                      mv <- C.await
                      case mv of
                        Just (Entity strikeId strike) -> do
-                         resultsCnt <- lift $ count [ BlockTimeStrikeGuessStrike ==. strikeId ]
-                         return ( Just (BlockTimeStrikePublic {blockTimeStrikePublicStrike = strike, blockTimeStrikePublicGuessesCount = fromIntegral resultsCnt}))
+                         mguessesCount <- lift $ selectFirst
+                           [ CalculatedBlockTimeStrikeGuessesCountStrike ==. strikeId]
+                           []
+                         guessesCount <- case mguessesCount of
+                           Just (Entity _ guessesCount) -> -- results are already calculated
+                             return (calculatedBlockTimeStrikeGuessesCountGuessesCount guessesCount)
+                           Nothing -> do -- fallback mode, recount online, which maybe a bad thing to do here TODO decide if it should be removed
+                             guessesCount <- lift $ verifyNatural <$> count [ BlockTimeStrikeGuessStrike ==. strikeId ]
+                             _ <- lift $ insert $! CalculatedBlockTimeStrikeGuessesCount
+                               { calculatedBlockTimeStrikeGuessesCountStrike = strikeId
+                               , calculatedBlockTimeStrikeGuessesCountGuessesCount = guessesCount
+                               }
+                             return guessesCount
+                         mObserved <- lift $ selectFirst
+                           [ BlockTimeStrikeObservedStrike ==. strikeId ]
+                           []
+                         return ( Just ( BlockTimeStrikeWithGuessesCountPublic
+                                         { blockTimeStrikeWithGuessesCountPublicStrike = BlockTimeStrikePublic
+                                           { blockTimeStrikePublicObservedResult = maybe
+                                             Nothing
+                                             (\(Entity _ v)-> Just $! blockTimeStrikeObservedIsFast v)
+                                             mObserved
+                                           , blockTimeStrikePublicObservedBlockMediantime = maybe
+                                             Nothing
+                                             (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockMediantime v)
+                                             mObserved
+                                           , blockTimeStrikePublicObservedBlockHash = maybe
+                                             Nothing
+                                             (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockHash v)
+                                             mObserved
+                                           , blockTimeStrikePublicObservedBlockHeight = maybe
+                                             Nothing
+                                             (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockHeight v)
+                                             mObserved
+                                           , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
+                                           , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
+                                           , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
+                                           }
+                                         , blockTimeStrikeWithGuessesCountPublicGuessesCount =
+                                           fromIntegral guessesCount
+                                         }
+                                       )
+                                )
                        Nothing -> return acc
                in loop Nothing
              )
+
