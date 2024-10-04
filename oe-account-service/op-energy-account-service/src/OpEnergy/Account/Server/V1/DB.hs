@@ -140,8 +140,18 @@ migrateAccountDBSchema config = do
     case mrecord of
       Just (Entity currentDBVersionId record)-> return (accountDBVersion record, currentDBVersionId)
       Nothing -> do -- fallback to default version of 0
+        (mPersonTableExistButVersionUnknown::[Single Bool]) <- rawSql
+          "SELECT EXISTS (SELECT FROM information_schema.tables where table_name = ? and table_schema='public');"
+          [ PersistText $! unEntityNameDB (tableDBName (undefined :: Person))]
         let
-            currentDBVersion = verifyNatural dbVersionAfterMigrations
+            currentDBVersion = case mPersonTableExistButVersionUnknown of
+              ((Single True):_)  -> needToApplyCustomMigrations
+                where
+                  needToApplyCustomMigrations = 0
+              ((Single False):_)  -> latestSchemaWillBeCreatedByORM
+                where
+                latestSchemaWillBeCreatedByORM = verifyNatural dbVersionAfterMigrations
+              _ -> error ("migrateAccountDBSchema: got unexpected response from DB: " ++ show mPersonTableExistButVersionUnknown)
         currentDBVersionId <- insert $ AccountDB
           { accountDBVersion = currentDBVersion
           }
@@ -245,8 +255,18 @@ migrateBlockTimeStrikeDBSchema config = do
     case mrecord of
       Just (Entity currentDBVersionId record)-> return (blockTimeStrikeDBVersion record, currentDBVersionId)
       Nothing -> do -- fallback to default version of 0
+        (mBlockTimeStrikeTableExistButVersionUnknown::[Single Bool]) <- rawSql
+          "SELECT EXISTS (SELECT FROM information_schema.tables where table_name = ? and table_schema='public');"
+          [ PersistText $! unEntityNameDB (tableDBName (undefined :: BlockTimeStrike))]
         let
-            currentDBVersion = verifyNatural dbVersionAfterMigrations
+            currentDBVersion = case mBlockTimeStrikeTableExistButVersionUnknown of
+              ((Single True):_)  -> needToApplyCustomMigrations
+                where
+                  needToApplyCustomMigrations = 0
+              ((Single False):_)  -> latestSchemaWillBeCreatedByORM
+                where
+                latestSchemaWillBeCreatedByORM = verifyNatural dbVersionAfterMigrations
+              _ -> error ("migrateBlockTimeStrikeDBSchema: got unexpected response from DB: " ++ show mBlockTimeStrikeTableExistButVersionUnknown)
         currentDBVersionId <- insert $ BlockTimeStrikeDB
           { blockTimeStrikeDBVersion = currentDBVersion
           , blockTimeStrikeDBLatestConfirmedHeight = Nothing
