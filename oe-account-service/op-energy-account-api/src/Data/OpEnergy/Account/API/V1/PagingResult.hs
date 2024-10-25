@@ -2,7 +2,9 @@
  -- The purpose is to be used as a generic container of list values with paging
  --}
 {-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE OverloadedLists            #-}
 {-# LANGUAGE DeriveGeneric              #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
 module Data.OpEnergy.Account.API.V1.PagingResult where
 
 import           Data.Swagger
@@ -42,14 +44,35 @@ instance ToJSON a => ToJSON (PagingResult a) where
       ) . (List.drop (Text.length "PagingResult"))
     , A.constructorTagModifier = List.map Char.toLower
     }
-instance (Default a, ToJSON a, Show a) => ToSchema (PagingResult a) where
-  declareNamedSchema v = return $ NamedSchema (Just ("PagingResult" <> Text.pack (List.takeWhile (/=' ') (show (List.head (pagingResultResults (def1 v))))))) $ mempty
-    & type_ ?~ SwaggerObject
-    & example ?~ toJSON (def1 v)
+instance (Default a, ToJSON a, Show a, ToSchema a) => ToSchema (PagingResult a) where
+  declareNamedSchema v = do
+    nextPageSchema <- declareSchemaRef (Proxy :: Proxy (Maybe Word32))
+    subSchema <- declareSchema ((pop  v))
+    subSchemaRef <- declareSchemaRef (proxyList $ pop v)
+    let
+        subDescription = maybe
+          "no schema description for a nested type given"
+          ( "where nested type is: " <>)
+          $! _schemaDescription subSchema
+    return $ NamedSchema (Just ("PagingResult" <> Text.pack (List.takeWhile (/=' ') (show (List.head (pagingResultResults (def1 v))))))) $ mempty
+      & type_ ?~ SwaggerObject
+      & description ?~ ("Provides paging results for a list of elements of nested types. " <> subDescription)
+      & properties .~
+        [ ("nextPage", nextPageSchema)
+        , ("results", subSchemaRef)
+        ]
+      & required .~
+        [ "results"
+        ]
+      & example ?~ toJSON (def1 v)
     where
       -- needed to satisfy type checker
       def1 :: Default b => Proxy b-> b
       def1 _ = def
+      proxyList :: Proxy a -> Proxy [a]
+      proxyList _ = Proxy
+      pop :: Proxy (PagingResult a) -> Proxy a
+      pop _ = Proxy
 
 instance Default a => Default (PagingResult a) where
   def = defaultPagingResult

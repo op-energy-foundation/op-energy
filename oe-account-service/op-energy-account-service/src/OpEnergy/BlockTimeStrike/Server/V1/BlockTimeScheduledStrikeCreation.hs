@@ -80,9 +80,6 @@ ensureGuessableStrikeExistsAhead confirmedTip = profile "ensureGuessableStrikeEx
                                       $ blockHeaderMediantime confirmedTip
                                       + fromIntegral ((fromNatural (height - blockHeaderHeight confirmedTip)) * 600) -- assume 10 minutes time slices for strike mediantime
                                     , blockTimeStrikeCreationTime = utcTimeToPOSIXSeconds now
-                                    , blockTimeStrikeObservedResult = Nothing
-                                    , blockTimeStrikeObservedBlockMediantime = Nothing
-                                    , blockTimeStrikeObservedBlockHash = Nothing
                                     })
           return nonExistentStrikeHeights
       when (List.length nonExistentBlockHeights > 0) $ do
@@ -139,9 +136,6 @@ ensureNextEpochGuessableStrikeExists confirmedTip = profile "ensureNextEpochGues
               { blockTimeStrikeBlock = nextEpochBlock
               , blockTimeStrikeStrikeMediantime = fromIntegral nextEpochBlockMediantime
               , blockTimeStrikeCreationTime = now
-              , blockTimeStrikeObservedResult = Nothing
-              , blockTimeStrikeObservedBlockMediantime = Nothing
-              , blockTimeStrikeObservedBlockHash = Nothing
               }
       case mmNextEpochBlockStrikeCreated of
         Nothing ->
