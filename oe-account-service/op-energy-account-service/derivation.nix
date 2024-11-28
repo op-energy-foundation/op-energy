@@ -67,9 +67,9 @@ mkDerivation {
   enableSharedExecutables = false;
   enableSharedLibraries = false;
   enableLibraryForGhci = false;
-  enableSeparateBinOutput = false;
+  enableSeparateBinOutput = true;
   testHaskellDepends = [ base hspec text ];
   doBenchmark = false;
-  doCheck = false;
+  doCheck = true;
   license = lib.licenses.bsd3;
 }
