@@ -88,6 +88,8 @@ data BlockTimeStrikeFilter = BlockTimeStrikeFilter
   , blockTimeStrikeFilterStrikeBlockHeightNEQ       :: Maybe BlockHeight
   , blockTimeStrikeFilterObservedBlockHashEQ        :: Maybe BlockHash
   , blockTimeStrikeFilterObservedBlockHashNEQ       :: Maybe BlockHash
+  , blockTimeStrikeFilterObservedResultEQ           :: Maybe SlowFast
+  , blockTimeStrikeFilterObservedResultNEQ          :: Maybe SlowFast
   , blockTimeStrikeFilterSort                       :: Maybe StrikeSortOrder
   , blockTimeStrikeFilterClass                      :: Maybe BlockTimeStrikeFilterClass
   , blockTimeStrikeFilterLinesPerPage               :: Maybe (Positive Int)
@@ -120,6 +122,8 @@ defaultBlockTimeStrikeFilter = BlockTimeStrikeFilter
   , blockTimeStrikeFilterStrikeBlockHeightNEQ  = Just 1
   , blockTimeStrikeFilterObservedBlockHashEQ   = Just BlockHash.defaultHash
   , blockTimeStrikeFilterObservedBlockHashNEQ  = Just BlockHash.defaultHash
+  , blockTimeStrikeFilterObservedResultEQ      = Just Slow
+  , blockTimeStrikeFilterObservedResultNEQ     = Just Fast
   , blockTimeStrikeFilterSort                  = Just StrikeSortOrderDescend
   , blockTimeStrikeFilterClass                 = Just BlockTimeStrikeFilterClassGuessable
   , blockTimeStrikeFilterLinesPerPage          = Just 100
@@ -270,6 +274,8 @@ instance BuildFilter BlockTimeStrike BlockTimeStrikeFilter where
                 mstrikeBlockHeightNEQ
                 _  -- mobservedBlockHashEQ
                 _  -- mobservedBlockHashNEQ
+                _  -- mobservedResultEQ
+                _  -- mobservedResultNEQ
                 _ -- sort
                 _ -- class
                 _ -- linesPerPage
@@ -297,6 +303,8 @@ instance BuildFilter BlockTimeStrikeObserved BlockTimeStrikeFilter where
                 _
                 mobservedBlockHashEQ
                 mobservedBlockHashNEQ
+                mobservedResultEQ
+                mobservedResultNEQ
                 _ -- sort
                 _ -- class
                 _ -- linesPerPage
@@ -304,6 +312,8 @@ instance BuildFilter BlockTimeStrikeObserved BlockTimeStrikeFilter where
               ) = List.concat
     [ maybe [] (\v-> [BlockTimeStrikeObservedJudgementBlockHash ==. v]) mobservedBlockHashEQ
     , maybe [] (\v-> [BlockTimeStrikeObservedJudgementBlockHash !=. v]) mobservedBlockHashNEQ
+    , maybe [] (\v-> [BlockTimeStrikeObservedIsFast ==. v]) mobservedResultEQ
+    , maybe [] (\v-> [BlockTimeStrikeObservedIsFast !=. v]) mobservedResultNEQ
     ]
 
 -- | we need to use separate sort order as we can sort strikes by guesses count
