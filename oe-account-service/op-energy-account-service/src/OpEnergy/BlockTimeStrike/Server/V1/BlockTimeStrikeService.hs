@@ -125,10 +125,12 @@ getBlockTimeStrikesPage
   -> AppM (PagingResult BlockTimeStrikeWithGuessesCountPublic)
 getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
   latestUnconfirmedBlockHeightV <- asks (BlockTime.latestUnconfirmedBlockHeight . blockTimeState)
+  confirmedTipV <- asks (BlockTime.latestConfirmedBlock . blockTimeState)
   mlatestUnconfirmedBlockHeight <- liftIO $ TVar.readTVarIO latestUnconfirmedBlockHeightV
+  mconfirmedTip <- liftIO $ TVar.readTVarIO confirmedTipV
   configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip <- asks (configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip . config)
-  case mlatestUnconfirmedBlockHeight of
-    Just latestUnconfirmedBlockHeight -> do
+  case (mlatestUnconfirmedBlockHeight, mconfirmedTip) of
+    (Just latestUnconfirmedBlockHeight, Just confirmedTip) -> do
       let finalFilter =
             case maybe Nothing (blockTimeStrikeFilterClass . fst . unFilterRequest) mfilter of
               Nothing -> filter
@@ -139,9 +141,20 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
                   ( (BlockTimeStrikeBlock >=. minimumGuessableBlock) -- block height should match threshold
                   :filter
                   )
-              Just BlockTimeStrikeFilterClassOutcomeKnown -> filter -- class will be handled inside lookup routine
-              Just BlockTimeStrikeFilterClassOutcomeUnknown -> filter -- class will be handled inside lookup routine
-      mret <- getBlockTimeStrikePast finalFilter
+              Just BlockTimeStrikeFilterClassOutcomeKnown ->
+                let
+                  preFilter = ( [ BlockTimeStrikeBlock <=. latestUnconfirmedBlockHeight ]
+                             ||. [ BlockTimeStrikeStrikeMediantime <=. fromIntegral (blockHeaderMediantime confirmedTip)]
+                             ) -- block height should match threshold
+                in
+                ( preFilter
+                ++ filter -- class will be handled inside lookup routine
+                )
+              Just BlockTimeStrikeFilterClassOutcomeUnknown ->
+                ( (BlockTimeStrikeBlock >. latestUnconfirmedBlockHeight) -- block height should match threshold
+                : filter -- class will be handled inside lookup routine
+                )
+      mret <- getBlockTimeStrikePast finalFilter latestUnconfirmedBlockHeight
       case mret of
         Nothing -> do
           throwJSON err500 ("something went wrong"::Text)
@@ -153,7 +166,7 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
   where
     sort = maybe Descend (sortOrder . unFilterRequest) mfilter
     filter = (maybe [] (buildFilter . unFilterRequest) mfilter)
-    getBlockTimeStrikePast finalFilter = do
+    getBlockTimeStrikePast finalFilter latestUnconfirmedBlockHeight = do
       recordsPerReply <- asks (configRecordsPerReply . config)
       let
           linesPerPage = maybe recordsPerReply (maybe recordsPerReply id . blockTimeStrikeFilterLinesPerPage . fst . unFilterRequest ) mfilter
@@ -165,33 +178,22 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
             StrikeSortOrderDescendGuessesCount -> Right ()
       case eGuessesCount of
         Left () -> pagingResult mpage linesPerPage finalFilter sort BlockTimeStrikeId -- select strikes with given filter first
-          $ ( C.awaitForever $ \v@(Entity strikeId _) -> do -- class
+          $ ( C.awaitForever $ \v@(Entity strikeId strike) -> do -- class
               case maybe Nothing (blockTimeStrikeFilterClass . fst . unFilterRequest) mfilter of
                 Nothing -> do
-                  -- now get possible observed data for strike
-                  mObserved <- lift $ selectFirst
-                    [ (BlockTimeStrikeObservedStrike ==. strikeId)
-                    ]
-                    []
+                  mObserved <- if blockTimeStrikeBlock strike < latestUnconfirmedBlockHeight
+                    then
+                      -- now get possible observed data for strike
+                      lift $ selectFirst
+                        [ (BlockTimeStrikeObservedStrike ==. strikeId)
+                        ]
+                        []
+                    else return Nothing
                   C.yield (v, mObserved) -- don't care about existence of observed data
                 Just BlockTimeStrikeFilterClassGuessable-> do
-                  -- now get possible observed data for strike
-                  mObserved <- lift $ selectFirst
-                    [ (BlockTimeStrikeObservedStrike ==. strikeId)
-                    ]
-                    []
-                  case mObserved of
-                    Nothing -> C.yield (v, mObserved) -- strike have not been observed and finalFilter should ensure, that it is in the future with proper guess threshold
-                    _ -> return () -- otherwise, block haven't matched the criteria and should be ignored
+                  C.yield (v, Nothing) -- strike have not been observed and finalFilter should ensure, that it is in the future with proper guess threshold
                 Just BlockTimeStrikeFilterClassOutcomeUnknown-> do
-                  -- now get possible observed data for strike with possible custom filter
-                  mObserved <- lift $ selectFirst
-                    [ (BlockTimeStrikeObservedStrike ==. strikeId)
-                    ]
-                    []
-                  case mObserved of
-                    Nothing-> C.yield (v, mObserved) -- haven't been observed
-                    _ -> return ()
+                  C.yield (v, Nothing) -- haven't been observed
                 Just BlockTimeStrikeFilterClassOutcomeKnown-> do
                   -- now get possible observed data for strike with possible custom filter
                   mObserved <- lift $ selectFirst
