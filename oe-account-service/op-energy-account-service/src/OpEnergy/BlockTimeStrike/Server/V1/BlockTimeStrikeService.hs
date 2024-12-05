@@ -166,31 +166,44 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
       case eGuessesCount of
         Left () -> pagingResult mpage linesPerPage finalFilter sort BlockTimeStrikeId -- select strikes with given filter first
           $ ( C.awaitForever $ \v@(Entity strikeId _) -> do -- class
-              -- now get possible observed data for strike
-              mObserved <- lift $ selectFirst
-                ( (BlockTimeStrikeObservedStrike ==. strikeId)
-                : (maybe [] ( buildFilter . unFilterRequest . mapFilter) mfilter)
-                )
-                []
-              -- now get possible calculated outcome data for strike
-              mResult <- lift $ selectFirst
-                ( (BlockTimeStrikeObservedStrike ==. strikeId)
-                : []
-                )
-                []
               case maybe Nothing (blockTimeStrikeFilterClass . fst . unFilterRequest) mfilter of
-                Nothing -> C.yield (v, mObserved, mResult) -- don't care about existence of observed data
-                Just BlockTimeStrikeFilterClassGuessable-> case mResult of
-                  Nothing -> C.yield (v, mObserved, mResult) -- strike have not been observed and finalFilter should ensure, that it is in the future with proper guess threshold
-                  _ -> return () -- otherwise, block haven't matched the criteria and should be ignored
-                Just BlockTimeStrikeFilterClassOutcomeUnknown-> case mResult of
-                  Nothing-> C.yield (v, mObserved, mResult) -- haven't been observed
-                  _ -> return ()
-                Just BlockTimeStrikeFilterClassOutcomeKnown-> case mResult of
-                  Just _ -> C.yield (v, mObserved, mResult) -- had been observed
-                  _ -> return ()
+                Nothing -> do
+                  -- now get possible observed data for strike
+                  mObserved <- lift $ selectFirst
+                    [ (BlockTimeStrikeObservedStrike ==. strikeId)
+                    ]
+                    []
+                  C.yield (v, mObserved) -- don't care about existence of observed data
+                Just BlockTimeStrikeFilterClassGuessable-> do
+                  -- now get possible observed data for strike
+                  mObserved <- lift $ selectFirst
+                    [ (BlockTimeStrikeObservedStrike ==. strikeId)
+                    ]
+                    []
+                  case mObserved of
+                    Nothing -> C.yield (v, mObserved) -- strike have not been observed and finalFilter should ensure, that it is in the future with proper guess threshold
+                    _ -> return () -- otherwise, block haven't matched the criteria and should be ignored
+                Just BlockTimeStrikeFilterClassOutcomeUnknown-> do
+                  -- now get possible observed data for strike with possible custom filter
+                  mObserved <- lift $ selectFirst
+                    [ (BlockTimeStrikeObservedStrike ==. strikeId)
+                    ]
+                    []
+                  case mObserved of
+                    Nothing-> C.yield (v, mObserved) -- haven't been observed
+                    _ -> return ()
+                Just BlockTimeStrikeFilterClassOutcomeKnown-> do
+                  -- now get possible observed data for strike with possible custom filter
+                  mObserved <- lift $ selectFirst
+                    ( (BlockTimeStrikeObservedStrike ==. strikeId)
+                    : (maybe [] ( buildFilter . unFilterRequest . mapFilter) mfilter)
+                    )
+                    []
+                  case mObserved of
+                    Just _ -> C.yield (v, mObserved) -- had been observed
+                    _ -> return ()
             )
-          .| ( C.awaitForever $ \(Entity strikeId strike, mObserved, mResult) -> do
+          .| ( C.awaitForever $ \(Entity strikeId strike, mObserved) -> do
               mguessesCount <- lift $ selectFirst
                 [ CalculatedBlockTimeStrikeGuessesCountStrike ==. strikeId]
                 []
@@ -209,7 +222,7 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
                          { blockTimeStrikePublicObservedResult = maybe
                            Nothing
                            (\(Entity _ v)-> Just $! blockTimeStrikeObservedIsFast v)
-                           mResult
+                           mObserved
                          , blockTimeStrikePublicObservedBlockMediantime = maybe
                            Nothing
                            (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockMediantime v)
