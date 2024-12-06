@@ -53,8 +53,8 @@ pagingResult mpage recordsPerReply filter sortOrder field next = profile "paging
         (PageSize ((fromPositive recordsPerReply) + 1))
         sortOrder
         (Range Nothing Nothing)
-      .| (C.drop (fromNatural page * fromPositive recordsPerReply) >> C.awaitForever C.yield) -- navigate to page
       .| next
+      .| (C.drop (fromNatural page * fromPositive recordsPerReply) >> C.awaitForever C.yield) -- navigate to page
       .| C.take (fromPositive recordsPerReply + 1) -- we take +1 to understand if there is a next page available
     return (pageResults)
   case mret of
@@ -71,3 +71,4 @@ pagingResult mpage recordsPerReply filter sortOrder field next = profile "paging
         }
   where
     page = maybe 0 id mpage
+
