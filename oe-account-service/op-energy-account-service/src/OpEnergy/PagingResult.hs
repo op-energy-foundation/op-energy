@@ -7,6 +7,7 @@ module OpEnergy.PagingResult
 
 import qualified Data.List as List
 import           Control.Monad.Trans.Reader ( ReaderT)
+import           Control.Monad(forM_)
 
 import qualified Data.Conduit as C
 import           Data.Conduit ((.|), runConduit, ConduitT)
@@ -47,12 +48,7 @@ pagingResult
 pagingResult mpage recordsPerReply filter sortOrder field next = profile "pagingResult" $ do
   mret <- withDBTransaction "" $ do
     pageResults <- runConduit
-      $ streamEntities
-        filter
-        field
-        (PageSize ((fromPositive recordsPerReply) + 1))
-        sortOrder
-        (Range Nothing Nothing)
+      $ loopSource Nothing
       .| next
       .| (C.drop (fromNatural page * fromPositive recordsPerReply) >> C.awaitForever C.yield) -- navigate to page
       .| C.take (fromPositive recordsPerReply + 1) -- we take +1 to understand if there is a next page available
@@ -71,4 +67,28 @@ pagingResult mpage recordsPerReply filter sortOrder field next = profile "paging
         }
   where
     page = maybe 0 id mpage
+    loopSource moffset = do
+      let
+          offset = maybe 0 id moffset
+      rows <- lift $ selectList
+        filter
+        [ LimitTo (recordsPerReplyInt + 1)
+        , OffsetBy offset
+        , sort
+        ]
+      let
+          rowsLen = List.length rows
+          isMoreRowsThanRecordsPerReplyAvailable = rowsLen > recordsPerReplyInt
+      if rowsLen < 1
+        then return ()
+        else do
+          forM_ (List.take recordsPerReplyInt rows) C.yield
+          if isMoreRowsThanRecordsPerReplyAvailable
+            then loopSource (Just (offset + recordsPerReplyInt))
+            else return ()
+      where
+        sort = case sortOrder of
+          Descend-> Desc field
+          Ascend -> Asc field
+        recordsPerReplyInt = fromPositive recordsPerReply
 
