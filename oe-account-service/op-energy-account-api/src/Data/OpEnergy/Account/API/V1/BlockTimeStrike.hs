@@ -235,7 +235,7 @@ defaultSlowFast = Slow
 verifySlowFast :: Text-> SlowFast
 verifySlowFast "slow" = Slow
 verifySlowFast "fast" = Fast
-verifySlowFast _ = error "verifySlowFast: wrong value"
+verifySlowFast v = error ("verifySlowFast: wrong value: " ++ Text.unpack v)
 
 instance ToParamSchema BlockTimeStrikeFilter where
   toParamSchema v = mempty
