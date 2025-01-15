@@ -279,11 +279,11 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
         $ liftIO $ TVar.readTVarIO latestConfirmedBlockV
       let
           finalFilter = buildFinalFilter latestUnconfirmedBlockHeight latestConfirmedBlock configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
-      guessesTail <- exceptTMaybeT ("db query failed")
+      guessesPlusOne <- exceptTMaybeT ("db query failed")
         $ withDBNOTransactionROUnsafe "" $ do
           C.runConduit
-            $ filters finalFilter linesPerPage
-            .| (C.drop (fromNatural page * fromPositive linesPerPage) >> C.awaitForever C.yield) -- navigate to page
+            $ streamGuessStrikeObservedResultAndOwner finalFilter linesPerPage
+            .| skipToNeededPage linesPerPage
             .| ( C.awaitForever $ \((Entity _ guess, Entity _ strike, mObserved), Entity _ person) -> do
                 C.yield $ BlockTimeStrikeGuessResultPublic
                   { person = personUuid person
@@ -315,16 +315,17 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
             .| C.take (fromPositive linesPerPage + 1) -- we take +1 to understand if there is a next page available
       let
           maybeNextPage =
-            if List.length guessesTail > fromPositive linesPerPage
+            if List.length guessesPlusOne > fromPositive linesPerPage
             then Just (fromIntegral (fromNatural page + 1))
             else Nothing
-          results = List.take (fromPositive linesPerPage) guessesTail
+          results = List.take (fromPositive linesPerPage) guessesPlusOne
       return $ PagingResult
         { pagingResultNextPage = maybeNextPage
         , pagingResultResults = results
         }
   where
     page = maybe 0 id mpage
+    skipToNeededPage linesPerPage = (C.drop (fromNatural page * fromPositive linesPerPage) >> C.awaitForever C.yield) -- navigate to page
     buildFinalFilter latestUnconfirmedBlockHeight latestConfirmedBlock configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip =
       case maybe Nothing (blockTimeStrikeGuessResultPublicFilterClass . fst . unFilterRequest) mfilter of
         Nothing -> filter
@@ -373,48 +374,53 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
       where
         id1 :: FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter -> FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter
         id1 = id -- helping typechecker
-    filters finalFilter linesPerPage =
-      streamEntities
+    streamGuessStrikeObservedResultAndOwner finalFilter linesPerPage
+      = fetchBlockTimeStrikeGuesses
+      .| fetchPerGuessBlockTimeStrikeAndZipThem
+      .| possiblyFetchObservedResultAndZipWithGuessAndStrike
+      .| fetchPerGuessOwnerAndZipObservedResultGuessAndStrike
+      where
+        fetchBlockTimeStrikeGuesses = streamEntities
           (maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter )
           BlockTimeStrikeGuessId
           (PageSize ((fromPositive linesPerPage) + 1))
           sort
           (Range Nothing Nothing)
-      .| ( C.awaitForever $ \v@(Entity _ guess)-> do
-          C.toProducer $ C.zipSources
-            (repeatC v)
-            (streamEntities
-              ((BlockTimeStrikeId ==. blockTimeStrikeGuessStrike guess):finalFilter)
-              BlockTimeStrikeId
-              (PageSize ((fromPositive linesPerPage) + 1))
-              sort
-              (Range Nothing Nothing)
-            )
-         )
-      .| ( C.awaitForever $ \(guess, strikeE@(Entity strikeId _)) -> do
-           case maybe Nothing (blockTimeStrikeGuessResultPublicFilterClass . fst . unFilterRequest) mfilter of
-             Nothing -> do
-               mObserved <- lift $ selectFirst [ BlockTimeStrikeObservedStrike ==. strikeId ][]
-               C.yield (guess, strikeE, mObserved) -- don't care about existence of observed data
-             Just BlockTimeStrikeFilterClassGuessable-> do
-               C.yield (guess, strikeE, Nothing) -- strike have not been observed and finalFilter should ensure, that it is in the future with proper guess threshold
-             Just BlockTimeStrikeFilterClassOutcomeUnknown-> do
-               C.yield (guess, strikeE, Nothing) -- haven't been observed
-             Just BlockTimeStrikeFilterClassOutcomeKnown-> do
-               mObserved <- lift $ selectFirst [ BlockTimeStrikeObservedStrike ==. strikeId ][]
-               C.yield (guess, strikeE, mObserved) -- had been observed
-         )
-      .| ( C.awaitForever $ \v@( Entity _ guess, _, _ )-> do
-          C.toProducer $ C.zipSources
-            (repeatC v)
-            ( streamEntities
-              (( PersonId ==. blockTimeStrikeGuessPerson guess ):(maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter ))
-              PersonId
-              (PageSize ((fromPositive linesPerPage) + 1))
-              sort
-              (Range Nothing Nothing)
-            )
-         )
+        fetchPerGuessBlockTimeStrikeAndZipThem =
+          C.awaitForever $ \v@(Entity _ guess)-> do
+            C.toProducer $ C.zipSources
+              (repeatC v)
+              (streamEntities
+                ((BlockTimeStrikeId ==. blockTimeStrikeGuessStrike guess):finalFilter)
+                BlockTimeStrikeId
+                (PageSize ((fromPositive linesPerPage) + 1))
+                sort
+                (Range Nothing Nothing)
+              )
+        possiblyFetchObservedResultAndZipWithGuessAndStrike =
+          C.awaitForever $ \(guess, strikeE@(Entity strikeId _)) -> do
+            case maybe Nothing (blockTimeStrikeGuessResultPublicFilterClass . fst . unFilterRequest) mfilter of
+              Nothing -> do
+                mObserved <- lift $ selectFirst [ BlockTimeStrikeObservedStrike ==. strikeId ][]
+                C.yield (guess, strikeE, mObserved) -- don't care about existence of observed data
+              Just BlockTimeStrikeFilterClassGuessable-> do
+                C.yield (guess, strikeE, Nothing) -- strike have not been observed and finalFilter should ensure, that it is in the future with proper guess threshold
+              Just BlockTimeStrikeFilterClassOutcomeUnknown-> do
+                C.yield (guess, strikeE, Nothing) -- haven't been observed
+              Just BlockTimeStrikeFilterClassOutcomeKnown-> do
+                mObserved <- lift $ selectFirst [ BlockTimeStrikeObservedStrike ==. strikeId ][]
+                C.yield (guess, strikeE, mObserved) -- had been observed
+        fetchPerGuessOwnerAndZipObservedResultGuessAndStrike =
+          C.awaitForever $ \v@( Entity _ guess, _, _ )-> do
+            C.toProducer $ C.zipSources
+              (repeatC v)
+              ( streamEntities
+                (( PersonId ==. blockTimeStrikeGuessPerson guess ):(maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter ))
+                PersonId
+                (PageSize ((fromPositive linesPerPage) + 1))
+                sort
+                (Range Nothing Nothing)
+              )
 
 -- | returns list BlockTimeStrikeGuesses records
 getBlockTimeStrikeGuessesPage
