@@ -50,7 +50,7 @@ pagingResult mpage recordsPerReply filter sortOrder field next = profile "paging
     pageResults <- runConduit
       $ loopSource Nothing
       .| next
-      .| (C.drop (fromNatural page * fromPositive recordsPerReply) >> C.awaitForever C.yield) -- navigate to page
+      .| skipToNeededPage -- navigate to page
       .| C.take (fromPositive recordsPerReply + 1) -- we take +1 to understand if there is a next page available
     return (pageResults)
   case mret of
@@ -66,6 +66,7 @@ pagingResult mpage recordsPerReply filter sortOrder field next = profile "paging
         , pagingResultResults = results
         }
   where
+    skipToNeededPage = (C.drop (fromNatural page * fromPositive recordsPerReply) >> C.awaitForever C.yield)
     page = maybe 0 id mpage
     loopSource moffset = do
       let
