@@ -68,7 +68,9 @@ library
                    , OpEnergy.BlockTimeStrike.Server.V1.Context
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeObserve
                    , Data.Text.Show
+                   , OpEnergy.Error
                    , OpEnergy.PagingResult
+                   , OpEnergy.ExceptMaybe
                    , OpEnergy.Account.Server.V2
                    , OpEnergy.Account.Server.V2.AccountService
     build-depends:    base ^>=4.15.1.0
