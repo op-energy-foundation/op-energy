@@ -279,7 +279,7 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
       latestConfirmedBlock <- exceptTMaybeT ("latest confirmed block haven't been received yet")
         $ liftIO $ TVar.readTVarIO latestConfirmedBlockV
       let
-          finalFilter = buildFinalFilter latestUnconfirmedBlockHeight latestConfirmedBlock configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
+          finalStrikesFilter = buildStrikesFilter latestUnconfirmedBlockHeight latestConfirmedBlock configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
       exceptTMaybeT ("db query failed")
         $ pagingResult
           mpage
@@ -287,10 +287,10 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
           guessFilter
           sort
           BlockTimeStrikeGuessId
-          $ streamGuessStrikeObservedResultAndOwner finalFilter linesPerPage
+          $ streamGuessStrikeObservedResultAndOwner finalStrikesFilter linesPerPage
   where
 
-    buildFinalFilter latestUnconfirmedBlockHeight latestConfirmedBlock configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip =
+    buildStrikesFilter latestUnconfirmedBlockHeight latestConfirmedBlock configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip =
       case maybe Nothing (blockTimeStrikeGuessResultPublicFilterClass . fst . unFilterRequest) mfilter of
         Nothing -> strikeFilter
         Just BlockTimeStrikeFilterClassGuessable ->
@@ -302,34 +302,34 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
                   * (naturalFromPositive configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
                     + (latestUnconfirmedBlockHeight - blockHeaderHeight latestConfirmedBlock)
                     )
-              isStrikeBlockHeightGuessable
+              strikeBlockHeightGuessable
                 = BlockTimeStrikeBlock >=. minimumGuessableBlock
-              isStrikeMediantimeGuessable
+              strikeMediantimeGuessable
                 = BlockTimeStrikeStrikeMediantime
                   >. fromIntegral minimumGuessableMediantime
           in
-            ( isStrikeBlockHeightGuessable
-            : isStrikeMediantimeGuessable
+            ( strikeBlockHeightGuessable
+            : strikeMediantimeGuessable
             : strikeFilter
             )
         Just BlockTimeStrikeFilterClassOutcomeKnown ->
           let
-              isStrikeBlockHeightObserved
+              strikeOutcomeKnownByBlockHeight
                 = BlockTimeStrikeBlock <=. blockHeaderHeight latestConfirmedBlock
-              isStrikeMediantimeObserved
+              strikeOutcomeKnownByMediantime
                 = BlockTimeStrikeStrikeMediantime <=. fromIntegral (blockHeaderMediantime latestConfirmedBlock)
           in
-            ( [isStrikeBlockHeightObserved] ||. [isStrikeMediantimeObserved]
+            ( [strikeOutcomeKnownByBlockHeight] ||. [strikeOutcomeKnownByMediantime]
             ) ++ strikeFilter
         Just BlockTimeStrikeFilterClassOutcomeUnknown ->
           let
-              isStrikeBlockHeightUnobserved
+              strikeBlockHeightUnconfirmed
                 = BlockTimeStrikeBlock >. blockHeaderHeight latestConfirmedBlock
-              isStrikeMediantiemUnobserved
+              strikeMediantimeInFuture
                 = BlockTimeStrikeStrikeMediantime >. fromIntegral (blockHeaderMediantime latestConfirmedBlock)
           in
-          ( isStrikeBlockHeightUnobserved
-          : isStrikeMediantiemUnobserved
+          ( strikeBlockHeightUnconfirmed
+          : strikeMediantimeInFuture
           : strikeFilter
           )
     strikeFilter = maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter
