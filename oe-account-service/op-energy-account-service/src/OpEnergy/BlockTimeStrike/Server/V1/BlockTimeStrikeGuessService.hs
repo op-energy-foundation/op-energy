@@ -55,6 +55,7 @@ import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountT
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 import           OpEnergy.Error( eitherThrowJSON)
 import           OpEnergy.PagingResult( pagingResult)
+import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeFilter as BlockTimeStrikeFilter
 
 mgetBlockTimeStrikeFuture
   :: (MonadIO m, MonadMonitor m)
@@ -279,7 +280,12 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
       latestConfirmedBlock <- exceptTMaybeT ("latest confirmed block haven't been received yet")
         $ liftIO $ TVar.readTVarIO latestConfirmedBlockV
       let
-          finalStrikesFilter = buildStrikesFilter latestUnconfirmedBlockHeight latestConfirmedBlock configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
+          finalStrikesFilter = BlockTimeStrikeFilter.buildFilter
+            strikeFilter
+            (maybe Nothing (blockTimeStrikeGuessResultPublicFilterClass . fst . unFilterRequest) mfilter)
+            latestUnconfirmedBlockHeight
+            latestConfirmedBlock
+            configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
       exceptTMaybeT ("db query failed")
         $ pagingResult
           mpage
@@ -289,49 +295,6 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
           BlockTimeStrikeGuessId
           $ streamGuessStrikeObservedResultAndOwner finalStrikesFilter linesPerPage
   where
-
-    buildStrikesFilter latestUnconfirmedBlockHeight latestConfirmedBlock configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip =
-      case maybe Nothing (blockTimeStrikeGuessResultPublicFilterClass . fst . unFilterRequest) mfilter of
-        Nothing -> strikeFilter
-        Just BlockTimeStrikeFilterClassGuessable ->
-          let
-              minimumGuessableBlock = latestUnconfirmedBlockHeight + naturalFromPositive configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
-              minimumGuessableMediantime
-                = fromIntegral (blockHeaderMediantime latestConfirmedBlock)
-                + 600
-                  * (naturalFromPositive configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
-                    + (latestUnconfirmedBlockHeight - blockHeaderHeight latestConfirmedBlock)
-                    )
-              strikeBlockHeightGuessable
-                = BlockTimeStrikeBlock >=. minimumGuessableBlock
-              strikeMediantimeGuessable
-                = BlockTimeStrikeStrikeMediantime
-                  >. fromIntegral minimumGuessableMediantime
-          in
-            ( strikeBlockHeightGuessable
-            : strikeMediantimeGuessable
-            : strikeFilter
-            )
-        Just BlockTimeStrikeFilterClassOutcomeKnown ->
-          let
-              strikeOutcomeKnownByBlockHeight
-                = BlockTimeStrikeBlock <=. blockHeaderHeight latestConfirmedBlock
-              strikeOutcomeKnownByMediantime
-                = BlockTimeStrikeStrikeMediantime <=. fromIntegral (blockHeaderMediantime latestConfirmedBlock)
-          in
-            ( [strikeOutcomeKnownByBlockHeight] ||. [strikeOutcomeKnownByMediantime]
-            ) ++ strikeFilter
-        Just BlockTimeStrikeFilterClassOutcomeUnknown ->
-          let
-              strikeBlockHeightUnconfirmed
-                = BlockTimeStrikeBlock >. blockHeaderHeight latestConfirmedBlock
-              strikeMediantimeInFuture
-                = BlockTimeStrikeStrikeMediantime >. fromIntegral (blockHeaderMediantime latestConfirmedBlock)
-          in
-          ( strikeBlockHeightUnconfirmed
-          : strikeMediantimeInFuture
-          : strikeFilter
-          )
     strikeFilter = maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter
     guessFilter = maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter
     repeatC v = C.yield v >> repeatC v
