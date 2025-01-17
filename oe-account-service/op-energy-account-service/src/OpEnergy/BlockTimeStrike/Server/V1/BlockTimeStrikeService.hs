@@ -24,6 +24,7 @@ import           Data.Text (Text)
 import           Data.Conduit( (.|) )
 import qualified Data.Conduit as C
 import           Control.Monad.Trans
+import           Control.Monad.Trans.Except( runExceptT)
 
 import           Database.Persist
 import           Database.Persist.Pagination
@@ -50,6 +51,9 @@ import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledStrikeCrea
 import           OpEnergy.PagingResult
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeObserve as Observe
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Context as Context
+import           OpEnergy.ExceptMaybe(exceptTMaybeT)
+import           OpEnergy.Error( eitherThrowJSON)
+import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeFilter as BlockTimeStrikeFilter
 
 -- | O(ln accounts).
 -- Tries to create future block time strike. Requires authenticated user and blockheight should be in the future
@@ -125,67 +129,30 @@ getBlockTimeStrikesPage
   -> AppM (PagingResult BlockTimeStrikeWithGuessesCountPublic)
 getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
   latestUnconfirmedBlockHeightV <- asks (BlockTime.latestUnconfirmedBlockHeight . blockTimeState)
-  mlatestUnconfirmedBlockHeight <- liftIO $ TVar.readTVarIO latestUnconfirmedBlockHeightV
   configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip <- asks (configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip . config)
   latestConfirmedBlockV <- asks (BlockTime.latestConfirmedBlock . blockTimeState)
-  mlatestConfirmedBlock <- liftIO $ TVar.readTVarIO latestConfirmedBlockV
-  case (mlatestUnconfirmedBlockHeight, mlatestConfirmedBlock) of
-    (Just latestUnconfirmedBlockHeight, Just latestConfirmedBlock) -> do
-      let finalFilter =
-            case maybe Nothing (blockTimeStrikeFilterClass . fst . unFilterRequest) mfilter of
-              Nothing -> filter
-              Just BlockTimeStrikeFilterClassGuessable ->
-                let
-                    minimumGuessableBlock = latestUnconfirmedBlockHeight + naturalFromPositive configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
-                    minimumGuessableMediantime
-                      = fromIntegral (blockHeaderMediantime latestConfirmedBlock)
-                      + 600
-                        * (naturalFromPositive configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
-                          + (latestUnconfirmedBlockHeight - blockHeaderHeight latestConfirmedBlock)
-                          )
-                    isStrikeBlockHeightGuessable
-                      = BlockTimeStrikeBlock >=. minimumGuessableBlock
-                    isStrikeMediantimeGuessable
-                      = BlockTimeStrikeStrikeMediantime
-                        >. fromIntegral minimumGuessableMediantime
-                in
-                  ( isStrikeBlockHeightGuessable
-                  : isStrikeMediantimeGuessable
-                  : filter
-                  )
-              Just BlockTimeStrikeFilterClassOutcomeKnown ->
-                let
-                    isStrikeBlockHeightObserved
-                      = BlockTimeStrikeBlock <=. blockHeaderHeight latestConfirmedBlock
-                    isStrikeMediantimeObserved
-                      = BlockTimeStrikeStrikeMediantime <=. fromIntegral (blockHeaderMediantime latestConfirmedBlock)
-                in
-                  ( [isStrikeBlockHeightObserved] ||. [isStrikeMediantimeObserved]
-                  ) ++ filter
-              Just BlockTimeStrikeFilterClassOutcomeUnknown ->
-                let
-                    isStrikeBlockHeightUnobserved
-                      = BlockTimeStrikeBlock >. blockHeaderHeight latestConfirmedBlock
-                    isStrikeMediantiemUnobserved
-                      = BlockTimeStrikeStrikeMediantime >. fromIntegral (blockHeaderMediantime latestConfirmedBlock)
-                in
-                ( isStrikeBlockHeightUnobserved
-                : isStrikeMediantiemUnobserved
-                : filter
-                )
-      mret <- getBlockTimeStrikePast finalFilter
-      case mret of
-        Nothing -> do
-          throwJSON err500 ("something went wrong"::Text)
-        Just ret -> return ret
-    _ -> do
-      let msg = "getBlockTimeStrikesPage: no confirmed block found yet"
-      runLogging $  $(logError) msg
-      throwJSON err500 msg
+  eitherThrowJSON
+    (\reason-> do
+      let msg = "getBlockTimeStrikesPage: " <> reason
+      runLogging $ $(logError) msg
+      return (err500, msg)
+    )
+    $ runExceptT $ do
+      latestUnconfirmedBlockHeight <- exceptTMaybeT "latest unconfirmed block haven't been received yet"
+        $ liftIO $ TVar.readTVarIO latestUnconfirmedBlockHeightV
+      latestConfirmedBlock <- exceptTMaybeT "latest confirmed block haven't been received yet"
+        $ liftIO $ TVar.readTVarIO latestConfirmedBlockV
+      let strikeFilter = BlockTimeStrikeFilter.buildFilter
+            (maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter)
+            (maybe Nothing (blockTimeStrikeFilterClass . fst . unFilterRequest) mfilter)
+            latestUnconfirmedBlockHeight
+            latestConfirmedBlock
+            configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
+      exceptTMaybeT "getBlockTimeStrikePast failed"
+        $ getBlockTimeStrikePast strikeFilter
   where
     sort = maybe Descend (sortOrder . unFilterRequest) mfilter
-    filter = (maybe [] (buildFilter . unFilterRequest) mfilter)
-    getBlockTimeStrikePast finalFilter = do
+    getBlockTimeStrikePast strikeFilter = do
       recordsPerReply <- asks (configRecordsPerReply . config)
       let
           linesPerPage = maybe recordsPerReply (maybe recordsPerReply id . blockTimeStrikeFilterLinesPerPage . fst . unFilterRequest ) mfilter
@@ -196,7 +163,7 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
             StrikeSortOrderAscendGuessesCount ->  Right ()
             StrikeSortOrderDescendGuessesCount -> Right ()
       case eGuessesCount of
-        Left () -> pagingResult mpage linesPerPage finalFilter sort BlockTimeStrikeId -- select strikes with given filter first
+        Left () -> pagingResult mpage linesPerPage strikeFilter sort BlockTimeStrikeId -- select strikes with given filter first
           $ ( C.awaitForever $ \v@(Entity strikeId _) -> do -- class
               case maybe Nothing (blockTimeStrikeFilterClass . fst . unFilterRequest) mfilter of
                 Nothing -> do
@@ -208,7 +175,7 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
                     []
                   C.yield (v, mObserved) -- don't care about existence of observed data
                 Just BlockTimeStrikeFilterClassGuessable->
-                  C.yield (v, Nothing) -- strike have not been observed and finalFilter should ensure, that it is in the future with proper guess threshold
+                  C.yield (v, Nothing) -- strike have not been observed and strikeFilter should ensure, that it is in the future with proper guess threshold
                 Just BlockTimeStrikeFilterClassOutcomeUnknown-> do
                   C.yield (v, Nothing) -- haven't been observed
                 Just BlockTimeStrikeFilterClassOutcomeKnown-> do
@@ -264,7 +231,7 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
           $ ( C.awaitForever $ \(Entity _ guessesCount) -> do
               mstrike <- lift $ selectFirst
                 ((BlockTimeStrikeId ==. calculatedBlockTimeStrikeGuessesCountStrike guessesCount)
-                 :finalFilter
+                 :strikeFilter
                 )
                 []
               mObserved <- lift $ selectFirst
