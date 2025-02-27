@@ -74,6 +74,7 @@ in
     opEnergyAccountServiceModule
   ];
   # bitcoind mainnet instance
+  # if you are going to use aready existing node, then don't include this part of config
   services.bitcoind.mainnet = {
     enable = true;
     dataDir = "/var/lib/bitcoind-mainnet";
@@ -110,9 +111,9 @@ in
           "DB_PASSWORD": "${op-energy-db-psk-mainnet}",
           "SECRET_SALT": "${op-energy-db-salt-mainnet}",
           "API_HTTP_PORT": 8999,
-          "BTC_URL": "http://127.0.0.1:8332",
-          "BTC_USER": "op-energy",
-          "BTC_PASSWORD": "${bitcoind-mainnet-rpc-psk}",
+          "BTC_URL": "http://127.0.0.1:8332", # in case of using another node, define it's address and credentials
+          "BTC_USER": "op-energy", # and here
+          "BTC_PASSWORD": "${bitcoind-mainnet-rpc-psk}", # and here as well
           "BTC_POLL_RATE_SECS": 10,
           "PROMETHEUS_PORT": 7999,
           "SCHEDULER_POLL_RATE_SECS": 10
@@ -155,7 +156,7 @@ in
 }
 
 ```
-   
+
 4. rebuild config:
 
 ```
