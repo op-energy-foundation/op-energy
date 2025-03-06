@@ -18,13 +18,14 @@ import           Control.Monad.Logger( logError, logInfo)
 import           Control.Monad(forever )
 import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
+import qualified Control.Concurrent.STM as STM
 import qualified Control.Concurrent.STM.TVar as TVar
 import qualified Control.Concurrent.MVar as MVar
 import           Data.Text (Text)
 import           Data.Conduit( (.|) )
 import qualified Data.Conduit as C
 import           Control.Monad.Trans
-import           Control.Monad.Trans.Except( runExceptT)
+import           Control.Monad.Trans.Except( runExceptT, ExceptT (..))
 
 import           Database.Persist
 import           Database.Persist.Pagination
@@ -138,10 +139,14 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
       return (err500, msg)
     )
     $ runExceptT $ do
-      latestUnconfirmedBlockHeight <- exceptTMaybeT "latest unconfirmed block haven't been received yet"
-        $ liftIO $ TVar.readTVarIO latestUnconfirmedBlockHeightV
-      latestConfirmedBlock <- exceptTMaybeT "latest confirmed block haven't been received yet"
-        $ liftIO $ TVar.readTVarIO latestConfirmedBlockV
+      (latestUnconfirmedBlockHeight, latestConfirmedBlock) <-
+        ExceptT $ liftIO $ STM.atomically $ runExceptT $ (,)
+          <$> (exceptTMaybeT "latest unconfirmed block haven't been received yet"
+              $ TVar.readTVar latestUnconfirmedBlockHeightV
+              )
+          <*> (exceptTMaybeT "latest confirmed block haven't been received yet"
+              $ TVar.readTVar latestConfirmedBlockV
+              )
       let strikeFilter = BlockTimeStrikeFilter.buildFilter
             (maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter)
             (maybe Nothing (blockTimeStrikeFilterClass . fst . unFilterRequest) mfilter)

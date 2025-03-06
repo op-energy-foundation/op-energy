@@ -19,11 +19,12 @@ import           Control.Monad.Trans.Reader (asks)
 import           Control.Monad.Logger( logError)
 import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
+import qualified Control.Concurrent.STM as STM
 import qualified Control.Concurrent.STM.TVar as TVar
 import           Control.Monad(void)
 import qualified Data.List as List
 import           Data.Text(Text)
-import           Control.Monad.Trans.Except( runExceptT)
+import           Control.Monad.Trans.Except( runExceptT, ExceptT(..))
 
 import           Data.Conduit ((.|))
 import qualified Data.Conduit as C
@@ -275,10 +276,14 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
       return (err500, msg)
     )
     $ runExceptT $ do
-      latestUnconfirmedBlockHeight <- exceptTMaybeT ("latest unconfirmed block haven't been received yet")
-        $ liftIO $ TVar.readTVarIO latestUnconfirmedBlockHeightV
-      latestConfirmedBlock <- exceptTMaybeT ("latest confirmed block haven't been received yet")
-        $ liftIO $ TVar.readTVarIO latestConfirmedBlockV
+      (latestUnconfirmedBlockHeight, latestConfirmedBlock) <- ExceptT
+        $ liftIO $ STM.atomically $ runExceptT $ (,)
+          <$> (exceptTMaybeT "latest unconfirmed block haven't been received yet"
+              $ TVar.readTVar latestUnconfirmedBlockHeightV
+              )
+          <*> ( exceptTMaybeT "latest confirmed block haven't been received yet"
+              $ TVar.readTVar latestConfirmedBlockV
+              )
       let
           finalStrikesFilter = BlockTimeStrikeFilter.buildFilter
             strikeFilter
