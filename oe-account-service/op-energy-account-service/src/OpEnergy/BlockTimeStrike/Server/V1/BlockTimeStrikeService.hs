@@ -15,7 +15,7 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
 import           Servant (err400, err500)
 import           Control.Monad.Trans.Reader ( ask, asks)
 import           Control.Monad.Logger( logError, logInfo)
-import           Control.Monad(forever )
+import           Control.Monad(forever, when)
 import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
 import qualified Control.Concurrent.STM as STM
@@ -26,6 +26,7 @@ import           Data.Conduit( (.|) )
 import qualified Data.Conduit as C
 import           Control.Monad.Trans
 import           Control.Monad.Trans.Except( runExceptT, ExceptT (..))
+import           Data.Maybe( isJust)
 
 import           Database.Persist
 import           Database.Persist.Pagination
@@ -185,12 +186,13 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
                   C.yield (v, Nothing) -- hasn't been observed
                 Just BlockTimeStrikeFilterClassOutcomeKnown-> do
                   -- now get possible observed data for strike
-                  mObserved <- lift $ selectFirst
+                  shouldNotBeNothing <- lift $ selectFirst
                     ( (BlockTimeStrikeObservedStrike ==. strikeId)
                     : (maybe [] ( buildFilter . unFilterRequest . mapFilter) mfilter)
                     )
                     []
-                  C.yield (v, mObserved) -- had been observed
+                  when (isJust shouldNotBeNothing) $ do
+                    C.yield (v, shouldNotBeNothing) -- had been observed
             )
           .| ( C.awaitForever $ \(Entity strikeId strike, mObserved) -> do
               mguessesCount <- lift $ selectFirst
