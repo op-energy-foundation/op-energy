@@ -10,7 +10,9 @@ let
       ++ pkgs.op-energy-account-service.buildInputs
       ++ [ pkgs.haskellPackages.swagger2 pkgs.haskellPackages.servant pkgs.haskellPackages.servant-swagger
          ]
-      ++ [ pkgs.haskellPackages.ghci pkgs.haskellPackages.ghcid pkgs.haskellPackages.cabal-install ];
+      ++ [ pkgs.haskellPackages.ghci pkgs.haskellPackages.ghcid pkgs.haskellPackages.cabal-install ]
+      ++ [ pkgs.haskell-language-server ]
+      ;
   };
 
 in shell

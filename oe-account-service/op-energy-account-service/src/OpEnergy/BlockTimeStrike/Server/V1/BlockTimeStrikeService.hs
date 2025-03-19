@@ -141,10 +141,10 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
     $ runExceptT $ do
       (latestUnconfirmedBlockHeight, latestConfirmedBlock) <-
         ExceptT $ liftIO $ STM.atomically $ runExceptT $ (,)
-          <$> (exceptTMaybeT "latest unconfirmed block haven't been received yet"
+          <$> (exceptTMaybeT "latest unconfirmed block hasn't been received yet"
               $ TVar.readTVar latestUnconfirmedBlockHeightV
               )
-          <*> (exceptTMaybeT "latest confirmed block haven't been received yet"
+          <*> (exceptTMaybeT "latest confirmed block hasn't been received yet"
               $ TVar.readTVar latestConfirmedBlockV
               )
       let strikeFilter = BlockTimeStrikeFilter.buildFilter
@@ -180,9 +180,9 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
                     []
                   C.yield (v, mObserved) -- don't care about existence of observed data
                 Just BlockTimeStrikeFilterClassGuessable->
-                  C.yield (v, Nothing) -- strike have not been observed and strikeFilter should ensure, that it is in the future with proper guess threshold
+                  C.yield (v, Nothing) -- strike has not been observed and strikeFilter should ensure, that it is in the future with proper guess threshold
                 Just BlockTimeStrikeFilterClassOutcomeUnknown-> do
-                  C.yield (v, Nothing) -- haven't been observed
+                  C.yield (v, Nothing) -- hasn't been observed
                 Just BlockTimeStrikeFilterClassOutcomeKnown-> do
                   -- now get possible observed data for strike
                   mObserved <- lift $ selectFirst
