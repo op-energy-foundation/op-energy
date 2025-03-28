@@ -125,6 +125,10 @@ newTipHandlerLoop = forever $ do
       Observe.observeStrikes leastUnobservedConfirmedBlock
       BlockTimeScheduledStrikeCreation.maybeCreateStrikes $! Context.unContext leastUnobservedConfirmedBlock
 
+data IsSortByGuessesCountNeeded
+  = SortByGuessesCountNotNeeded
+  | SortByGuessesCountNeeded
+
 -- | returns list of BlockTimeStrikePublic records
 getBlockTimeStrikesPage
   :: Maybe (Natural Int)
@@ -165,12 +169,12 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
           linesPerPage = maybe recordsPerReply (maybe recordsPerReply id . blockTimeStrikeFilterLinesPerPage . fst . unFilterRequest ) mfilter
       let
           eGuessesCount = case (maybe StrikeSortOrderDescend (maybe StrikeSortOrderDescend id . blockTimeStrikeFilterSort . fst . unFilterRequest) mfilter) of
-            StrikeSortOrderAscend -> Left ()
-            StrikeSortOrderDescend -> Left ()
-            StrikeSortOrderAscendGuessesCount ->  Right ()
-            StrikeSortOrderDescendGuessesCount -> Right ()
+            StrikeSortOrderAscend -> SortByGuessesCountNotNeeded
+            StrikeSortOrderDescend -> SortByGuessesCountNotNeeded
+            StrikeSortOrderAscendGuessesCount ->  SortByGuessesCountNeeded
+            StrikeSortOrderDescendGuessesCount -> SortByGuessesCountNeeded
       case eGuessesCount of
-        Left () -> pagingResult mpage linesPerPage strikeFilter sort BlockTimeStrikeId -- select strikes with given filter first
+        SortByGuessesCountNotNeeded -> pagingResult mpage linesPerPage strikeFilter sort BlockTimeStrikeId -- select strikes with given filter first
           $ ( C.awaitForever $ \v@(Entity strikeId _) -> do -- class
               case maybe Nothing (blockTimeStrikeFilterClass . fst . unFilterRequest) mfilter of
                 Nothing -> do
@@ -249,7 +253,7 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
                        }
                       )
             )
-        Right () -> pagingResult mpage linesPerPage [] sort CalculatedBlockTimeStrikeGuessesCountGuessesCount
+        SortByGuessesCountNeeded -> pagingResult mpage linesPerPage [] sort CalculatedBlockTimeStrikeGuessesCountGuessesCount
           $ ( C.awaitForever $ \(Entity _ guessesCount) -> do
               mstrike <- lift $ selectFirst
                 ((BlockTimeStrikeId ==. calculatedBlockTimeStrikeGuessesCountStrike guessesCount)
