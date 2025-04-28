@@ -14,7 +14,7 @@ import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
 
 
 -- | this function builds a strike filter with given dynamic variables like
--- current latest confirmed and unconfirmed blocks and a like
+-- current latest confirmed and unconfirmed blocks and etc
 buildFilter
   :: [Filter BlockTimeStrike]
   -> Maybe BlockTimeStrikeFilterClass
