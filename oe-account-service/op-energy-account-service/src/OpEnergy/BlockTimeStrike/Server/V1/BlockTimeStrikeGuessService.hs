@@ -177,33 +177,33 @@ getBlockTimeStrikeGuessResultsPage mpage mfilter = profile "getBlockTimeStrikeGu
         res <- C.runConduit
           $ filters linesPerPage confirmedBlock
           .| (C.drop (fromNatural page * fromPositive linesPerPage) >> C.awaitForever C.yield) -- navigate to page
-          .| ( C.awaitForever $ \(Entity _ strike, Entity _ guess, Entity _ person, mObserved) -> do
-               C.yield $ BlockTimeStrikeGuessResultPublic
-                         { person = personUuid person
-                         , strike = BlockTimeStrikePublic
-                           { blockTimeStrikePublicObservedResult = maybe
-                             Nothing
-                             (\(Entity _ result) -> Just (blockTimeStrikeObservedIsFast result))
-                             mObserved
-                           , blockTimeStrikePublicObservedBlockMediantime = maybe
-                             Nothing
-                             (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockMediantime result))
-                             mObserved
-                           , blockTimeStrikePublicObservedBlockHash = maybe
-                             Nothing
-                             (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockHash result))
-                             mObserved
-                           , blockTimeStrikePublicObservedBlockHeight = maybe
-                             Nothing
-                             (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockHeight result))
-                             mObserved
-                           , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
-                           , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
-                           , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
-                           }
-                         , creationTime = blockTimeStrikeGuessCreationTime guess
-                         , guess = blockTimeStrikeGuessIsFast guess
-                         }
+          .| ( C.map $ \(Entity _ strike, Entity _ guess, Entity _ person, mObserved) ->
+               BlockTimeStrikeGuessResultPublic
+                 { person = personUuid person
+                 , strike = BlockTimeStrikePublic
+                   { blockTimeStrikePublicObservedResult = maybe
+                     Nothing
+                     (\(Entity _ result) -> Just (blockTimeStrikeObservedIsFast result))
+                     mObserved
+                   , blockTimeStrikePublicObservedBlockMediantime = maybe
+                     Nothing
+                     (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockMediantime result))
+                     mObserved
+                   , blockTimeStrikePublicObservedBlockHash = maybe
+                     Nothing
+                     (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockHash result))
+                     mObserved
+                   , blockTimeStrikePublicObservedBlockHeight = maybe
+                     Nothing
+                     (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockHeight result))
+                     mObserved
+                   , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
+                   , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
+                   , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
+                   }
+                 , creationTime = blockTimeStrikeGuessCreationTime guess
+                 , guess = blockTimeStrikeGuessIsFast guess
+                 }
              )
           .| C.take (fromPositive linesPerPage + 1) -- we take +1 to understand if there is a next page available
         return (res)
@@ -389,8 +389,8 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
           (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
           ()
         buildBlockTimeStrikeGuessResultPublic =
-          C.awaitForever $ \((Entity _ guess, Entity _ strike, mObserved), Entity _ person) -> do
-            C.yield $ BlockTimeStrikeGuessResultPublic
+          C.map $ \((Entity _ guess, Entity _ strike, mObserved), Entity _ person) ->
+            BlockTimeStrikeGuessResultPublic
               { person = personUuid person
               , strike = BlockTimeStrikePublic
                 { blockTimeStrikePublicObservedResult = maybe
@@ -433,33 +433,33 @@ getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilter = profi
     res <- C.runConduit
       $ filters linesPerPage
       .| (C.drop (fromNatural page * fromPositive linesPerPage) >> C.awaitForever C.yield) -- navigate to page
-      .| ( C.awaitForever $ \(Entity _ strike, Entity _ guess, Entity _ person, mObserved) -> do
-           C.yield $ BlockTimeStrikeGuessResultPublic
-                     { person = personUuid person
-                     , strike = BlockTimeStrikePublic
-                       { blockTimeStrikePublicObservedResult = maybe
-                         Nothing
-                         (\(Entity _ result)-> Just (blockTimeStrikeObservedIsFast result))
-                         mObserved
-                       , blockTimeStrikePublicObservedBlockMediantime = maybe
-                         Nothing
-                         (\(Entity _ result)-> Just (blockTimeStrikeObservedJudgementBlockMediantime result))
-                         mObserved
-                       , blockTimeStrikePublicObservedBlockHash = maybe
-                         Nothing
-                         (\(Entity _ result)-> Just (blockTimeStrikeObservedJudgementBlockHash result))
-                         mObserved
-                       , blockTimeStrikePublicObservedBlockHeight = maybe
-                         Nothing
-                         (\(Entity _ result)-> Just (blockTimeStrikeObservedJudgementBlockHeight result))
-                         mObserved
-                       , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
-                       , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
-                       , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
-                       }
-                     , creationTime = blockTimeStrikeGuessCreationTime guess
-                     , guess = blockTimeStrikeGuessIsFast guess
-                     }
+      .| ( C.map $ \(Entity _ strike, Entity _ guess, Entity _ person, mObserved) ->
+           BlockTimeStrikeGuessResultPublic
+             { person = personUuid person
+             , strike = BlockTimeStrikePublic
+               { blockTimeStrikePublicObservedResult = maybe
+                 Nothing
+                 (\(Entity _ result)-> Just (blockTimeStrikeObservedIsFast result))
+                 mObserved
+               , blockTimeStrikePublicObservedBlockMediantime = maybe
+                 Nothing
+                 (\(Entity _ result)-> Just (blockTimeStrikeObservedJudgementBlockMediantime result))
+                 mObserved
+               , blockTimeStrikePublicObservedBlockHash = maybe
+                 Nothing
+                 (\(Entity _ result)-> Just (blockTimeStrikeObservedJudgementBlockHash result))
+                 mObserved
+               , blockTimeStrikePublicObservedBlockHeight = maybe
+                 Nothing
+                 (\(Entity _ result)-> Just (blockTimeStrikeObservedJudgementBlockHeight result))
+                 mObserved
+               , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
+               , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
+               , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
+               }
+             , creationTime = blockTimeStrikeGuessCreationTime guess
+             , guess = blockTimeStrikeGuessIsFast guess
+             }
          )
       .| C.take (fromPositive linesPerPage + 1) -- we take +1 to understand if there is a next page available
     return (res)
