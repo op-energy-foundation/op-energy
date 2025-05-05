@@ -16,7 +16,7 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
 
 import           Servant (err400, err500)
 import           Control.Monad.Trans.Reader (asks)
-import           Control.Monad.Logger( logError)
+import           Control.Monad.Logger( logError, NoLoggingT)
 import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
 import qualified Control.Concurrent.STM as STM
@@ -24,9 +24,11 @@ import qualified Control.Concurrent.STM.TVar as TVar
 import           Control.Monad(void)
 import qualified Data.List as List
 import           Data.Text(Text)
+import           Control.Monad.Trans.Reader( ReaderT(..))
+import           Control.Monad.Trans.Resource( ResourceT)
 import           Control.Monad.Trans.Except( runExceptT, ExceptT(..))
 
-import           Data.Conduit ((.|))
+import           Data.Conduit ((.|), ConduitT)
 import qualified Data.Conduit as C
 import qualified Data.Conduit.Internal as C(zipSources)
 import qualified Data.Conduit.List as C
@@ -37,10 +39,12 @@ import           Prometheus(MonadMonitor)
 
 
 import           Data.OpEnergy.Account.API.V1.Account
-import           Data.OpEnergy.API.V1.Positive( naturalFromPositive)
+import           Data.OpEnergy.API.V1.Positive( naturalFromPositive
+                                              , fromPositive
+                                              , Positive
+                                              )
 import           Data.OpEnergy.API.V1.Block
 import           Data.OpEnergy.API.V1.Natural
-import           Data.OpEnergy.API.V1.Positive(fromPositive)
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
@@ -300,7 +304,9 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
           BlockTimeStrikeGuessId
           $ streamGuessStrikeObservedResultAndOwner finalStrikesFilter linesPerPage
   where
+    strikeFilter :: [Filter BlockTimeStrike]
     strikeFilter = maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter
+    guessFilter :: [ Filter BlockTimeStrikeGuess]
     guessFilter = maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter
     repeatC v = C.yield v >> repeatC v
     sort = maybe Descend (sortOrder . unFilterRequest . id1 . mapFilter) mfilter
@@ -308,12 +314,25 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
         id1 :: FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter -> FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter
         id1 = id -- helping typechecker
 
+    streamGuessStrikeObservedResultAndOwner
+      :: [Filter BlockTimeStrike]
+      -> Positive Int
+      -> ConduitT
+           (Entity BlockTimeStrikeGuess)
+           BlockTimeStrikeGuessResultPublic
+           (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
+           ()
     streamGuessStrikeObservedResultAndOwner finalFilter linesPerPage
       = fetchPerGuessBlockTimeStrikeAndZipThem
       .| possiblyFetchObservedResultAndZipWithGuessAndStrike
       .| fetchPerGuessOwnerAndZipObservedResultGuessAndStrike
       .| buildBlockTimeStrikeGuessResultPublic
       where
+        fetchPerGuessBlockTimeStrikeAndZipThem :: ConduitT
+          (Entity BlockTimeStrikeGuess)
+          (Entity BlockTimeStrikeGuess, Entity BlockTimeStrike)
+          (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
+          ()
         fetchPerGuessBlockTimeStrikeAndZipThem =
           C.awaitForever $ \v@(Entity _ guess)-> do
             C.toProducer $ C.zipSources
@@ -325,6 +344,12 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
                 sort
                 (Range Nothing Nothing)
               )
+        possiblyFetchObservedResultAndZipWithGuessAndStrike :: ConduitT
+          (Entity BlockTimeStrikeGuess, Entity BlockTimeStrike)
+          (Entity BlockTimeStrikeGuess, Entity BlockTimeStrike,
+           Maybe (Entity BlockTimeStrikeObserved))
+          (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
+          ()
         possiblyFetchObservedResultAndZipWithGuessAndStrike =
           C.awaitForever $ \(guess, strikeE@(Entity strikeId _)) -> do
             case maybe Nothing (blockTimeStrikeGuessResultPublicFilterClass . fst . unFilterRequest) mfilter of
@@ -338,6 +363,14 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
               Just BlockTimeStrikeFilterClassOutcomeKnown-> do
                 mObserved <- lift $ selectFirst [ BlockTimeStrikeObservedStrike ==. strikeId ][]
                 C.yield (guess, strikeE, mObserved) -- had been observed
+        fetchPerGuessOwnerAndZipObservedResultGuessAndStrike :: ConduitT
+          (Entity BlockTimeStrikeGuess, Entity BlockTimeStrike,
+           Maybe (Entity BlockTimeStrikeObserved))
+          ((Entity BlockTimeStrikeGuess, Entity BlockTimeStrike,
+            Maybe (Entity BlockTimeStrikeObserved)),
+           Entity Person)
+          (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
+          ()
         fetchPerGuessOwnerAndZipObservedResultGuessAndStrike =
           C.awaitForever $ \v@( Entity _ guess, _, _ )-> do
             C.toProducer $ C.zipSources
@@ -349,6 +382,13 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
                 sort
                 (Range Nothing Nothing)
               )
+        buildBlockTimeStrikeGuessResultPublic :: ConduitT
+          ((Entity BlockTimeStrikeGuess, Entity BlockTimeStrike,
+            Maybe (Entity BlockTimeStrikeObserved)),
+           Entity Person)
+          BlockTimeStrikeGuessResultPublic
+          (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
+          ()
         buildBlockTimeStrikeGuessResultPublic =
           C.awaitForever $ \((Entity _ guess, Entity _ strike, mObserved), Entity _ person) -> do
             C.yield $ BlockTimeStrikeGuessResultPublic
