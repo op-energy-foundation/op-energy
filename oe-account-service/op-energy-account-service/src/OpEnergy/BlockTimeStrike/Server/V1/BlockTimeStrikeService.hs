@@ -12,8 +12,8 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
   , getBlockTimeStrike
   ) where
 
-import           Servant (err400, err500)
-import           Control.Monad.Trans.Reader ( ask, asks)
+import           Servant (err400, err500, Handler)
+import           Control.Monad.Trans.Reader ( ask, asks, ReaderT)
 import           Control.Monad.Logger( logError, logInfo)
 import           Control.Monad(forever, when)
 import           Data.Time.Clock(getCurrentTime)
@@ -163,6 +163,12 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
         $ getBlockTimeStrikePast strikeFilter
   where
     sort = maybe Descend (sortOrder . unFilterRequest) mfilter
+    getBlockTimeStrikePast
+      :: [Filter BlockTimeStrike]
+      -> ReaderT
+         State
+         Handler
+         (Maybe (PagingResult BlockTimeStrikeWithGuessesCountPublic))
     getBlockTimeStrikePast strikeFilter = do
       recordsPerReply <- asks (configRecordsPerReply . config)
       let

@@ -15,7 +15,7 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
   ) where
 
 import           Servant (err400, err500)
-import           Control.Monad.Trans.Reader (asks)
+import           Control.Monad.Trans.Reader (asks, ReaderT(..))
 import           Control.Monad.Logger( logError, NoLoggingT)
 import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
@@ -24,7 +24,6 @@ import qualified Control.Concurrent.STM.TVar as TVar
 import           Control.Monad(void)
 import qualified Data.List as List
 import           Data.Text(Text)
-import           Control.Monad.Trans.Reader( ReaderT(..))
 import           Control.Monad.Trans.Resource( ResourceT)
 import           Control.Monad.Trans.Except( runExceptT, ExceptT(..))
 
