@@ -68,6 +68,7 @@ library
                    , OpEnergy.BlockTimeStrike.Server.V1.Context
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeObserve
                    , Data.Text.Show
+                   , Data.Conduit.Extra.Zip
                    , OpEnergy.Error
                    , OpEnergy.PagingResult
                    , OpEnergy.ExceptMaybe
