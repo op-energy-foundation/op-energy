@@ -819,10 +819,10 @@ getBlockTimeStrikeGuessPerson uuid blockHeight strikeMediantime = profile "getBl
          , Maybe (Entity BlockTimeStrikeObserved)
          )
     maybeFetchBlockTimeStrikeObserved (strikeE@(Entity strikeId _), guessE) = do
-               mObserved <- selectFirst
-                 [ BlockTimeStrikeObservedStrike ==. strikeId]
-                 []
-               return (strikeE, guessE, mObserved)
+      mObserved <- selectFirst
+        [ BlockTimeStrikeObservedStrike ==. strikeId]
+        []
+      return (strikeE, guessE, mObserved)
     renderBlockTimeStrikeGuessResultPublic
       :: Person
       -> ( Entity BlockTimeStrike
