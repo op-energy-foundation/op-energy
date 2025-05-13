@@ -17,8 +17,8 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
 import           Servant (err400, err500)
 import           Control.Monad.Trans.Reader (asks, ReaderT(..))
 import           Control.Monad.Logger( logError, NoLoggingT)
-import           Data.Time.Clock(getCurrentTime)
-import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
+import           Data.Time.Clock( getCurrentTime)
+import           Data.Time.Clock.POSIX(POSIXTime, utcTimeToPOSIXSeconds)
 import qualified Control.Concurrent.STM as STM
 import qualified Control.Concurrent.STM.TVar as TVar
 import           Control.Monad(void)
@@ -26,11 +26,12 @@ import qualified Data.List as List
 import           Data.Text(Text)
 import           Control.Monad.Trans.Resource( ResourceT)
 import           Control.Monad.Trans.Except( runExceptT, ExceptT(..))
+import           Data.Maybe(fromMaybe)
 
 import           Data.Conduit ((.|), ConduitT)
 import qualified Data.Conduit as C
-import qualified Data.Conduit.Internal as C(zipSources)
 import qualified Data.Conduit.List as C
+import qualified Data.Conduit.Extra.Zip as C
 import           Control.Monad.Trans
 import           Database.Persist.Postgresql
 import           Database.Persist.Pagination
@@ -169,48 +170,26 @@ getBlockTimeStrikeGuessResultsPage mpage mfilter = profile "getBlockTimeStrikeGu
       throwJSON err500 err
     Just confirmedBlock -> do
       let
-          page = maybe 0 id mpage
+          page = fromMaybe 0 mpage
       recordsPerReply <- asks (configRecordsPerReply . config)
       let
-          linesPerPage = maybe recordsPerReply (maybe recordsPerReply id . blockTimeStrikeGuessResultPublicFilterLinesPerPage . fst . unFilterRequest ) mfilter
-      mret <- withDBNOTransactionROUnsafe "" $ do
-        res <- C.runConduit
-          $ filters linesPerPage confirmedBlock
-          .| (C.drop (fromNatural page * fromPositive linesPerPage) >> C.awaitForever C.yield) -- navigate to page
-          .| ( C.map $ \(Entity _ strike, Entity _ guess, Entity _ person, mObserved) ->
-               BlockTimeStrikeGuessResultPublic
-                 { person = personUuid person
-                 , strike = BlockTimeStrikePublic
-                   { blockTimeStrikePublicObservedResult = maybe
-                     Nothing
-                     (\(Entity _ result) -> Just (blockTimeStrikeObservedIsFast result))
-                     mObserved
-                   , blockTimeStrikePublicObservedBlockMediantime = maybe
-                     Nothing
-                     (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockMediantime result))
-                     mObserved
-                   , blockTimeStrikePublicObservedBlockHash = maybe
-                     Nothing
-                     (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockHash result))
-                     mObserved
-                   , blockTimeStrikePublicObservedBlockHeight = maybe
-                     Nothing
-                     (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockHeight result))
-                     mObserved
-                   , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
-                   , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
-                   , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
-                   }
-                 , creationTime = blockTimeStrikeGuessCreationTime guess
-                 , guess = blockTimeStrikeGuessIsFast guess
-                 }
-             )
-          .| C.take (fromPositive linesPerPage + 1) -- we take +1 to understand if there is a next page available
-        return (res)
+          linesPerPage = maybe
+            recordsPerReply
+            ( fromMaybe recordsPerReply
+            . blockTimeStrikeGuessResultPublicFilterLinesPerPage
+            . fst
+            . unFilterRequest
+            )
+            mfilter
+      mret <- withDBNOTransactionROUnsafe "" $ C.runConduit
+        $ filters linesPerPage confirmedBlock
+        .| (C.drop (fromNatural page * fromPositive linesPerPage) >> C.awaitForever C.yield) -- navigate to page
+        .| C.map renderBlockTimeGuessResultPublic
+        .| C.take (fromPositive linesPerPage + 1) -- we take +1 to understand if there is a next page available
       case mret of
           Nothing -> do
             throwJSON err500 ("something went wrong, check logs for details"::Text)
-          Just (guessesTail) -> do
+          Just guessesTail -> do
             let newPage =
                   if List.length guessesTail > fromPositive linesPerPage
                   then Just (fromIntegral (fromNatural page + 1))
@@ -221,44 +200,112 @@ getBlockTimeStrikeGuessResultsPage mpage mfilter = profile "getBlockTimeStrikeGu
               , pagingResultResults = results
               }
   where
-    repeatC v = C.yield v >> repeatC v
     sort = maybe Descend (sortOrder . unFilterRequest . id1 . mapFilter) mfilter
       where
         id1 :: FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter -> FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter
         id1 = id -- helping typechecker
     filters recordsPerReply confirmedBlock =
+      fetchConfirmedStrikes recordsPerReply confirmedBlock
+      .| C.zipConcatMapMC (fetchGuessStrikesForStrike recordsPerReply)
+      .| C.zipConcatMapMC (fetchGuessPerson recordsPerReply)
+      .| C.mapM maybeFetchObservedStrikeAndFlatten
+    fetchConfirmedStrikes
+      :: Positive Int
+      -> BlockHeader
+      -> ConduitT () (Entity BlockTimeStrike) (ReaderT SqlBackend IO) ()
+    fetchConfirmedStrikes recordsPerReply confirmedBlock = streamEntities
+      ((BlockTimeStrikeBlock <=. blockHeaderHeight confirmedBlock)
+      : maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter
+      )
+      BlockTimeStrikeId
+      (PageSize (fromPositive recordsPerReply + 1))
+      sort
+      (Range Nothing Nothing)
+    fetchGuessStrikesForStrike
+      :: Positive Int
+      -> Entity BlockTimeStrike
+      -> ConduitT () (Entity BlockTimeStrikeGuess) (ReaderT SqlBackend IO) ()
+    fetchGuessStrikesForStrike recordsPerReply (Entity strikeId _) = do
       streamEntities
-          ((BlockTimeStrikeBlock <=. blockHeaderHeight confirmedBlock):(maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter ))
-          BlockTimeStrikeId
-          (PageSize ((fromPositive recordsPerReply) + 1))
-          sort
-          (Range Nothing Nothing)
-      .| ( C.awaitForever $ \v@(Entity strikeId _)-> do
-          C.toProducer $ C.zipSources
-            (repeatC v)
-            (streamEntities
-              (( BlockTimeStrikeGuessStrike ==. strikeId ):(maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter ))
-              BlockTimeStrikeGuessId
-              (PageSize ((fromPositive recordsPerReply) + 1))
-              sort
-              (Range Nothing Nothing)
+        ( ( BlockTimeStrikeGuessStrike ==. strikeId )
+        : maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter
+        )
+        BlockTimeStrikeGuessId
+        (PageSize (fromPositive recordsPerReply + 1))
+        sort
+        (Range Nothing Nothing)
+    fetchGuessPerson
+      :: Positive Int
+      -> (Entity BlockTimeStrike, Entity BlockTimeStrikeGuess)
+      -> ConduitT () (Entity Person) (ReaderT SqlBackend IO) ()
+    fetchGuessPerson recordsPerReply (_, Entity _ guess ) = do
+      streamEntities
+        ( ( PersonId ==. blockTimeStrikeGuessPerson guess )
+        : maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter
+        )
+        PersonId
+        (PageSize (fromPositive recordsPerReply + 1))
+        sort
+        (Range Nothing Nothing)
+    maybeFetchObservedStrikeAndFlatten
+      :: ( ( Entity BlockTimeStrike
+           , Entity BlockTimeStrikeGuess
+           )
+         , Entity Person
+         )
+      -> ReaderT SqlBackend IO
+           ( Entity BlockTimeStrike
+           , Entity BlockTimeStrikeGuess
+           , Entity Person
+           , Maybe (Entity BlockTimeStrikeObserved)
+           )
+    maybeFetchObservedStrikeAndFlatten
+        ((strikeE@(Entity strikeId _), guessE), personE) = do
+      mObserved <- selectFirst
+        [ BlockTimeStrikeObservedStrike ==. strikeId]
+        []
+      return (strikeE, guessE, personE, mObserved)
+    renderBlockTimeGuessResultPublic
+      :: ( Entity BlockTimeStrike
+         , Entity BlockTimeStrikeGuess
+         , Entity Person
+         , Maybe (Entity BlockTimeStrikeObserved)
+         )
+      -> BlockTimeStrikeGuessResultPublic
+    renderBlockTimeGuessResultPublic
+        (Entity _ strike, Entity _ guess, Entity _ person, mObserved) =
+      BlockTimeStrikeGuessResultPublic
+        { person = personUuid person
+        , strike = BlockTimeStrikePublic
+          { blockTimeStrikePublicObservedResult = fmap
+            (\(Entity _ result) -> blockTimeStrikeObservedIsFast result)
+            mObserved
+          , blockTimeStrikePublicObservedBlockMediantime = fmap
+            (\(Entity _ result) ->
+              blockTimeStrikeObservedJudgementBlockMediantime result
             )
-         )
-      .| ( C.awaitForever $ \v@(_, Entity _ guess )-> do
-          C.toProducer $ C.zipSources
-            (repeatC v)
-            ( streamEntities
-              (( PersonId ==. blockTimeStrikeGuessPerson guess ):(maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter ))
-              PersonId
-              (PageSize ((fromPositive recordsPerReply) + 1))
-              sort
-              (Range Nothing Nothing)
+            mObserved
+          , blockTimeStrikePublicObservedBlockHash = fmap
+            (\(Entity _ result) ->
+              blockTimeStrikeObservedJudgementBlockHash result
             )
-         )
-      .| ( C.awaitForever $ \((strikeE@(Entity strikeId _), guessE), personE) -> do
-           mObserved <- lift $ selectFirst [ BlockTimeStrikeObservedStrike ==. strikeId][]
-           C.yield (strikeE, guessE, personE, mObserved)
-         )
+            mObserved
+          , blockTimeStrikePublicObservedBlockHeight = fmap
+            (\(Entity _ result) ->
+              blockTimeStrikeObservedJudgementBlockHeight result
+            )
+            mObserved
+          , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
+          , blockTimeStrikePublicStrikeMediantime =
+            blockTimeStrikeStrikeMediantime strike
+          , blockTimeStrikePublicCreationTime =
+            blockTimeStrikeCreationTime strike
+          }
+        , creationTime = blockTimeStrikeGuessCreationTime guess
+        , guess = blockTimeStrikeGuessIsFast guess
+        }
+
+
 
 -- | returns list BlockTimeStrikeGuess records
 getBlockTimeStrikesGuessesPage
@@ -307,7 +354,6 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
     strikeFilter = maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter
     guessFilter :: [ Filter BlockTimeStrikeGuess]
     guessFilter = maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter
-    repeatC v = C.yield v >> repeatC v
     sort = maybe Descend (sortOrder . unFilterRequest . id1 . mapFilter) mfilter
       where
         id1 :: FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter -> FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter
@@ -322,100 +368,114 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
            (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
            ()
     streamGuessStrikeObservedResultAndOwner finalFilter linesPerPage
-      = fetchPerGuessBlockTimeStrikeAndZipThem
-      .| possiblyFetchObservedResultAndZipWithGuessAndStrike
-      .| fetchPerGuessOwnerAndZipObservedResultGuessAndStrike
-      .| buildBlockTimeStrikeGuessResultPublic
+      =  C.zipConcatMapMC fetchPerGuessBlockTimeStrikeForZip
+      .| C.mapM possiblyFetchObservedResultAndZipWithGuessAndStrike
+      .| C.zipConcatMapMC fetchPerGuessOwnerAndZipObservedResultGuessAndStrike
+      .| C.map buildBlockTimeStrikeGuessResultPublic
       where
-        fetchPerGuessBlockTimeStrikeAndZipThem :: ConduitT
-          (Entity BlockTimeStrikeGuess)
-          (Entity BlockTimeStrikeGuess, Entity BlockTimeStrike)
-          (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
-          ()
-        fetchPerGuessBlockTimeStrikeAndZipThem =
-          C.awaitForever $ \v@(Entity _ guess)-> do
-            C.toProducer $ C.zipSources
-              (repeatC v)
-              (streamEntities
-                ((BlockTimeStrikeId ==. blockTimeStrikeGuessStrike guess):finalFilter)
-                BlockTimeStrikeId
-                (PageSize ((fromPositive linesPerPage) + 1))
-                sort
-                (Range Nothing Nothing)
+        fetchPerGuessBlockTimeStrikeForZip
+          :: Entity BlockTimeStrikeGuess
+          -> ConduitT
+             ()
+             (Entity BlockTimeStrike)
+             (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
+             ()
+        fetchPerGuessBlockTimeStrikeForZip (Entity _ guess) = streamEntities
+          ((BlockTimeStrikeId ==. blockTimeStrikeGuessStrike guess)
+          :finalFilter
+          )
+          BlockTimeStrikeId
+          (PageSize (fromPositive linesPerPage + 1))
+          sort
+          (Range Nothing Nothing)
+        possiblyFetchObservedResultAndZipWithGuessAndStrike
+          :: (Entity BlockTimeStrikeGuess, Entity BlockTimeStrike)
+          -> (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
+             (Entity BlockTimeStrikeGuess
+             , Entity BlockTimeStrike
+             , Maybe (Entity BlockTimeStrikeObserved)
+             )
+        possiblyFetchObservedResultAndZipWithGuessAndStrike
+            (guess, strikeE@(Entity strikeId _)) = do
+          case maybe
+              Nothing
+              (blockTimeStrikeGuessResultPublicFilterClass
+              . fst
+              . unFilterRequest
               )
-        possiblyFetchObservedResultAndZipWithGuessAndStrike :: ConduitT
-          (Entity BlockTimeStrikeGuess, Entity BlockTimeStrike)
-          (Entity BlockTimeStrikeGuess, Entity BlockTimeStrike,
-           Maybe (Entity BlockTimeStrikeObserved))
-          (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
-          ()
-        possiblyFetchObservedResultAndZipWithGuessAndStrike =
-          C.awaitForever $ \(guess, strikeE@(Entity strikeId _)) -> do
-            case maybe Nothing (blockTimeStrikeGuessResultPublicFilterClass . fst . unFilterRequest) mfilter of
-              Nothing -> do
-                mObserved <- lift $ selectFirst [ BlockTimeStrikeObservedStrike ==. strikeId ][]
-                C.yield (guess, strikeE, mObserved) -- don't care about existence of observed data
-              Just BlockTimeStrikeFilterClassGuessable-> do
-                C.yield (guess, strikeE, Nothing) -- strike has not been observed and finalFilter should ensure, that it is in the future with proper guess threshold
-              Just BlockTimeStrikeFilterClassOutcomeUnknown-> do
-                C.yield (guess, strikeE, Nothing) -- hasn't been observed
-              Just BlockTimeStrikeFilterClassOutcomeKnown-> do
-                mObserved <- lift $ selectFirst [ BlockTimeStrikeObservedStrike ==. strikeId ][]
-                C.yield (guess, strikeE, mObserved) -- had been observed
-        fetchPerGuessOwnerAndZipObservedResultGuessAndStrike :: ConduitT
-          (Entity BlockTimeStrikeGuess, Entity BlockTimeStrike,
-           Maybe (Entity BlockTimeStrikeObserved))
-          ((Entity BlockTimeStrikeGuess, Entity BlockTimeStrike,
-            Maybe (Entity BlockTimeStrikeObserved)),
-           Entity Person)
-          (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
-          ()
-        fetchPerGuessOwnerAndZipObservedResultGuessAndStrike =
-          C.awaitForever $ \v@( Entity _ guess, _, _ )-> do
-            C.toProducer $ C.zipSources
-              (repeatC v)
-              ( streamEntities
-                (( PersonId ==. blockTimeStrikeGuessPerson guess ):(maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter ))
-                PersonId
-                (PageSize ((fromPositive linesPerPage) + 1))
-                sort
-                (Range Nothing Nothing)
-              )
-        buildBlockTimeStrikeGuessResultPublic :: ConduitT
-          ((Entity BlockTimeStrikeGuess, Entity BlockTimeStrike,
-            Maybe (Entity BlockTimeStrikeObserved)),
-           Entity Person)
+              mfilter of
+            Nothing -> do
+              mObserved <- selectFirst
+                [ BlockTimeStrikeObservedStrike ==. strikeId ]
+                []
+              return (guess, strikeE, mObserved) -- don't care about existence of observed data
+            Just BlockTimeStrikeFilterClassGuessable-> do
+              return (guess, strikeE, Nothing) -- strike has not been observed and finalFilter should ensure, that it is in the future with proper guess threshold
+            Just BlockTimeStrikeFilterClassOutcomeUnknown-> do
+              return (guess, strikeE, Nothing) -- hasn't been observed
+            Just BlockTimeStrikeFilterClassOutcomeKnown-> do
+              mObserved <- selectFirst
+                [ BlockTimeStrikeObservedStrike ==. strikeId ]
+                []
+              return (guess, strikeE, mObserved) -- had been observed
+        fetchPerGuessOwnerAndZipObservedResultGuessAndStrike
+          :: (Entity BlockTimeStrikeGuess, Entity BlockTimeStrike, Maybe (Entity BlockTimeStrikeObserved))
+          -> ConduitT
+             ()
+             (Entity Person)
+             (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
+             ()
+        fetchPerGuessOwnerAndZipObservedResultGuessAndStrike
+            (Entity _ guess, _, _) =
+          streamEntities
+            (( PersonId ==. blockTimeStrikeGuessPerson guess )
+            : maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter
+            )
+            PersonId
+            (PageSize (fromPositive linesPerPage + 1))
+            sort
+            (Range Nothing Nothing)
+        buildBlockTimeStrikeGuessResultPublic
+          :: ( ( Entity BlockTimeStrikeGuess
+               , Entity BlockTimeStrike
+               , Maybe (Entity BlockTimeStrikeObserved)
+               )
+             , Entity Person
+             )
+          -> BlockTimeStrikeGuessResultPublic
+        buildBlockTimeStrikeGuessResultPublic
+            ((Entity _ guess, Entity _ strike, mObserved), Entity _ person) =
           BlockTimeStrikeGuessResultPublic
-          (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
-          ()
-        buildBlockTimeStrikeGuessResultPublic =
-          C.map $ \((Entity _ guess, Entity _ strike, mObserved), Entity _ person) ->
-            BlockTimeStrikeGuessResultPublic
-              { person = personUuid person
-              , strike = BlockTimeStrikePublic
-                { blockTimeStrikePublicObservedResult = maybe
-                  Nothing
-                  (\(Entity _ result) -> Just (blockTimeStrikeObservedIsFast result) )
-                  mObserved
-                , blockTimeStrikePublicObservedBlockMediantime = maybe
-                  Nothing
-                  (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockMediantime result) )
-                  mObserved
-                , blockTimeStrikePublicObservedBlockHash = maybe
-                  Nothing
-                  (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockHash result) )
-                  mObserved
-                , blockTimeStrikePublicObservedBlockHeight = maybe
-                  Nothing
-                  (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockHeight result) )
-                  mObserved
-                , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
-                , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
-                , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
-                }
-              , creationTime = blockTimeStrikeGuessCreationTime guess
-              , guess = blockTimeStrikeGuessIsFast guess
+            { person = personUuid person
+            , strike = BlockTimeStrikePublic
+              { blockTimeStrikePublicObservedResult = fmap
+                (\(Entity _ result) -> blockTimeStrikeObservedIsFast result)
+                mObserved
+              , blockTimeStrikePublicObservedBlockMediantime = fmap
+                (\(Entity _ result) ->
+                  blockTimeStrikeObservedJudgementBlockMediantime result
+                )
+                mObserved
+              , blockTimeStrikePublicObservedBlockHash = fmap
+                (\(Entity _ result) ->
+                  blockTimeStrikeObservedJudgementBlockHash result
+                )
+                mObserved
+              , blockTimeStrikePublicObservedBlockHeight =
+                fmap
+                (\(Entity _ result) ->
+                  blockTimeStrikeObservedJudgementBlockHeight result
+                )
+                mObserved
+              , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
+              , blockTimeStrikePublicStrikeMediantime =
+                blockTimeStrikeStrikeMediantime strike
+              , blockTimeStrikePublicCreationTime =
+                blockTimeStrikeCreationTime strike
               }
+            , creationTime = blockTimeStrikeGuessCreationTime guess
+            , guess = blockTimeStrikeGuessIsFast guess
+            }
 
 
 -- | returns list BlockTimeStrikeGuesses records
@@ -430,43 +490,15 @@ getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilter = profi
   let
       linesPerPage = maybe recordsPerReply (maybe recordsPerReply id . blockTimeStrikeGuessResultPublicFilterLinesPerPage . fst . unFilterRequest ) mfilter
   mret <- withDBNOTransactionROUnsafe "" $ do
-    res <- C.runConduit
+    C.runConduit
       $ filters linesPerPage
       .| (C.drop (fromNatural page * fromPositive linesPerPage) >> C.awaitForever C.yield) -- navigate to page
-      .| ( C.map $ \(Entity _ strike, Entity _ guess, Entity _ person, mObserved) ->
-           BlockTimeStrikeGuessResultPublic
-             { person = personUuid person
-             , strike = BlockTimeStrikePublic
-               { blockTimeStrikePublicObservedResult = maybe
-                 Nothing
-                 (\(Entity _ result)-> Just (blockTimeStrikeObservedIsFast result))
-                 mObserved
-               , blockTimeStrikePublicObservedBlockMediantime = maybe
-                 Nothing
-                 (\(Entity _ result)-> Just (blockTimeStrikeObservedJudgementBlockMediantime result))
-                 mObserved
-               , blockTimeStrikePublicObservedBlockHash = maybe
-                 Nothing
-                 (\(Entity _ result)-> Just (blockTimeStrikeObservedJudgementBlockHash result))
-                 mObserved
-               , blockTimeStrikePublicObservedBlockHeight = maybe
-                 Nothing
-                 (\(Entity _ result)-> Just (blockTimeStrikeObservedJudgementBlockHeight result))
-                 mObserved
-               , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
-               , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
-               , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
-               }
-             , creationTime = blockTimeStrikeGuessCreationTime guess
-             , guess = blockTimeStrikeGuessIsFast guess
-             }
-         )
+      .| C.map renderGuessResultPublic
       .| C.take (fromPositive linesPerPage + 1) -- we take +1 to understand if there is a next page available
-    return (res)
   case mret of
       Nothing -> do
         throwJSON err500 ("something went wrong, check logs for details"::Text)
-      Just (guessesTail) -> do
+      Just guessesTail-> do
         let newPage =
               if List.length guessesTail > fromPositive linesPerPage
               then Just (fromIntegral (fromNatural page + 1))
@@ -477,45 +509,106 @@ getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilter = profi
           , pagingResultResults = results
           }
   where
-    page = maybe 0 id mpage
-    repeatC v = C.yield v >> repeatC v
+    page = fromMaybe 0 mpage
     sort = maybe Descend (sortOrder . unFilterRequest . id1 . mapFilter) mfilter
       where
         id1 :: FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter -> FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter
         id1 = id -- helping typechecker
     filters recordsPerReply =
+      fetchBlockTimeStrikeByHeightAndMediantime recordsPerReply sort
+        blockHeight (fromIntegral strikeMediantime)
+      .| C.zipConcatMapMC (fetchGuessByPerson recordsPerReply)
+      .| C.zipConcatMapMC (fetchPersonByGuess recordsPerReply)
+      .| C.mapM maybeFetchObservedStrikeAndFlatten
+    fetchGuessByPerson
+      :: Positive Int
+      -> Entity BlockTimeStrike
+      -> ConduitT () (Entity BlockTimeStrikeGuess) (ReaderT SqlBackend IO) ()
+    fetchGuessByPerson recordsPerReply (Entity strikeId _) = do
       streamEntities
-          [ BlockTimeStrikeBlock ==. blockHeight, BlockTimeStrikeStrikeMediantime ==. fromIntegral strikeMediantime ]
-          BlockTimeStrikeId
-          (PageSize ((fromPositive recordsPerReply) + 1))
-          sort
-          (Range Nothing Nothing)
-      .| ( C.awaitForever $ \v@(Entity strikeId _)-> do
-          C.toProducer $ C.zipSources
-            (repeatC v)
-            (streamEntities
-              (( BlockTimeStrikeGuessStrike ==. strikeId ):(maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter ))
-              BlockTimeStrikeGuessId
-              (PageSize ((fromPositive recordsPerReply) + 1))
-              sort
-              (Range Nothing Nothing)
-            )
+        ( ( BlockTimeStrikeGuessStrike ==. strikeId )
+        : maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter
+        )
+        BlockTimeStrikeGuessId
+        (PageSize (fromPositive recordsPerReply + 1))
+        sort
+        (Range Nothing Nothing)
+    fetchPersonByGuess
+      :: Positive Int
+      -> (Entity BlockTimeStrike, Entity BlockTimeStrikeGuess)
+      -> ConduitT () (Entity Person) (ReaderT SqlBackend IO) ()
+    fetchPersonByGuess recordsPerReply (_, Entity _ guess ) = streamEntities
+      (( PersonId ==. blockTimeStrikeGuessPerson guess )
+      : maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter
+      )
+      PersonId
+      (PageSize (fromPositive recordsPerReply + 1))
+      sort
+      (Range Nothing Nothing)
+    maybeFetchObservedStrikeAndFlatten
+      :: ( ( Entity BlockTimeStrike
+           , Entity BlockTimeStrikeGuess
+           )
+         , Entity Person
          )
-      .| ( C.awaitForever $ \v@(_, Entity _ guess )-> do
-          C.toProducer $ C.zipSources
-            (repeatC v)
-            ( streamEntities
-              (( PersonId ==. blockTimeStrikeGuessPerson guess ):(maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter ))
-              PersonId
-              (PageSize ((fromPositive recordsPerReply) + 1))
-              sort
-              (Range Nothing Nothing)
-            )
+      -> ReaderT SqlBackend IO
+         ( Entity BlockTimeStrike
+         , Entity BlockTimeStrikeGuess
+         , Entity Person
+         , Maybe (Entity BlockTimeStrikeObserved)
          )
-      .| ( C.awaitForever $ \((strikeE@(Entity strikeId _), guessE), personE)-> do
-           mObserved <- lift $ selectFirst [ BlockTimeStrikeObservedStrike ==. strikeId ][]
-           C.yield (strikeE, guessE, personE, mObserved)
+    maybeFetchObservedStrikeAndFlatten
+        ((strikeE@(Entity strikeId _), guessE), personE) = do
+      mObserved <- selectFirst [ BlockTimeStrikeObservedStrike ==. strikeId ][]
+      return (strikeE, guessE, personE, mObserved)
+    renderGuessResultPublic
+      :: ( Entity BlockTimeStrike
+         , Entity BlockTimeStrikeGuess
+         , Entity Person
+         , Maybe (Entity BlockTimeStrikeObserved)
          )
+      -> BlockTimeStrikeGuessResultPublic
+    renderGuessResultPublic
+        (Entity _ strike, Entity _ guess, Entity _ person, mObserved) =
+      BlockTimeStrikeGuessResultPublic
+        { person = personUuid person
+        , strike = BlockTimeStrikePublic
+          { blockTimeStrikePublicObservedResult = fmap
+            (\(Entity _ result)-> blockTimeStrikeObservedIsFast result)
+            mObserved
+          , blockTimeStrikePublicObservedBlockMediantime = fmap
+            (\(Entity _ result)-> blockTimeStrikeObservedJudgementBlockMediantime result)
+            mObserved
+          , blockTimeStrikePublicObservedBlockHash = fmap
+            (\(Entity _ result)-> blockTimeStrikeObservedJudgementBlockHash result)
+            mObserved
+          , blockTimeStrikePublicObservedBlockHeight = fmap
+            (\(Entity _ result)-> blockTimeStrikeObservedJudgementBlockHeight result)
+            mObserved
+          , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
+          , blockTimeStrikePublicStrikeMediantime =
+            blockTimeStrikeStrikeMediantime strike
+          , blockTimeStrikePublicCreationTime =
+            blockTimeStrikeCreationTime strike
+          }
+        , creationTime = blockTimeStrikeGuessCreationTime guess
+        , guess = blockTimeStrikeGuessIsFast guess
+        }
+fetchBlockTimeStrikeByHeightAndMediantime
+  :: Positive Int
+  -> SortOrder
+  -> BlockHeight
+  -> POSIXTime
+  -> ConduitT () (Entity BlockTimeStrike) (ReaderT SqlBackend IO) ()
+fetchBlockTimeStrikeByHeightAndMediantime
+    recordsPerReply sort blockHeight strikeMediantime = streamEntities
+  [ BlockTimeStrikeBlock ==. blockHeight
+  , BlockTimeStrikeStrikeMediantime ==. strikeMediantime
+  ]
+  BlockTimeStrikeId
+  (PageSize (fromPositive recordsPerReply + 1))
+  sort
+  (Range Nothing Nothing)
 
 -- | returns BlockTimeStrikeGuessPublic by strike and person, taken from account token
 getBlockTimeStrikeGuess
@@ -544,64 +637,103 @@ getBlockTimeStrikeGuess token blockHeight strikeMediantime = profile "getBlockTi
         Just (Just ret)-> return ret
 
   where
-    repeatC v = C.yield v >> repeatC v
     actualGetStrikeGuess (Entity personKey person) blockHeight strikeMediantime = do
       recordsPerReply <- asks (configRecordsPerReply . config)
       withDBNOTransactionROUnsafe "" $ do
         C.runConduit
-          $ streamEntities
-            [BlockTimeStrikeBlock ==. blockHeight, BlockTimeStrikeStrikeMediantime ==. strikeMediantime]
-            BlockTimeStrikeId
-            (PageSize ((fromPositive recordsPerReply) + 1))
-            Descend
-            (Range Nothing Nothing)
-          .| ( C.awaitForever $ \v@(Entity strikeId _)-> do
-              C.toProducer $ C.zipSources
-                (repeatC v)
-                (streamEntities
-                  [ BlockTimeStrikeGuessStrike ==. strikeId, BlockTimeStrikeGuessPerson ==. personKey ]
-                  BlockTimeStrikeGuessId
-                  (PageSize ((fromPositive recordsPerReply) + 1))
-                  Descend
-                  (Range Nothing Nothing)
-                )
+          $ fetchBlockStrikeByBlockHeightAndMediantime
+              recordsPerReply
+              blockHeight
+              strikeMediantime
+          .| C.zipConcatMapMC (fetchBlockTimeStrikeGuessByStrikeAndPerson
+               recordsPerReply
+               personKey
              )
-          .| ( C.awaitForever $ \( strikeE@(Entity strikeId _), guessE)-> do
-               mObserved <- lift $ selectFirst [ BlockTimeStrikeObservedStrike ==. strikeId ][]
-               C.yield (strikeE, guessE, mObserved)
-             )
-          .| ( let loop = do
-                     mv <- C.await
-                     case mv of
-                       Nothing -> return Nothing
-                       Just (Entity _ strike, Entity _ guess, mObserved) -> return $ Just $ BlockTimeStrikeGuessResultPublic
-                         { person = personUuid person
-                         , strike = BlockTimeStrikePublic
-                           { blockTimeStrikePublicObservedResult = maybe
-                             Nothing
-                             (\(Entity _ result) -> Just (blockTimeStrikeObservedIsFast result))
-                             mObserved
-                           , blockTimeStrikePublicObservedBlockMediantime = maybe
-                             Nothing
-                             (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockMediantime result))
-                             mObserved
-                           , blockTimeStrikePublicObservedBlockHash = maybe
-                             Nothing
-                             (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockHash result))
-                             mObserved
-                           , blockTimeStrikePublicObservedBlockHeight = maybe
-                             Nothing
-                             (\(Entity _ result) -> Just (blockTimeStrikeObservedJudgementBlockHeight result))
-                             mObserved
-                           , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
-                           , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
-                           , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
-                           }
-                         , creationTime = blockTimeStrikeGuessCreationTime guess
-                         , guess = blockTimeStrikeGuessIsFast guess
-                         }
-               in loop
-             )
+          .| C.mapM maybeFetchObservedStrike
+          .| C.map (renderBlockTimeStrikeGuessResultPublic person)
+          .| C.head
+    fetchBlockStrikeByBlockHeightAndMediantime
+      :: Positive Int
+      -> BlockHeight
+      -> POSIXTime
+      -> ConduitT () (Entity BlockTimeStrike) (ReaderT SqlBackend IO) ()
+    fetchBlockStrikeByBlockHeightAndMediantime
+        recordsPerReply blockHeight strikeMediantime = streamEntities
+      [BlockTimeStrikeBlock ==. blockHeight
+      , BlockTimeStrikeStrikeMediantime ==. strikeMediantime
+      ]
+      BlockTimeStrikeId
+      (PageSize (fromPositive recordsPerReply + 1))
+      Descend
+      (Range Nothing Nothing)
+    fetchBlockTimeStrikeGuessByStrikeAndPerson
+      :: Positive Int
+      -> PersonId
+      -> Entity BlockTimeStrike
+      -> ConduitT () (Entity BlockTimeStrikeGuess) (ReaderT SqlBackend IO) ()
+    fetchBlockTimeStrikeGuessByStrikeAndPerson
+        recordsPerReply personKey (Entity strikeId _) = do
+      streamEntities
+        [ BlockTimeStrikeGuessStrike ==. strikeId
+        , BlockTimeStrikeGuessPerson ==. personKey
+        ]
+        BlockTimeStrikeGuessId
+        (PageSize (fromPositive recordsPerReply + 1))
+        Descend
+        (Range Nothing Nothing)
+    maybeFetchObservedStrike
+      :: (Entity BlockTimeStrike, Entity BlockTimeStrikeGuess)
+      -> ReaderT SqlBackend IO
+         ( Entity BlockTimeStrike
+         , Entity BlockTimeStrikeGuess
+         , Maybe (Entity BlockTimeStrikeObserved)
+         )
+    maybeFetchObservedStrike ( strikeE@(Entity strikeId _), guessE) = do
+      mObserved <- selectFirst
+        [ BlockTimeStrikeObservedStrike ==. strikeId ]
+        []
+      return (strikeE, guessE, mObserved)
+    renderBlockTimeStrikeGuessResultPublic
+      :: Person
+      -> ( Entity BlockTimeStrike
+         , Entity BlockTimeStrikeGuess
+         , Maybe (Entity BlockTimeStrikeObserved)
+         )
+      -> BlockTimeStrikeGuessResultPublic
+    renderBlockTimeStrikeGuessResultPublic person
+        (Entity _ strike, Entity _ guess, mObserved) = BlockTimeStrikeGuessResultPublic
+      { person = personUuid person
+      , strike = BlockTimeStrikePublic
+        { blockTimeStrikePublicObservedResult = fmap
+          (\(Entity _ result) ->
+            blockTimeStrikeObservedIsFast result
+          )
+          mObserved
+        , blockTimeStrikePublicObservedBlockMediantime = fmap
+          (\(Entity _ result) ->
+            blockTimeStrikeObservedJudgementBlockMediantime result
+          )
+          mObserved
+        , blockTimeStrikePublicObservedBlockHash = fmap
+          (\(Entity _ result) ->
+            blockTimeStrikeObservedJudgementBlockHash result
+          )
+          mObserved
+        , blockTimeStrikePublicObservedBlockHeight = fmap
+          (\(Entity _ result) ->
+            blockTimeStrikeObservedJudgementBlockHeight result
+          )
+          mObserved
+        , blockTimeStrikePublicBlock =
+          blockTimeStrikeBlock strike
+        , blockTimeStrikePublicStrikeMediantime =
+          blockTimeStrikeStrikeMediantime strike
+        , blockTimeStrikePublicCreationTime =
+          blockTimeStrikeCreationTime strike
+        }
+      , creationTime = blockTimeStrikeGuessCreationTime guess
+      , guess = blockTimeStrikeGuessIsFast guess
+      }
 
 getBlockTimeStrikeGuessPerson
   :: UUID Person
@@ -633,7 +765,6 @@ getBlockTimeStrikeGuessPerson uuid blockHeight strikeMediantime = profile "getBl
         Just (Just ret)-> return ret
 
   where
-    repeatC v = C.yield v >> repeatC v
     mgetPersonByUUID uuid = do
       withDBNOTransactionROUnsafe "" $ do
         selectFirst [ PersonUuid ==. uuid ][]
@@ -641,61 +772,96 @@ getBlockTimeStrikeGuessPerson uuid blockHeight strikeMediantime = profile "getBl
       recordsPerReply <- asks (configRecordsPerReply . config)
       withDBNOTransactionROUnsafe "" $ do
         C.runConduit
-          $ streamEntities
-            [BlockTimeStrikeBlock ==. blockHeight, BlockTimeStrikeStrikeMediantime ==. strikeMediantime]
-            BlockTimeStrikeId
-            (PageSize ((fromPositive recordsPerReply) + 1))
-            Descend
-            (Range Nothing Nothing)
-          .| ( C.awaitForever $ \v@(Entity strikeId _)-> do
-              C.toProducer $ C.zipSources
-                (repeatC v)
-                (streamEntities
-                  [ BlockTimeStrikeGuessStrike ==. strikeId, BlockTimeStrikeGuessPerson ==. personKey ]
-                  BlockTimeStrikeGuessId
-                  (PageSize ((fromPositive recordsPerReply) + 1))
-                  Descend
-                  (Range Nothing Nothing)
-                )
+          $ fetchBlockTimeStrikeByBlockHeightAndMediantime recordsPerReply blockHeight strikeMediantime
+          .| C.zipConcatMapMC (fetchBlockTimeStrikeGuessByStrikeAndPerson
+               recordsPerReply personKey
              )
-          .| ( C.awaitForever $ \(strikeE@(Entity strikeId _), guessE) -> do
-               mObserved <- lift $ selectFirst [ BlockTimeStrikeObservedStrike ==. strikeId][]
-               C.yield (strikeE, guessE, mObserved)
-             )
-          .| ( let loop = do
-                     mv <- C.await
-                     case mv of
-                       Nothing -> return Nothing
-                       Just (Entity _ strike, Entity _ guess, mObserved) -> return $ Just $ BlockTimeStrikeGuessResultPublic
-                         { person = personUuid person
-                         , strike = BlockTimeStrikePublic
-                           { blockTimeStrikePublicObservedResult =
-                             maybe
-                               Nothing
-                               (\(Entity _ result)-> Just (blockTimeStrikeObservedIsFast result))
-                               mObserved
-                           , blockTimeStrikePublicObservedBlockMediantime =
-                             maybe
-                               Nothing
-                               (\(Entity _ result)-> Just (blockTimeStrikeObservedJudgementBlockMediantime result))
-                               mObserved
-                           , blockTimeStrikePublicObservedBlockHash =
-                             maybe
-                               Nothing
-                               (\(Entity _ result)-> Just (blockTimeStrikeObservedJudgementBlockHash result))
-                               mObserved
-                           , blockTimeStrikePublicObservedBlockHeight =
-                             maybe
-                               Nothing
-                               (\(Entity _ result)-> Just (blockTimeStrikeObservedJudgementBlockHeight result))
-                               mObserved
-                           , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
-                           , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
-                           , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
-                           }
-                         , creationTime = blockTimeStrikeGuessCreationTime guess
-                         , guess = blockTimeStrikeGuessIsFast guess
-                         }
-               in loop
-             )
+          .| C.mapM maybeFetchBlockTimeStrikeObserved
+          .| C.map (renderBlockTimeStrikeGuessResultPublic person)
+          .| C.head
+    fetchBlockTimeStrikeByBlockHeightAndMediantime
+      :: Positive Int
+      -> BlockHeight
+      -> POSIXTime
+      -> ConduitT () (Entity BlockTimeStrike) (ReaderT SqlBackend IO) ()
+    fetchBlockTimeStrikeByBlockHeightAndMediantime
+        recordsPerReply blockHeight strikeMediantime =
+      streamEntities
+        [ BlockTimeStrikeBlock ==. blockHeight
+        , BlockTimeStrikeStrikeMediantime ==. strikeMediantime
+        ]
+        BlockTimeStrikeId
+        (PageSize (fromPositive recordsPerReply + 1))
+        Descend
+        (Range Nothing Nothing)
+    fetchBlockTimeStrikeGuessByStrikeAndPerson
+      :: Positive Int
+      -> PersonId
+      -> Entity BlockTimeStrike
+      -> ConduitT () (Entity BlockTimeStrikeGuess) (ReaderT SqlBackend IO) ()
+    fetchBlockTimeStrikeGuessByStrikeAndPerson
+        recordsPerReply personKey (Entity strikeId _) = do
+      streamEntities
+        [ BlockTimeStrikeGuessStrike ==. strikeId
+        , BlockTimeStrikeGuessPerson ==. personKey
+        ]
+        BlockTimeStrikeGuessId
+        (PageSize (fromPositive recordsPerReply + 1))
+        Descend
+        (Range Nothing Nothing)
+    maybeFetchBlockTimeStrikeObserved
+      :: (Entity BlockTimeStrike, Entity BlockTimeStrikeGuess)
+      -> ReaderT
+         SqlBackend
+         IO
+         (Entity BlockTimeStrike
+         , Entity BlockTimeStrikeGuess
+         , Maybe (Entity BlockTimeStrikeObserved)
+         )
+    maybeFetchBlockTimeStrikeObserved (strikeE@(Entity strikeId _), guessE) = do
+               mObserved <- selectFirst
+                 [ BlockTimeStrikeObservedStrike ==. strikeId]
+                 []
+               return (strikeE, guessE, mObserved)
+    renderBlockTimeStrikeGuessResultPublic
+      :: Person
+      -> ( Entity BlockTimeStrike
+         , Entity BlockTimeStrikeGuess
+         , Maybe (Entity BlockTimeStrikeObserved)
+         )
+      -> BlockTimeStrikeGuessResultPublic
+    renderBlockTimeStrikeGuessResultPublic person
+        (Entity _ strike, Entity _ guess, mObserved) =
+      BlockTimeStrikeGuessResultPublic
+        { person = personUuid person
+        , strike = BlockTimeStrikePublic
+          { blockTimeStrikePublicObservedResult = fmap
+              (\(Entity _ result)->
+                blockTimeStrikeObservedIsFast result
+              )
+              mObserved
+          , blockTimeStrikePublicObservedBlockMediantime = fmap
+              (\(Entity _ result)->
+                blockTimeStrikeObservedJudgementBlockMediantime result
+              )
+              mObserved
+          , blockTimeStrikePublicObservedBlockHash = fmap
+              (\(Entity _ result)->
+                blockTimeStrikeObservedJudgementBlockHash result
+              )
+              mObserved
+          , blockTimeStrikePublicObservedBlockHeight = fmap
+              (\(Entity _ result)->
+                blockTimeStrikeObservedJudgementBlockHeight result
+              )
+              mObserved
+          , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
+          , blockTimeStrikePublicStrikeMediantime =
+            blockTimeStrikeStrikeMediantime strike
+          , blockTimeStrikePublicCreationTime =
+            blockTimeStrikeCreationTime strike
+          }
+        , creationTime = blockTimeStrikeGuessCreationTime guess
+        , guess = blockTimeStrikeGuessIsFast guess
+        }
 
