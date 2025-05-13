@@ -203,11 +203,11 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
           strikeFilter
           sort
           BlockTimeStrikeId -- select strikes with given filter first
-          $  guessesCountWillBeFetchedLater
+          $  C.map guessesCountWillBeFetchedLater
           .| maybeFetchObservedStrike
-          .| fetchGuessesCount
+          .| C.mapM fetchGuessesCount
           .| unwrapGuessesCount
-          .| renderBlockTimeStrikePublic
+          .| C.map renderBlockTimeStrikePublic
         SortByGuessesCountNeeded -> pagingResult
           mpage
           linesPerPage
@@ -215,68 +215,61 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
           sort
           CalculatedBlockTimeStrikeGuessesCountGuessesCount
           $  fetchStrikeByGuessesCount strikeFilter
-          .| guessesCountAlreadyFetched
+          .| C.map guessesCountAlreadyFetched
           .| maybeFetchObservedStrike
           .| unwrapGuessesCount
-          .| renderBlockTimeStrikePublic
-    guessesCountWillBeFetchedLater :: ConduitT
-      ( Entity BlockTimeStrike
-      )
-      ( Maybe (Entity CalculatedBlockTimeStrikeGuessesCount)
-      , Entity BlockTimeStrike
-      )
-      (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
-      ()
-    guessesCountWillBeFetchedLater = C.map (\strikeE -> (Nothing, strikeE))
-    guessesCountAlreadyFetched :: ConduitT
-      ( Entity CalculatedBlockTimeStrikeGuessesCount
-      , Entity BlockTimeStrike
-      )
-      ( Maybe (Entity CalculatedBlockTimeStrikeGuessesCount)
-      , Entity BlockTimeStrike
-      )
-      (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
-      ()
-    guessesCountAlreadyFetched = C.map (\(guessE, strikeE) -> (Just guessE, strikeE))
-    fetchGuessesCount :: ConduitT
-      ( Entity BlockTimeStrike
-      , Maybe (Entity BlockTimeStrikeObserved)
-      , Maybe (Entity CalculatedBlockTimeStrikeGuessesCount)
-      )
-      ( Entity BlockTimeStrike
-      , Maybe (Entity BlockTimeStrikeObserved)
-      , Maybe (Entity CalculatedBlockTimeStrikeGuessesCount)
-      )
-      (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
-      ()
-    fetchGuessesCount =
-        C.awaitForever $ \(strikeE@(Entity strikeId _), mObserved, mguessesCount) -> do
+          .| C.map renderBlockTimeStrikePublic
+    guessesCountWillBeFetchedLater
+      :: Entity BlockTimeStrike
+      -> ( Maybe (Entity CalculatedBlockTimeStrikeGuessesCount)
+         , Entity BlockTimeStrike
+         )
+    guessesCountWillBeFetchedLater strikeE = (Nothing, strikeE)
+    guessesCountAlreadyFetched
+      :: ( Entity CalculatedBlockTimeStrikeGuessesCount
+         , Entity BlockTimeStrike
+         )
+      -> ( Maybe (Entity CalculatedBlockTimeStrikeGuessesCount)
+         , Entity BlockTimeStrike
+         )
+    guessesCountAlreadyFetched (guessE, strikeE) = (Just guessE, strikeE)
+    fetchGuessesCount
+      :: ( Entity BlockTimeStrike
+         , Maybe (Entity BlockTimeStrikeObserved)
+         , Maybe (Entity CalculatedBlockTimeStrikeGuessesCount)
+         )
+      -> (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
+         ( Entity BlockTimeStrike
+         , Maybe (Entity BlockTimeStrikeObserved)
+         , Maybe (Entity CalculatedBlockTimeStrikeGuessesCount)
+         )
+    fetchGuessesCount (strikeE@(Entity strikeId _), mObserved, mguessesCount) = do
       case mguessesCount of
-        Just _ -> C.yield (strikeE, mObserved, mguessesCount)
+        Just _ -> return (strikeE, mObserved, mguessesCount)
         Nothing -> do
-          mguessesCount <- lift $ selectFirst
+          mguessesCount <- selectFirst
             [ CalculatedBlockTimeStrikeGuessesCountStrike ==. strikeId]
             []
           guessE <- case mguessesCount of
             Just guessE -> -- results are already calculated
               return guessE
             Nothing -> do -- fallback mode, recount online, which maybe a bad thing to do here TODO decide if it should be removed
-              guessesCount <- lift $
-                verifyNatural <$> count [ BlockTimeStrikeGuessStrike ==. strikeId ]
+              guessesCount <- verifyNatural
+                <$> count [ BlockTimeStrikeGuessStrike ==. strikeId ]
               let guess = CalculatedBlockTimeStrikeGuessesCount
                     { calculatedBlockTimeStrikeGuessesCountStrike = strikeId
                     , calculatedBlockTimeStrikeGuessesCountGuessesCount = guessesCount
                     }
-              guessId <- lift $ insert guess
+              guessId <- insert guess
               return (Entity guessId guess)
-          C.yield (strikeE, mObserved, Just guessE)
+          return (strikeE, mObserved, Just guessE)
     fetchStrikeByGuessesCount
       :: [Filter BlockTimeStrike]
       -> ConduitT
-        (Entity CalculatedBlockTimeStrikeGuessesCount)
-        (Entity CalculatedBlockTimeStrikeGuessesCount, Entity BlockTimeStrike)
-        (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
-        ()
+         (Entity CalculatedBlockTimeStrikeGuessesCount)
+         (Entity CalculatedBlockTimeStrikeGuessesCount, Entity BlockTimeStrike)
+         (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
+         ()
     fetchStrikeByGuessesCount strikeFilter = C.awaitForever $ \guessE@(Entity _ guessesCount) -> do
       mstrike <- lift $ selectFirst
         ((BlockTimeStrikeId ==. calculatedBlockTimeStrikeGuessesCountStrike guessesCount)
@@ -319,7 +312,6 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
               C.yield ( strikeE
                       , observableCanBeMissing
                       , mguessesCount
-                      -- , calculatedBlockTimeStrikeGuessesCountGuessesCount guessesCount
                       )
             ( _nonEmptyObservedFilter: _ , Just _observedBlockFitsFilter)->
               C.yield ( strikeE
@@ -353,37 +345,36 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
                     , shouldNotBeNothing
                     , mguessesCount
                     ) -- had been observed
-    renderBlockTimeStrikePublic :: ConduitT
-      ( Entity BlockTimeStrike
-      , Maybe (Entity BlockTimeStrikeObserved)
-      , Natural Int
-      )
+    renderBlockTimeStrikePublic
+      :: ( Entity BlockTimeStrike
+         , Maybe (Entity BlockTimeStrikeObserved)
+         , Natural Int
+         )
+      -> BlockTimeStrikeWithGuessesCountPublic
+    renderBlockTimeStrikePublic (Entity _ strike, mObserved, guessesCount) =
       BlockTimeStrikeWithGuessesCountPublic
-      (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
-      ()
-    renderBlockTimeStrikePublic = C.map (\(Entity _ strike, mObserved, guessesCount) ->BlockTimeStrikeWithGuessesCountPublic
-               { blockTimeStrikeWithGuessesCountPublicStrike = BlockTimeStrikePublic
-                 { blockTimeStrikePublicObservedResult = fmap
-                   (\(Entity _ v)-> blockTimeStrikeObservedIsFast v)
-                   mObserved
-                 , blockTimeStrikePublicObservedBlockMediantime = fmap
-                   (\(Entity _ v)-> blockTimeStrikeObservedJudgementBlockMediantime v)
-                   mObserved
-                 , blockTimeStrikePublicObservedBlockHash = fmap
-                   (\(Entity _ v)-> blockTimeStrikeObservedJudgementBlockHash v)
-                   mObserved
-                 , blockTimeStrikePublicObservedBlockHeight = fmap
-                   (\(Entity _ v)-> blockTimeStrikeObservedJudgementBlockHeight v)
-                   mObserved
-                 , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
-                 , blockTimeStrikePublicStrikeMediantime =
-                   blockTimeStrikeStrikeMediantime strike
-                 , blockTimeStrikePublicCreationTime =
-                   blockTimeStrikeCreationTime strike
-                 }
-               , blockTimeStrikeWithGuessesCountPublicGuessesCount =
-                 fromIntegral guessesCount
-               })
+        { blockTimeStrikeWithGuessesCountPublicStrike = BlockTimeStrikePublic
+          { blockTimeStrikePublicObservedResult = fmap
+            (\(Entity _ v)-> blockTimeStrikeObservedIsFast v)
+            mObserved
+          , blockTimeStrikePublicObservedBlockMediantime = fmap
+            (\(Entity _ v)-> blockTimeStrikeObservedJudgementBlockMediantime v)
+            mObserved
+          , blockTimeStrikePublicObservedBlockHash = fmap
+            (\(Entity _ v)-> blockTimeStrikeObservedJudgementBlockHash v)
+            mObserved
+          , blockTimeStrikePublicObservedBlockHeight = fmap
+            (\(Entity _ v)-> blockTimeStrikeObservedJudgementBlockHeight v)
+            mObserved
+          , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
+          , blockTimeStrikePublicStrikeMediantime =
+            blockTimeStrikeStrikeMediantime strike
+          , blockTimeStrikePublicCreationTime =
+            blockTimeStrikeCreationTime strike
+          }
+        , blockTimeStrikeWithGuessesCountPublicGuessesCount =
+          fromIntegral guessesCount
+        }
     unwrapGuessesCount
       :: ConduitT
         ( Entity BlockTimeStrike
