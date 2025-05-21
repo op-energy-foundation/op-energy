@@ -11,11 +11,11 @@ import           Control.Monad.Error.Class(MonadError)
 import           Servant(ServerError)
 import           Data.OpEnergy.API.V1.Error(throwJSON)
 
--- | the goal of this function is to wrap the 'payload' with exception handling
--- For this, payload should return value of type Either l r: In case if payload
--- will return 'Left reason', this function will call 'handler reason' and will
--- throw JSON exception with 'throwJSON' function
--- In case of 'Right result' it will just return the result
+-- | The goal of this function is to turn failure results from @payload@ into JSON  `ServerError`s.
+-- For this, @payload@ should return value of type @Either l r@: In the case that @payload@
+-- returns @Left reason@, this function will call @handler reason@ and will
+-- throw a JSON exception with 'throwJSON' function
+-- In the case of 'Right result' it will just return the result.
 eitherThrowJSON
   :: ( Monad m
      , MonadError ServerError m
