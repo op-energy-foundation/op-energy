@@ -8,12 +8,12 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeObserve
 
 import           Control.Monad.Trans.Reader (ReaderT, ask, asks)
 import           Control.Monad.Logger(NoLoggingT, logDebug, logError)
-import           Control.Monad( when, forM_)
+import           Control.Monad( forM_)
 import           Control.Monad.Trans.Maybe ( runMaybeT, MaybeT(..))
 import           Data.Time.Clock.POSIX( getPOSIXTime)
 import           Data.Conduit( (.|) )
 import qualified Data.Conduit as C
-import qualified Data.Conduit.List as C
+import qualified Data.Conduit.Combinators as C
 import           Control.Monad.Trans
 import qualified Data.List as List
 import qualified Data.Text as Text
@@ -61,14 +61,14 @@ observeStrikes confirmedBlock = profile "observeStrikesByBlockHeight" $ do
   mresultsCount <- withDBTransaction "" $ do
     C.runConduit
       $ queryStrikesThatMaybeObserved recordsPerReply
-      .| filterUnobservedStrikes
-      .| calculateResult
-      .| insertStrikeResult
+      .| C.concatMapM filterUnobservedStrikes
+      .| C.map calculateResult
+      .| C.mapM insertStrikeResult
       .| calculateResultCount
   case mresultsCount of
     Nothing -> do
       liftIO $ runLoggingIO state $ $(logDebug)
-          ("something went wrong during result calculation")
+          "something went wrong during result calculation"
     Just cnt -> do
       liftIO $ runLoggingIO state $ $(logDebug)
           ("calculated results for " <> tshow cnt <> " strikes")
@@ -104,72 +104,57 @@ observeStrikes confirmedBlock = profile "observeStrikesByBlockHeight" $ do
   -- previously, so only unobserved strikes will be passed further down the
   -- stream
   filterUnobservedStrikes
-    :: C.ConduitT
-       ( Entity BlockTimeStrike)
-       ( Either (Context BlockObserved (Entity BlockTimeStrike))
-                (Context BlockMediantimeReachedBlockNotObserved (Entity BlockTimeStrike))
-       )
-       (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
-       ()
-  filterUnobservedStrikes = C.awaitForever $ \strikeE@(Entity strikeId _) -> do
+    :: Entity BlockTimeStrike
+    -> (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
+       [ Either (Context BlockObserved (Entity BlockTimeStrike))
+                 (Context BlockMediantimeReachedBlockNotObserved (Entity BlockTimeStrike))
+       ]
+  filterUnobservedStrikes strikeE@(Entity strikeId _) = do
     let isStrikeOutcomeObserved =
           BlockTimeStrikeObservedStrike ==. strikeId
-    isStrikeOutcomeNotObserved <- fmap not $ lift $ exists
-      [ isStrikeOutcomeObserved
-      ]
-    when isStrikeOutcomeNotObserved $ do
-      C.yield $! Judgement.eitherBlockOrMediantimeObservedStrike
-        strikeE
-        (unContext confirmedBlock)
+    isStrikeOutcomeNotObserved <- fmap not $ exists
+      [ isStrikeOutcomeObserved ]
+    if isStrikeOutcomeNotObserved
+      then return
+        [ Judgement.eitherBlockOrMediantimeObservedStrike strikeE
+          (unContext confirmedBlock)
+        ]
+      else return []
   calculateResult
-    :: C.ConduitT
-       ( Either (Context BlockObserved (Entity BlockTimeStrike))
-                (Context BlockMediantimeReachedBlockNotObserved (Entity BlockTimeStrike))
-       )
-       ( Either (Context BlockObserved (Entity BlockTimeStrike))
-                (Context BlockMediantimeReachedBlockNotObserved (Entity BlockTimeStrike))
+    :: Either
+       (Context BlockObserved (Entity BlockTimeStrike))
+       (Context BlockMediantimeReachedBlockNotObserved (Entity BlockTimeStrike))
+    -> ( Either
+         (Context BlockObserved (Entity BlockTimeStrike))
+         (Context BlockMediantimeReachedBlockNotObserved (Entity BlockTimeStrike))
        , SlowFast
        )
-       (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
-       ()
-  calculateResult = C.map (\( estrike)->
-                              ( estrike
-                              , Judgement.judgeStrike estrike judgementBlockC
-                              )
-                          )
+  calculateResult estrike =
+    ( estrike
+    , Judgement.judgeStrike estrike judgementBlockC
+    )
   calculateResultCount
     :: C.ConduitT
-       (BlockTimeStrikeObservedId)
+       BlockTimeStrikeObservedId
        C.Void
        (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
        Int
-  calculateResultCount = do
-    sumInLoop 0
-    where
-      sumInLoop acc = do
-        mv <- C.await
-        case mv of
-          Nothing -> return acc
-          Just _ -> sumInLoop (acc + 1)
+  calculateResultCount = C.length
   insertStrikeResult
-    :: C.ConduitT
-       ( Either (Context BlockObserved (Entity BlockTimeStrike))
+    :: ( Either (Context BlockObserved (Entity BlockTimeStrike))
                 (Context BlockMediantimeReachedBlockNotObserved (Entity BlockTimeStrike))
        , SlowFast
        )
-       (BlockTimeStrikeObservedId)
-       (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
-       ()
-  insertStrikeResult = C.awaitForever $ \( estrikeC
-                                         , calculatedResult
-                                         ) -> do
+    -> (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
+       BlockTimeStrikeObservedId
+  insertStrikeResult ( estrikeC , calculatedResult) = do
     let
         Entity strikeId _ = case estrikeC of
           Left strikeE -> unContext strikeE
           Right strikeE -> unContext strikeE
         judgementBlock = unContext judgementBlockC
     now <- liftIO getPOSIXTime
-    key <- lift $ insert $ BlockTimeStrikeObserved
+    insert $ BlockTimeStrikeObserved
       { blockTimeStrikeObservedStrike = strikeId
       , blockTimeStrikeObservedJudgementBlockHash =
         blockHeaderHash judgementBlock
@@ -180,7 +165,6 @@ observeStrikes confirmedBlock = profile "observeStrikesByBlockHeight" $ do
       , blockTimeStrikeObservedJudgementBlockHeight =
         blockHeaderHeight judgementBlock
       }
-    C.yield key
 
 data LeastUnobservedConfirmedTip
 -- | this function gets current latest confirmed tip as an argument
