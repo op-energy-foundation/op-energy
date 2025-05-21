@@ -418,57 +418,67 @@ getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $
           $ streamEntities
             [ BlockTimeStrikeBlock ==. blockHeight, BlockTimeStrikeStrikeMediantime ==. fromIntegral strikeMediantime ]
             BlockTimeStrikeId
-            (PageSize ((fromPositive recordsPerReply) + 1))
+            (PageSize (fromPositive recordsPerReply + 1))
             Descend
             (Range Nothing Nothing)
-          .| ( let loop acc = do
-                     mv <- C.await
-                     case mv of
-                       Just (Entity strikeId strike) -> do
-                         mguessesCount <- lift $ selectFirst
-                           [ CalculatedBlockTimeStrikeGuessesCountStrike ==. strikeId]
-                           []
-                         guessesCount <- case mguessesCount of
-                           Just (Entity _ guessesCount) -> -- results are already calculated
-                             return (calculatedBlockTimeStrikeGuessesCountGuessesCount guessesCount)
-                           Nothing -> do -- fallback mode, recount online, which maybe a bad thing to do here TODO decide if it should be removed
-                             guessesCount <- lift $ verifyNatural <$> count [ BlockTimeStrikeGuessStrike ==. strikeId ]
-                             _ <- lift $ insert $! CalculatedBlockTimeStrikeGuessesCount
-                               { calculatedBlockTimeStrikeGuessesCountStrike = strikeId
-                               , calculatedBlockTimeStrikeGuessesCountGuessesCount = guessesCount
-                               }
-                             return guessesCount
-                         mObserved <- lift $ selectFirst
-                           [ BlockTimeStrikeObservedStrike ==. strikeId ]
-                           []
-                         return ( Just ( BlockTimeStrikeWithGuessesCountPublic
-                                         { blockTimeStrikeWithGuessesCountPublicStrike = BlockTimeStrikePublic
-                                           { blockTimeStrikePublicObservedResult = maybe
-                                             Nothing
-                                             (\(Entity _ v)-> Just $! blockTimeStrikeObservedIsFast v)
-                                             mObserved
-                                           , blockTimeStrikePublicObservedBlockMediantime = maybe
-                                             Nothing
-                                             (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockMediantime v)
-                                             mObserved
-                                           , blockTimeStrikePublicObservedBlockHash = maybe
-                                             Nothing
-                                             (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockHash v)
-                                             mObserved
-                                           , blockTimeStrikePublicObservedBlockHeight = maybe
-                                             Nothing
-                                             (\(Entity _ v)-> Just $! blockTimeStrikeObservedJudgementBlockHeight v)
-                                             mObserved
-                                           , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
-                                           , blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime strike
-                                           , blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime strike
-                                           }
-                                         , blockTimeStrikeWithGuessesCountPublicGuessesCount =
-                                           fromIntegral guessesCount
-                                         }
-                                       )
-                                )
-                       Nothing -> return acc
-               in loop Nothing
-             )
+          .| C.mapM getOrCountGuessesCountByBlockTimeStrike
+          .| C.mapM maybeFetchObserved
+          .| C.map renderBlockTimeStrikeWithGuessesCountPublic
+          .| C.head
+    getOrCountGuessesCountByBlockTimeStrike
+      :: Entity BlockTimeStrike
+      -> ReaderT SqlBackend IO
+         (Entity BlockTimeStrike, Natural Int)
+    getOrCountGuessesCountByBlockTimeStrike strikeE@(Entity strikeId _) = do
+      mguessesCount <- selectFirst
+        [ CalculatedBlockTimeStrikeGuessesCountStrike ==. strikeId]
+        []
+      guessesCount <- case mguessesCount of
+        Just (Entity _ guessesCount) -> -- results are already calculated
+          return (calculatedBlockTimeStrikeGuessesCountGuessesCount guessesCount)
+        Nothing -> do -- fallback mode, recount online, which maybe a bad thing to do here TODO decide if it should be removed
+          guessesCount <- verifyNatural <$> count [ BlockTimeStrikeGuessStrike ==. strikeId ]
+          _ <- insert $! CalculatedBlockTimeStrikeGuessesCount
+            { calculatedBlockTimeStrikeGuessesCountStrike = strikeId
+            , calculatedBlockTimeStrikeGuessesCountGuessesCount = guessesCount
+            }
+          return guessesCount
+      return (strikeE, guessesCount)
+    maybeFetchObserved
+      :: (Entity BlockTimeStrike, Natural Int)
+      -> ReaderT SqlBackend IO
+         (Entity BlockTimeStrike, Natural Int, Maybe (Entity BlockTimeStrikeObserved))
+    maybeFetchObserved (strikeE@(Entity strikeId _), guessesCount) = do
+      mObserved <- selectFirst
+        [ BlockTimeStrikeObservedStrike ==. strikeId ]
+        []
+      return (strikeE, guessesCount, mObserved)
+    renderBlockTimeStrikeWithGuessesCountPublic
+      :: (Entity BlockTimeStrike, Natural Int, Maybe (Entity BlockTimeStrikeObserved))
+      -> BlockTimeStrikeWithGuessesCountPublic
+    renderBlockTimeStrikeWithGuessesCountPublic
+        (Entity _ strike, guessesCount, mObserved) =
+      BlockTimeStrikeWithGuessesCountPublic
+        { blockTimeStrikeWithGuessesCountPublicStrike = BlockTimeStrikePublic
+          { blockTimeStrikePublicObservedResult = fmap
+            (\(Entity _ v)-> blockTimeStrikeObservedIsFast v)
+            mObserved
+          , blockTimeStrikePublicObservedBlockMediantime = fmap
+            (\(Entity _ v)-> blockTimeStrikeObservedJudgementBlockMediantime v)
+            mObserved
+          , blockTimeStrikePublicObservedBlockHash = fmap
+            (\(Entity _ v)-> blockTimeStrikeObservedJudgementBlockHash v)
+            mObserved
+          , blockTimeStrikePublicObservedBlockHeight = fmap
+            (\(Entity _ v)-> blockTimeStrikeObservedJudgementBlockHeight v)
+            mObserved
+          , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
+          , blockTimeStrikePublicStrikeMediantime =
+            blockTimeStrikeStrikeMediantime strike
+          , blockTimeStrikePublicCreationTime =
+            blockTimeStrikeCreationTime strike
+          }
+        , blockTimeStrikeWithGuessesCountPublicGuessesCount =
+          fromIntegral guessesCount
+        }
 
