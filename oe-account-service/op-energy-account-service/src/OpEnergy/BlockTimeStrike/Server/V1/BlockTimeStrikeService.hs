@@ -424,28 +424,22 @@ getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $
             (PageSize (fromPositive recordsPerReply + 1))
             Descend
             (Range Nothing Nothing)
-          .| C.mapM getOrCountGuessesCountByBlockTimeStrike
+          .| C.mapM getGuessesCountByBlockTimeStrike
           .| C.mapM maybeFetchObserved
           .| C.map renderBlockTimeStrikeWithGuessesCountPublic
           .| C.head
-    getOrCountGuessesCountByBlockTimeStrike
+    getGuessesCountByBlockTimeStrike
       :: Entity BlockTimeStrike
       -> ReaderT SqlBackend IO
          (Entity BlockTimeStrike, Natural Int)
-    getOrCountGuessesCountByBlockTimeStrike strikeE@(Entity strikeId _) = do
+    getGuessesCountByBlockTimeStrike strikeE@(Entity strikeId _) = do
       mguessesCount <- selectFirst
         [ CalculatedBlockTimeStrikeGuessesCountStrike ==. strikeId]
         []
-      guessesCount <- case mguessesCount of
-        Just (Entity _ guessesCount) -> -- results are already calculated
-          return (calculatedBlockTimeStrikeGuessesCountGuessesCount guessesCount)
-        Nothing -> do -- fallback mode, recount online, which maybe a bad thing to do here TODO decide if it should be removed
-          guessesCount <- verifyNatural <$> count [ BlockTimeStrikeGuessStrike ==. strikeId ]
-          _ <- insert $! CalculatedBlockTimeStrikeGuessesCount
-            { calculatedBlockTimeStrikeGuessesCountStrike = strikeId
-            , calculatedBlockTimeStrikeGuessesCountGuessesCount = guessesCount
-            }
-          return guessesCount
+      let guessesCount = maybe
+            0
+            (\(Entity _ v) -> calculatedBlockTimeStrikeGuessesCountGuessesCount v)
+            mguessesCount
       return (strikeE, guessesCount)
     maybeFetchObserved
       :: (Entity BlockTimeStrike, Natural Int)
