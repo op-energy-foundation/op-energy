@@ -49,7 +49,7 @@ import           Data.OpEnergy.Account.API.V1.FilterRequest
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
 import           Data.OpEnergy.API.V1.Error(throwJSON)
 import           OpEnergy.Account.Server.V1.Config (Config(..))
-import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging, profile, withDBTransaction, withDBNOTransactionROUnsafe )
+import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging, profile, withDBTransaction )
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledStrikeCreation as BlockTimeScheduledStrikeCreation
@@ -416,7 +416,7 @@ getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $
   where
     actualGetBlockTimeStrike = do
       recordsPerReply <- asks (configRecordsPerReply . config)
-      withDBNOTransactionROUnsafe "" $ do
+      withDBTransaction "" $ do
         C.runConduit
           $ streamEntities
             [ BlockTimeStrikeBlock ==. blockHeight, BlockTimeStrikeStrikeMediantime ==. fromIntegral strikeMediantime ]
@@ -430,7 +430,7 @@ getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $
           .| C.head
     getGuessesCountByBlockTimeStrike
       :: Entity BlockTimeStrike
-      -> ReaderT SqlBackend IO
+      -> ReaderT SqlBackend (NoLoggingT (ResourceT IO))
          (Entity BlockTimeStrike, Natural Int)
     getGuessesCountByBlockTimeStrike strikeE@(Entity strikeId _) = do
       mguessesCount <- selectFirst
@@ -443,7 +443,7 @@ getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $
       return (strikeE, guessesCount)
     maybeFetchObserved
       :: (Entity BlockTimeStrike, Natural Int)
-      -> ReaderT SqlBackend IO
+      -> ReaderT SqlBackend (NoLoggingT (ResourceT IO))
          (Entity BlockTimeStrike, Natural Int, Maybe (Entity BlockTimeStrikeObserved))
     maybeFetchObserved (strikeE@(Entity strikeId _), guessesCount) = do
       mObserved <- selectFirst

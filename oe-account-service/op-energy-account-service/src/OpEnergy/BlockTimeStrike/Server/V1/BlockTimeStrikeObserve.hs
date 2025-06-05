@@ -34,7 +34,6 @@ import           OpEnergy.Account.Server.V1.Config (Config(..))
 import           OpEnergy.Account.Server.V1.Class ( AppT
                                                   , State(..)
                                                   , profile
-                                                  , withDBNOTransactionROUnsafe
                                                   , withDBTransaction
                                                   , runLoggingIO
                                                   , runLogging
@@ -180,7 +179,7 @@ withLeastUnobservedConfirmedBlock
   -> AppT m ()
 withLeastUnobservedConfirmedBlock mpersistedBlockHeightC payload = do
   mlatestConfirmedHeight <- runMaybeT $ do
-    mret <- MaybeT $ withDBNOTransactionROUnsafe "" $ runMaybeT $ do
+    mret <- MaybeT $ withDBTransaction "" $ runMaybeT $ do
       Entity _ record <- MaybeT $ selectFirst [][]
       MaybeT $ return $ blockTimeStrikeDBLatestConfirmedHeight record
     MaybeT $ return mret

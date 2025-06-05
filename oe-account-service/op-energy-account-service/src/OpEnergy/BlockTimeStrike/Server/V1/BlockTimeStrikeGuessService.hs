@@ -54,7 +54,7 @@ import           Data.OpEnergy.Account.API.V1.UUID
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
 import           Data.OpEnergy.API.V1.Error (throwJSON)
 import           OpEnergy.Account.Server.V1.Config (Config(..))
-import           OpEnergy.Account.Server.V1.Class ( AppT, AppM, State(..), runLogging, profile, withDBTransaction, withDBNOTransactionROUnsafe)
+import           OpEnergy.Account.Server.V1.Class ( AppT, AppM, State(..), runLogging, profile, withDBTransaction)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
@@ -181,7 +181,7 @@ getBlockTimeStrikeGuessResultsPage mpage mfilter = profile "getBlockTimeStrikeGu
             . unFilterRequest
             )
             mfilter
-      mret <- withDBNOTransactionROUnsafe "" $ C.runConduit
+      mret <- withDBTransaction "" $ C.runConduit
         $ filters linesPerPage confirmedBlock
         .| (C.drop (fromNatural page * fromPositive linesPerPage) >> C.awaitForever C.yield) -- navigate to page
         .| C.map renderBlockTimeStrikeGuessResultPublic
@@ -215,7 +215,11 @@ getBlockTimeStrikeGuessResultsPage mpage mfilter = profile "getBlockTimeStrikeGu
     fetchConfirmedStrikes
       :: Positive Int
       -> BlockHeader
-      -> ConduitT () (Entity BlockTimeStrike) (ReaderT SqlBackend IO) ()
+      -> ConduitT
+         ()
+         (Entity BlockTimeStrike)
+         (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
+         ()
     fetchConfirmedStrikes recordsPerReply confirmedBlock = streamEntities
       ((BlockTimeStrikeBlock <=. blockHeaderHeight confirmedBlock)
       : maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter
@@ -390,7 +394,7 @@ getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilter = profi
   recordsPerReply <- asks (configRecordsPerReply . config)
   let
       linesPerPage = maybe recordsPerReply (maybe recordsPerReply id . blockTimeStrikeGuessResultPublicFilterLinesPerPage . fst . unFilterRequest ) mfilter
-  mret <- withDBNOTransactionROUnsafe "" $ do
+  mret <- withDBTransaction "" $ do
     C.runConduit
       $ filters linesPerPage
       .| (C.drop (fromNatural page * fromPositive linesPerPage) >> C.awaitForever C.yield) -- navigate to page
@@ -455,7 +459,7 @@ getBlockTimeStrikeGuess token blockHeight strikeMediantime = profile "getBlockTi
   where
     actualGetStrikeGuess (Entity personKey person) blockHeight strikeMediantime = do
       recordsPerReply <- asks (configRecordsPerReply . config)
-      withDBNOTransactionROUnsafe "" $ do
+      withDBTransaction "" $ do
         C.runConduit
           $ fetchBlockTimeStrikeByHeightAndMediantime
               recordsPerReply
@@ -471,7 +475,7 @@ getBlockTimeStrikeGuess token blockHeight strikeMediantime = profile "getBlockTi
           .| C.head
     maybeFetchObservedStrike
       :: (Entity BlockTimeStrike, Entity BlockTimeStrikeGuess)
-      -> ReaderT SqlBackend IO
+      -> ReaderT SqlBackend (NoLoggingT (ResourceT IO))
          ( Entity BlockTimeStrike
          , Entity BlockTimeStrikeGuess
          , Maybe (Entity BlockTimeStrikeObserved)
@@ -513,11 +517,11 @@ getBlockTimeStrikeGuessPerson uuid blockHeight strikeMediantime = profile "getBl
 
   where
     mgetPersonByUUID uuid = do
-      withDBNOTransactionROUnsafe "" $ do
+      withDBTransaction "" $ do
         selectFirst [ PersonUuid ==. uuid ][]
     actualGetStrikeGuess (Entity personKey person) blockHeight strikeMediantime = do
       recordsPerReply <- asks (configRecordsPerReply . config)
-      withDBNOTransactionROUnsafe "" $ do
+      withDBTransaction "" $ do
         C.runConduit
           $ fetchBlockTimeStrikeByHeightAndMediantime recordsPerReply Descend blockHeight strikeMediantime
           .| C.zipConcatMapMC (fetchBlockTimeStrikeGuessByStrikeAndPerson
@@ -530,7 +534,7 @@ getBlockTimeStrikeGuessPerson uuid blockHeight strikeMediantime = profile "getBl
       :: (Entity BlockTimeStrike, Entity BlockTimeStrikeGuess)
       -> ReaderT
          SqlBackend
-         IO
+         (NoLoggingT (ResourceT IO))
          (Entity BlockTimeStrike
          , Entity BlockTimeStrikeGuess
          , Maybe (Entity BlockTimeStrikeObserved)
@@ -546,7 +550,11 @@ fetchBlockTimeStrikeByHeightAndMediantime
   -> SortOrder
   -> BlockHeight
   -> POSIXTime
-  -> ConduitT () (Entity BlockTimeStrike) (ReaderT SqlBackend IO) ()
+  -> ConduitT
+     ()
+     (Entity BlockTimeStrike)
+     (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
+     ()
 fetchBlockTimeStrikeByHeightAndMediantime
     recordsPerReply sort blockHeight strikeMediantime = streamEntities
   [ BlockTimeStrikeBlock ==. blockHeight
@@ -605,7 +613,11 @@ fetchBlockTimeStrikeGuessByStrike
   -> SortOrder
   -> Maybe (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
   -> Entity BlockTimeStrike
-  -> ConduitT () (Entity BlockTimeStrikeGuess) (ReaderT SqlBackend IO) ()
+  -> ConduitT
+     ()
+     (Entity BlockTimeStrikeGuess)
+     (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
+     ()
 fetchBlockTimeStrikeGuessByStrike recordsPerReply sort mfilter (Entity strikeId _) = do
   streamEntities
     ( ( BlockTimeStrikeGuessStrike ==. strikeId )
@@ -621,7 +633,11 @@ fetchGuessPersonByBlockTimeStrikeGuess
   -> SortOrder
   -> Maybe (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
   -> ( Entity BlockTimeStrike, Entity BlockTimeStrikeGuess)
-  -> ConduitT () (Entity Person) (ReaderT SqlBackend IO) ()
+  -> ConduitT
+     ()
+     (Entity Person)
+     (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
+     ()
 fetchGuessPersonByBlockTimeStrikeGuess
     recordsPerReply sort mfilter (_, Entity _ guess ) = do
   streamEntities
@@ -639,7 +655,7 @@ maybeFetchObservedStrikeByStrikeGuessAndPersonAndFlatten
        )
      , Entity Person
      )
-  -> ReaderT SqlBackend IO
+  -> ReaderT SqlBackend (NoLoggingT (ResourceT IO))
        ( Entity BlockTimeStrike
        , Entity BlockTimeStrikeGuess
        , Entity Person
@@ -696,7 +712,11 @@ fetchBlockTimeStrikeGuessByStrikeAndPerson
   :: Positive Int
   -> PersonId
   -> Entity BlockTimeStrike
-  -> ConduitT () (Entity BlockTimeStrikeGuess) (ReaderT SqlBackend IO) ()
+  -> ConduitT
+     ()
+     (Entity BlockTimeStrikeGuess)
+     (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
+     ()
 fetchBlockTimeStrikeGuessByStrikeAndPerson
     recordsPerReply personKey (Entity strikeId _) = do
   streamEntities
