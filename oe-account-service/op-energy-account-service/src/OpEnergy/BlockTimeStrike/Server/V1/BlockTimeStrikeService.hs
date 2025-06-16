@@ -331,7 +331,7 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
                  ]
         Just BlockTimeStrikeFilterClassOutcomeKnown-> do
           -- now get possible observed data for strike
-          shouldNotBeNothing <- selectFirst
+          observedStrikeExpectedToExist <- selectFirst
             ( (BlockTimeStrikeObservedStrike ==. strikeId)
             : (maybe [] ( buildFilter
                         . unFilterRequest
@@ -340,11 +340,11 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
               )
             )
             []
-          case shouldNotBeNothing of
+          case observedStrikeExpectedToExist of
             Nothing -> return []
             Just _ -> return
               [( strikeE
-               , shouldNotBeNothing
+               , observedStrikeExpectedToExist
                , mguessesCount
                ) -- had been observed
               ]
