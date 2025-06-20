@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleContexts  #-}
 module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeFilter
-  ( buildFilter
+  ( buildFilterByClass
   ) where
 
 
@@ -15,21 +15,19 @@ import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
 
 -- | this function builds a strike filter with given dynamic variables like
 -- current latest confirmed and unconfirmed blocks and etc
-buildFilter
-  :: [Filter BlockTimeStrike]
-  -> Maybe BlockTimeStrikeFilterClass
+buildFilterByClass
+  :: Maybe BlockTimeStrikeFilterClass
   -> BlockHeight
   -> BlockHeader
   -> Positive Int
   -> [Filter BlockTimeStrike]
-buildFilter
-    strikeFilter
+buildFilterByClass
     filterClass
     latestUnconfirmedBlockHeight
     latestConfirmedBlock
     configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip =
   case filterClass of
-    Nothing -> strikeFilter
+    Nothing -> []
     Just BlockTimeStrikeFilterClassGuessable ->
       let
           minimumGuessableBlock = latestUnconfirmedBlockHeight + naturalFromPositive configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
@@ -45,10 +43,9 @@ buildFilter
             = BlockTimeStrikeStrikeMediantime
               >. fromIntegral minimumGuessableMediantime
       in
-        ( isStrikeBlockHeightGuessable
-        : isStrikeMediantimeGuessable
-        : strikeFilter
-        )
+        [ isStrikeBlockHeightGuessable
+        , isStrikeMediantimeGuessable
+        ]
     Just BlockTimeStrikeFilterClassOutcomeKnown ->
       let
           strikeOutcomeKnownByBlockHeight
@@ -56,8 +53,7 @@ buildFilter
           strikeOutcomeKnownByMediantime
             = BlockTimeStrikeStrikeMediantime <=. fromIntegral (blockHeaderMediantime latestConfirmedBlock)
       in
-        ( [strikeOutcomeKnownByBlockHeight] ||. [strikeOutcomeKnownByMediantime]
-        ) ++ strikeFilter
+        [strikeOutcomeKnownByBlockHeight] ||. [strikeOutcomeKnownByMediantime]
     Just BlockTimeStrikeFilterClassOutcomeUnknown ->
       let
           strikeBlockHeightUnconfirmed
@@ -65,7 +61,7 @@ buildFilter
           strikeMediantimeInFuture
             = BlockTimeStrikeStrikeMediantime >. fromIntegral (blockHeaderMediantime latestConfirmedBlock)
       in
-      ( strikeBlockHeightUnconfirmed
-      : strikeMediantimeInFuture
-      : strikeFilter
-      )
+      [ strikeBlockHeightUnconfirmed
+      , strikeMediantimeInFuture
+      ]
+

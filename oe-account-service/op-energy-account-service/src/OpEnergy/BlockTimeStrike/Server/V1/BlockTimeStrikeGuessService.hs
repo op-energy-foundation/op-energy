@@ -259,13 +259,14 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
               $ TVar.readTVar latestConfirmedBlockV
               )
       let
-          finalStrikesFilter = BlockTimeStrikeFilter.buildFilter
-            strikeFilter
-            (maybe Nothing (blockTimeStrikeGuessResultPublicFilterClass . fst . unFilterRequest) mfilter)
-            latestUnconfirmedBlockHeight
-            latestConfirmedBlock
-            configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
-      exceptTMaybeT ("db query failed")
+          finalStrikesFilter =
+            BlockTimeStrikeFilter.buildFilterByClass
+              (maybe Nothing (blockTimeStrikeGuessResultPublicFilterClass . fst . unFilterRequest) mfilter)
+              latestUnconfirmedBlockHeight
+              latestConfirmedBlock
+              configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
+            ++ strikeFilter
+      exceptTMaybeT "db query failed"
         $ pagingResult
           mpage
           linesPerPage

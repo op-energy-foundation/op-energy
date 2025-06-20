@@ -155,12 +155,15 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
           <*> (exceptTMaybeT "latest confirmed block hasn't been received yet"
               $ TVar.readTVar latestConfirmedBlockV
               )
-      let strikeFilter = BlockTimeStrikeFilter.buildFilter
-            (maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter)
-            (maybe Nothing (blockTimeStrikeFilterClass . fst . unFilterRequest) mfilter)
-            latestUnconfirmedBlockHeight
-            latestConfirmedBlock
-            configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
+      let
+          staticPartFilter =  (maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter)
+          strikeFilter =
+            BlockTimeStrikeFilter.buildFilterByClass
+              (maybe Nothing (blockTimeStrikeFilterClass . fst . unFilterRequest) mfilter)
+              latestUnconfirmedBlockHeight
+              latestConfirmedBlock
+              configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
+            ++ staticPartFilter
       exceptTMaybeT "getBlockTimeStrikePast failed"
         $ getBlockTimeStrikePast strikeFilter
   where
