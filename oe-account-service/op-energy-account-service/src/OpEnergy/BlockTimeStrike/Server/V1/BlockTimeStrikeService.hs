@@ -208,7 +208,7 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
           BlockTimeStrikeId -- select strikes with given filter first
           $  C.map guessesCountWillBeFetchedLater
           .| C.concatMapM maybeFetchObservedStrike
-          .| C.mapM fetchGuessesCount
+          .| C.concatMapM maybeFetchGuessesCount
           .| C.concatMapM unwrapGuessesCount
           .| C.map renderBlockTimeStrikePublic
         SortByGuessesCountNeeded -> pagingResult
@@ -236,36 +236,28 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
          , Entity BlockTimeStrike
          )
     guessesCountAlreadyFetched (guessE, strikeE) = (Just guessE, strikeE)
-    fetchGuessesCount
+    maybeFetchGuessesCount
       :: ( Entity BlockTimeStrike
          , Maybe (Entity BlockTimeStrikeObserved)
          , Maybe (Entity CalculatedBlockTimeStrikeGuessesCount)
          )
       -> (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
-         ( Entity BlockTimeStrike
-         , Maybe (Entity BlockTimeStrikeObserved)
-         , Maybe (Entity CalculatedBlockTimeStrikeGuessesCount)
-         )
-    fetchGuessesCount (strikeE@(Entity strikeId _), mObserved, mguessesCount) = do
+         [( Entity BlockTimeStrike
+          , Maybe (Entity BlockTimeStrikeObserved)
+          , Maybe (Entity CalculatedBlockTimeStrikeGuessesCount)
+          )
+         ]
+    maybeFetchGuessesCount (strikeE@(Entity strikeId _), mObserved, mguessesCount) = do
       case mguessesCount of
-        Just _ -> return (strikeE, mObserved, mguessesCount)
+        Just _ -> return [(strikeE, mObserved, mguessesCount)]
         Nothing -> do
           mguessesCount <- selectFirst
             [ CalculatedBlockTimeStrikeGuessesCountStrike ==. strikeId]
             []
-          guessE <- case mguessesCount of
-            Just guessE -> -- results are already calculated
-              return guessE
+          case mguessesCount of
+            Just _ -> return [(strikeE, mObserved, mguessesCount)]
             Nothing -> do -- fallback mode, recount online, which maybe a bad thing to do here TODO decide if it should be removed
-              guessesCount <- verifyNatural
-                <$> count [ BlockTimeStrikeGuessStrike ==. strikeId ]
-              let guess = CalculatedBlockTimeStrikeGuessesCount
-                    { calculatedBlockTimeStrikeGuessesCountStrike = strikeId
-                    , calculatedBlockTimeStrikeGuessesCountGuessesCount = guessesCount
-                    }
-              guessId <- insert guess
-              return (Entity guessId guess)
-          return (strikeE, mObserved, Just guessE)
+              return []
     fetchStrikeByGuessesCount
       :: [Filter BlockTimeStrike]
       -> Entity CalculatedBlockTimeStrikeGuessesCount
