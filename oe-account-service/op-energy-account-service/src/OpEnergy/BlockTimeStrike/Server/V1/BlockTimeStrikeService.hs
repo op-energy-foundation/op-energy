@@ -283,66 +283,58 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
           )
          ]
     maybeFetchObservedStrike (mguessesCount, strikeE@(Entity strikeId _)) = do
-      case maybe Nothing ( blockTimeStrikeFilterClass
-                         . fst
-                         . unFilterRequest
-                         ) mfilter of
-        Nothing -> do
-          let
-              observedFilter = maybe [] ( buildFilter
-                                        . unFilterRequest
-                                        . mapFilter
-                                        ) mfilter
-          mObserved <- selectFirst
-            ( ( BlockTimeStrikeObservedStrike ==. strikeId
+      anyValidObservedStrike <- tryFetchValidObservedStrikeByClass
+      case anyValidObservedStrike of
+        Nothing -> return [ ]
+        Just maybeObservedStrike ->
+          return [ (strikeE, maybeObservedStrike, mguessesCount)]
+      where
+      tryFetchValidObservedStrikeByClass = do
+        let
+            anyStrikeClassContraintByFilter = maybe
+              Nothing
+              ( blockTimeStrikeFilterClass
+              . fst
+              . unFilterRequest
+              ) mfilter
+        case anyStrikeClassContraintByFilter of
+          Nothing -> do
+            let
+                observedStrikeFilter = maybe
+                  [] ( buildFilter
+                     . unFilterRequest
+                     . mapFilter
+                     ) mfilter
+            anyObservedStrike <- selectFirst
+              ( ( BlockTimeStrikeObservedStrike ==. strikeId
+                )
+              : observedStrikeFilter
+              ) []
+            case (observedStrikeFilter, anyObservedStrike) of
+              ([], classDoNotConstraintExistenceOfObservedStrike) ->
+                return (Just classDoNotConstraintExistenceOfObservedStrike)
+              ( _nonEmptyObservedStrikeFilter: _ , Just observedBlockFitsFilter)->
+                return (Just (Just observedBlockFitsFilter))
+              (_observedStrikeFilterExistsButObservedStrikeMissing :_ , Nothing) ->
+                return Nothing
+          Just BlockTimeStrikeFilterClassGuessable->
+            return (Just Nothing) -- strike has not been observed and strikeFilter should ensure, that it is in the future with proper guess threshold
+          Just BlockTimeStrikeFilterClassOutcomeUnknown-> do
+            return (Just Nothing) -- hasn't been observed
+          Just BlockTimeStrikeFilterClassOutcomeKnown-> do
+            -- now get possible observed data for strike
+            anyObservedStrikeFitsOutcomeKnownClass <- selectFirst
+              ( (BlockTimeStrikeObservedStrike ==. strikeId)
+              : maybe [] ( buildFilter
+                          . unFilterRequest
+                          . mapFilter
+                          ) mfilter
               )
-            : observedFilter
-            ) []
-          case (observedFilter, mObserved) of
-            ([], observableCanBeMissing) ->
-              return [( strikeE
-                      , observableCanBeMissing
-                      , mguessesCount
-                      )
-                     ]
-            ( _nonEmptyObservedFilter: _ , Just _observedBlockFitsFilter)->
-              return [( strikeE
-                      , mObserved
-                      , mguessesCount
-                      )
-                     ]
-            _ -> return []
-        Just BlockTimeStrikeFilterClassGuessable->
-          return [( strikeE
-                  , Nothing
-                  , mguessesCount
-                  ) -- strike has not been observed and strikeFilter should ensure, that it is in the future with proper guess threshold
-                 ]
-        Just BlockTimeStrikeFilterClassOutcomeUnknown-> do
-          return [( strikeE
-                  , Nothing
-                  , mguessesCount
-                  ) -- hasn't been observed
-                 ]
-        Just BlockTimeStrikeFilterClassOutcomeKnown-> do
-          -- now get possible observed data for strike
-          observedStrikeExpectedToExist <- selectFirst
-            ( (BlockTimeStrikeObservedStrike ==. strikeId)
-            : (maybe [] ( buildFilter
-                        . unFilterRequest
-                        . mapFilter
-                        ) mfilter
-              )
-            )
-            []
-          case observedStrikeExpectedToExist of
-            Nothing -> return []
-            Just _ -> return
-              [( strikeE
-               , observedStrikeExpectedToExist
-               , mguessesCount
-               ) -- had been observed
-              ]
+              []
+            case anyObservedStrikeFitsOutcomeKnownClass of
+              Nothing -> return Nothing
+              Just observedStrikeFitsOutcomeKnownClass ->
+                return (Just (Just observedStrikeFitsOutcomeKnownClass)) -- had been observed
     renderBlockTimeStrikePublic
       :: ( Entity BlockTimeStrike
          , Maybe (Entity BlockTimeStrikeObserved)
