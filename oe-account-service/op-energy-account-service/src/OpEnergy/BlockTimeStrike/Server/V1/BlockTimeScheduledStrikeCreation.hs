@@ -113,20 +113,30 @@ ensureNextEpochGuessableStrikeExists confirmedTip = profile "ensureNextEpochGues
       , BlockTimeStrikeStrikeMediantime ==. fromIntegral nextEpochZeroDifficultyAdjustmentBlockMediantime
       ][]
     case anyNextEpochBlockStrikeExist of
-      Just _ -> return Nothing
-      Nothing -> do
-        now <- liftIO $ getPOSIXTime
-        fmap Just $! insert $! BlockTimeStrike
-          { blockTimeStrikeBlock = nextEpochStartBlockHeight
-          , blockTimeStrikeStrikeMediantime = fromIntegral nextEpochZeroDifficultyAdjustmentBlockMediantime
-          , blockTimeStrikeCreationTime = now
-          }
+      Just _ -> let
+          doNothingAsNextEpochBlockTimeStrikeExists = return Nothing
+        in doNothingAsNextEpochBlockTimeStrikeExists
+      Nothing -> let
+          thereIsNoBlockTimeStrikeExistCreateNewOne = do
+            now <- liftIO getPOSIXTime
+            fmap Just $! insert $! BlockTimeStrike
+              { blockTimeStrikeBlock = nextEpochStartBlockHeight
+              , blockTimeStrikeStrikeMediantime = fromIntegral nextEpochZeroDifficultyAdjustmentBlockMediantime
+              , blockTimeStrikeCreationTime = now
+              }
+        in thereIsNoBlockTimeStrikeExistCreateNewOne
   case mmNextEpochBlockStrikeCreated of
-    Nothing ->
-      runLogging $ $(logError) $ "ensureNextEpochGuessableStrikeExists: DB query failed"
-    Just Nothing -> return ()
-    Just (Just _) ->
-      runLogging $ $(logInfo) $ "ensureNextEpochGuessableStrikeExists: created strike ("
-        <> tshow nextEpochStartBlockHeight <> " / "
-        <> tshow nextEpochZeroDifficultyAdjustmentBlockMediantime <> ")"
+    Nothing -> let
+        logDBError = do
+          runLogging $ $(logError) $ "ensureNextEpochGuessableStrikeExists: DB query failed"
+      in logDBError
+    Just Nothing -> let
+        doNothingAsNextEpochBlockTimeStrikeExists = return ()
+      in doNothingAsNextEpochBlockTimeStrikeExists
+    Just (Just _) -> let
+        logNewestCreatedBlockTimeStrike = do
+          runLogging $ $(logInfo) $ "ensureNextEpochGuessableStrikeExists: created strike ("
+            <> tshow nextEpochStartBlockHeight <> " / "
+            <> tshow nextEpochZeroDifficultyAdjustmentBlockMediantime <> ")"
+      in logNewestCreatedBlockTimeStrike
 
