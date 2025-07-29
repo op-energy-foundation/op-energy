@@ -133,7 +133,7 @@ ensureNextEpochGuessableStrikeExists confirmedTip = profile "ensureNextEpochGues
     Just Nothing -> let
         doNothingAsNextEpochBlockTimeStrikeExists = return ()
       in doNothingAsNextEpochBlockTimeStrikeExists
-    Just (Just _) -> let
+    Just (Just _newBlockTimeStrikeCreated) -> let
         logNewestCreatedBlockTimeStrike = do
           runLogging $ $(logInfo) $ "ensureNextEpochGuessableStrikeExists: created strike ("
             <> tshow nextEpochStartBlockHeight <> " / "
