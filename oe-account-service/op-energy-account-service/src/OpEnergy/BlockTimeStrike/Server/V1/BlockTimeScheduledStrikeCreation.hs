@@ -24,6 +24,7 @@ import           Data.OpEnergy.API.V1.Natural
 import           OpEnergy.Account.Server.V1.Class as Account (profile, AppT, State(..), runLogging, withDBTransaction)
 import           OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import           OpEnergy.Account.Server.V1.Config
+import qualified OpEnergy.Account.Server.V1.Config as Config
 import           Data.Text.Show
 
 -- | This function is being called when latest confirmed block had been discovered. You should expect, that it can be called by recieving notification from the blockspan service either at discover or at a time of connection of block time service to blockspan service. So it is expected, that it will run at each restart of the blockspan service or at reconnection to blockspan service or at blocktime service restart.
@@ -93,56 +94,49 @@ ensureNextEpochGuessableStrikeExists
   => BlockHeader
   -> AppT m ()
 ensureNextEpochGuessableStrikeExists confirmedTip = profile "ensureNextEpochGuessableStrikeExists" $ do
-  Account.State{ config = Config
-         { configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip = configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
-         }
-       , blockTimeState = BlockTime.State
-         { latestUnconfirmedBlockHeight = latestUnconfirmedBlockHeightV
-         }
-       } <- ask
-  anyLatestUnconfirmedBlockHeightExist <- liftIO $ TVar.readTVarIO latestUnconfirmedBlockHeightV
-  case anyLatestUnconfirmedBlockHeightExist of
-    Nothing -> return ()
-    Just latestUnconfirmedBlockHeight -> do
-      configBlockspanURL <- asks (configBlockspanURL . config)
-      let
-          topUnguessableBlockHeight = latestUnconfirmedBlockHeight
-                                    + naturalFromPositive configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip - 1
-          epochBlocks = 2016
-          currentEpochMultiplier = topUnguessableBlockHeight `div` epochBlocks
-          currentEpochBlockHeight = epochBlocks * currentEpochMultiplier
-          nextEpochMultiplier = currentEpochMultiplier + 1
-          nextEpochBlock = epochBlocks * nextEpochMultiplier
-          isCurrentEpochBlockConfirmed =
-            blockHeaderHeight confirmedTip >= currentEpochBlockHeight
-      currentEpochBlockMediantime <-
-        if isCurrentEpochBlockConfirmed
-          then liftIO $! Blockspan.withClient configBlockspanURL $
-            blockHeaderMediantime <$> getBlockByHeight currentEpochBlockHeight
-          else return 0
-      let
-          nextEpochBlockMediantime = currentEpochBlockMediantime
-                                   + (fromIntegral ( fromNatural epochBlocks * 600))
-      mmNextEpochBlockStrikeCreated <- withDBTransaction "" $ do
-        anyNextEpochBlockStrikeExist <- selectFirst
-          [ BlockTimeStrikeBlock ==. nextEpochBlock
-          , BlockTimeStrikeStrikeMediantime ==. fromIntegral nextEpochBlockMediantime
-          ][]
-        case anyNextEpochBlockStrikeExist of
-          Just _ -> return Nothing
-          Nothing -> do
-            now <- liftIO $ getPOSIXTime
+  configBlockspanURL <- asks (Config.configBlockspanURL . config)
+  let
+      epochBlocks = 2016
+      currentEpochMultiplier = blockHeaderHeight confirmedTip `div` epochBlocks
+      currentEpochStartBlockHeight = epochBlocks * currentEpochMultiplier
+      nextEpochMultiplier = currentEpochMultiplier + 1
+      nextEpochStartBlockHeight = epochBlocks * nextEpochMultiplier
+  currentEpochBlockMediantime <-
+    liftIO $! Blockspan.withClient configBlockspanURL $
+      blockHeaderMediantime <$> getBlockByHeight currentEpochStartBlockHeight
+  let
+      nextEpochZeroDifficultyAdjustmentBlockMediantime = currentEpochBlockMediantime
+                               + (fromIntegral ( fromNatural epochBlocks * 600))
+  mmNextEpochBlockStrikeCreated <- withDBTransaction "" $ do
+    anyNextEpochBlockStrikeExist <- selectFirst
+      [ BlockTimeStrikeBlock ==. nextEpochStartBlockHeight
+      , BlockTimeStrikeStrikeMediantime ==. fromIntegral nextEpochZeroDifficultyAdjustmentBlockMediantime
+      ][]
+    case anyNextEpochBlockStrikeExist of
+      Just _ -> let
+          doNothingAsNextEpochBlockTimeStrikeExists = return Nothing
+        in doNothingAsNextEpochBlockTimeStrikeExists
+      Nothing -> let
+          thereIsNoBlockTimeStrikeExistCreateNewOne = do
+            now <- liftIO getPOSIXTime
             fmap Just $! insert $! BlockTimeStrike
-              { blockTimeStrikeBlock = nextEpochBlock
-              , blockTimeStrikeStrikeMediantime = fromIntegral nextEpochBlockMediantime
+              { blockTimeStrikeBlock = nextEpochStartBlockHeight
+              , blockTimeStrikeStrikeMediantime = fromIntegral nextEpochZeroDifficultyAdjustmentBlockMediantime
               , blockTimeStrikeCreationTime = now
               }
-      case mmNextEpochBlockStrikeCreated of
-        Nothing ->
+        in thereIsNoBlockTimeStrikeExistCreateNewOne
+  case mmNextEpochBlockStrikeCreated of
+    Nothing -> let
+        logDBError = do
           runLogging $ $(logError) $ "ensureNextEpochGuessableStrikeExists: DB query failed"
-        Just Nothing -> return ()
-        Just (Just _) ->
+      in logDBError
+    Just Nothing -> let
+        doNothingAsNextEpochBlockTimeStrikeExists = return ()
+      in doNothingAsNextEpochBlockTimeStrikeExists
+    Just (Just _newBlockTimeStrikeCreated) -> let
+        logNewestCreatedBlockTimeStrike = do
           runLogging $ $(logInfo) $ "ensureNextEpochGuessableStrikeExists: created strike ("
-            <> tshow nextEpochBlock <> " / "
-            <> tshow nextEpochBlockMediantime <> ")"
+            <> tshow nextEpochStartBlockHeight <> " / "
+            <> tshow nextEpochZeroDifficultyAdjustmentBlockMediantime <> ")"
+      in logNewestCreatedBlockTimeStrike
 
