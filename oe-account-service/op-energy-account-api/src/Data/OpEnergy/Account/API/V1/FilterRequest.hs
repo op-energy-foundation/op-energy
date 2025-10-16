@@ -2,7 +2,6 @@
  -- The purpose is to be used to build search filters
  --}
 {-# LANGUAGE OverloadedStrings          #-}
-{-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE AllowAmbiguousTypes        #-}
 module Data.OpEnergy.Account.API.V1.FilterRequest
@@ -30,14 +29,14 @@ class BuildFilter a b where
   buildFilter :: (b, Proxy a) -> [ Filter a]
   sortOrder   :: (b, Proxy a) -> SortOrder
 
-newtype BuildFilter a b => FilterRequest a b = FilterRequest
+newtype FilterRequest a b = FilterRequest
   { unFilterRequest :: (b, Proxy a)
   }
   deriving (Eq, Show)
 
-instance (FromJSON b, BuildFilter a b) => FromJSON (FilterRequest a b) where
+instance (FromJSON b) => FromJSON (FilterRequest a b) where
   parseJSON v = FilterRequest <$> ((,) <$> parseJSON v <*> pure Proxy)
-instance (BuildFilter a b, ToJSON b) => ToJSON (FilterRequest a b) where
+instance (ToJSON b) => ToJSON (FilterRequest a b) where
   toJSON (FilterRequest (v, _)) = toJSON v
   toEncoding (FilterRequest (v, _)) = toEncoding v
 instance (ToSchema b) => ToSchema (FilterRequest a b) where
@@ -52,10 +51,10 @@ instance (ToParamSchema b) => ToParamSchema (FilterRequest a b) where
       -- needed to satisfy type checker
       def1 :: Proxy (FilterRequest a b)-> Proxy b
       def1 _ = Proxy
-instance (BuildFilter a b, ToHttpApiData b, ToJSON b) => ToHttpApiData (FilterRequest a b) where
+instance (ToHttpApiData b, ToJSON b) => ToHttpApiData (FilterRequest a b) where
   toUrlPiece (FilterRequest (v, _)) = toUrlPiece v
   toQueryParam (FilterRequest (v, _)) = toQueryParam v
-instance (BuildFilter a b, FromJSON b) => FromHttpApiData (FilterRequest a b) where
+instance (FromJSON b) => FromHttpApiData (FilterRequest a b) where
   parseUrlPiece v = case Aeson.eitherDecodeStrict (Text.encodeUtf8 v) of
     Left some -> Left (Text.pack some)
     Right some -> Right (FilterRequest (some, Proxy))
@@ -64,7 +63,7 @@ instance (BuildFilter a b, FromJSON b) => FromHttpApiData (FilterRequest a b) wh
     Right some -> Right (FilterRequest (some, Proxy))
 
 
-instance (Default b, BuildFilter a b) => Default (FilterRequest a b) where
+instance (Default b) => Default (FilterRequest a b) where
   def = FilterRequest (def, Proxy)
 
 instance Enum SortOrder where
@@ -99,9 +98,9 @@ verifySortOrder "descend" = Descend
 verifySortOrder _ = error "verifySortOrder: wrong value"
 
 -- | default PageResult
-defaultFilterRequest :: (BuildFilter a b, Default b) => FilterRequest a b
+defaultFilterRequest :: (Default b) => FilterRequest a b
 defaultFilterRequest = FilterRequest (def, Proxy)
 
-mapFilter :: (BuildFilter a b, BuildFilter c b) => FilterRequest a b -> FilterRequest c b
+mapFilter :: FilterRequest a b -> FilterRequest c b
 mapFilter (FilterRequest (v, _)) = FilterRequest (v, Proxy)
 

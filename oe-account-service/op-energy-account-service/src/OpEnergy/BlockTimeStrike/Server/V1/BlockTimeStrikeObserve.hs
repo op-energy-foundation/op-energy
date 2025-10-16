@@ -29,7 +29,8 @@ import           Data.Text.Show (tshow)
 import           Data.OpEnergy.Client as Blockspan
 import           Data.OpEnergy.API.V1.Block
 import           Data.OpEnergy.API.V1.Positive( Positive, fromPositive)
-import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
+import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
+import           OpEnergy.BlockTimeStrike.Server.V1.SlowFast
 import           OpEnergy.Account.Server.V1.Config (Config(..))
 import           OpEnergy.Account.Server.V1.Class ( AppT
                                                   , State(..)

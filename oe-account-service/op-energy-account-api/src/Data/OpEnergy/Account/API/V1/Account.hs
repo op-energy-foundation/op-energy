@@ -36,7 +36,6 @@ import           Data.ByteString.Short (ShortByteString)
 import qualified Data.ByteString.Short as BS (toShort, fromShort)
 import qualified Data.ByteString as BS (pack)
 
-import           Database.Persist.TH
 import           Database.Persist
 import           Database.Persist.Sql
 import           Servant.API
@@ -189,27 +188,25 @@ verifyDisplayName raw =
     Prelude.Right ret -> ret
     Left some -> error (show some)
 
-share [mkPersist sqlSettings, mkMigrate "migrateAccount"] [persistLowerCase|
-Person
+data Person = Person
   -- data
-  uuid (UUID Person) -- will be used by other services as foreign key. local relations should use PersonId instead. If you in doubt why not use only Key, then think if you will be able to ensure that Key won't be changed in case of archieving persons, that haven't been seen for a long time.
-  hashedSecret (Hashed AccountSecret) -- hash of the secret in order to not to store plain secrets
-  loginsCount Word64 -- this field contains an integer value of how many times person had performed login. Default is 0
-  email EMailString Maybe -- can be empty (initially)
-  displayName DisplayName
+  { uuid :: UUID Person -- will be used by other services as foreign key. local relations should use PersonId instead. If you in doubt why not use only Key, then think if you will be able to ensure that Key won't be changed in case of archieving persons, that haven't been seen for a long time.
+  , hashedSecret :: Hashed AccountSecret -- hash of the secret in order to not to store plain secrets
+  , loginsCount :: Word64 -- this field contains an integer value of how many times person had performed login. Default is 0
+  , email :: Maybe EMailString -- can be empty (initially)
+  , displayName :: DisplayName
   -- metadata
-  creationTime POSIXTime
-  lastSeenTime POSIXTime -- timestamp of the last seen time. By default the same as creationTime
-  lastUpdated POSIXTime -- either CreationTime or last time of the lastest update
-  -- constraints
-  UniquePersonHashedSecret hashedSecret
-  UniqueUUID uuid
-  UniqueDisplayName displayName -- it will be confusing if we will allow persons with identical names
-  deriving Eq Show Generic
-|]
+  , creationTime :: POSIXTime
+  , lastSeenTime :: POSIXTime -- timestamp of the last seen time. By default the same as creationTime
+  , lastUpdated :: POSIXTime -- either CreationTime or last time of the lastest update
+  }
+  deriving (Eq, Show, Generic)
 
 defaultPOSIXTime :: POSIXTime
 defaultPOSIXTime = fromIntegral (0::Int)
+
+newtype PersonId = PersonId Word64
+  deriving (Eq, Show, Generic)
 
 instance PersistField POSIXTime where
   toPersistValue posix = toPersistValue word

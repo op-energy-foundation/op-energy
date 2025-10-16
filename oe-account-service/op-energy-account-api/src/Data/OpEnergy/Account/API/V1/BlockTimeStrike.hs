@@ -1,21 +1,12 @@
 {-# LANGUAGE DataKinds                  #-}
-{-# LANGUAGE OverloadedStrings          #-}
-{-# LANGUAGE TypeOperators              #-}
-{-# LANGUAGE DeriveDataTypeable         #-}
 {-# LANGUAGE DeriveGeneric              #-}
-{-# LANGUAGE DeriveAnyClass             #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings          #-}
-{-# LANGUAGE EmptyDataDecls             #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE DuplicateRecordFields      #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
-{-# LANGUAGE QuasiQuotes                #-}
-{-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE GADTs                      #-}
 {-# LANGUAGE UndecidableInstances       #-}
-{-# LANGUAGE StandaloneDeriving         #-}
 {-# LANGUAGE DerivingStrategies         #-}
 module Data.OpEnergy.Account.API.V1.BlockTimeStrike where
 
@@ -29,53 +20,44 @@ import qualified Data.Text.Encoding as Text
 import           Data.Time.Clock.POSIX(POSIXTime)
 import qualified Data.List as List
 import qualified Data.ByteString.Lazy as BS
+import           Data.Word(Word64)
 
 import           Servant.API(ToHttpApiData(..), FromHttpApiData(..))
-import           Database.Persist.TH
-import           Database.Persist
-import           Database.Persist.Sql
 import           Database.Persist.Pagination
 import           Data.Proxy
 import           Data.Default
 
-import           Data.OpEnergy.API.V1.Block(BlockHeight, defaultBlockHeight)
+import           Data.OpEnergy.API.V1.Block(BlockHash, BlockHeight, defaultBlockHeight)
 import           Data.OpEnergy.Account.API.V1.Account
-import           Data.OpEnergy.API.V1.Block(BlockHash)
 import           Data.OpEnergy.API.V1.Positive(Positive)
 import qualified Data.OpEnergy.API.V1.Hash as BlockHash (defaultHash)
-import           Data.OpEnergy.Account.API.V1.FilterRequest
+import           Data.OpEnergy.Account.API.V1.FilterRequest()
 import           Data.OpEnergy.Account.API.V1.Common
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
 
-share [mkPersist sqlSettings, mkMigrate "migrateBlockTimeStrike"] [persistLowerCase|
-BlockTimeStrike
-  -- data
-  block BlockHeight
-  strikeMediantime POSIXTime
-  -- metadata
-  creationTime POSIXTime
-  -- constraints
-  UniqueBlockTimeStrikeBlockStrikeMediantime block strikeMediantime -- for now it is forbidden to have multiple strikes of the same (block,strikeMediantime) values
-  deriving Eq Show Generic
+data BlockTimeStrike = BlockTimeStrike
+  { blockTimeStrikeBlock            :: BlockHeight
+  , blockTimeStrikeStrikeMediantime :: POSIXTime
+  , blockTimeStrikeCreationTime     :: POSIXTime
+  }
+  deriving (Eq, Show, Generic)
 
-BlockTimeStrikeObserved
-  -- data
-  -- those fields are being kept as a sanity check in case of block chain
-  -- reorganization as a last prove of the outcome. Though, we use confirmation
-  -- algorithm, which goal is to reduce a possibility of hitting this case
-  judgementBlockMediantime POSIXTime -- mediantime of the judgement block.
-  judgementBlockHash BlockHash -- hash of the judgement block.
-  judgementBlockHeight BlockHeight -- height of the judgement block.
-  isFast SlowFast
+newtype BlockTimeStrikeId = BlockTimeStrikeId
+  { unBlockTimeStrikeId :: Word64
+  }
+  deriving (Eq, Show, Generic)
+
+data BlockTimeStrikeObserved = BlockTimeStrikeObserved
+  { judgementBlockMediantime :: POSIXTime -- mediantime of the judgement block.
+  , judgementBlockHash :: BlockHash -- hash of the judgement block.
+  , judgementBlockHeight :: BlockHeight -- height of the judgement block.
+  , isFast :: SlowFast
   -- metadata
-  creationTime POSIXTime
+  , creationTime :: POSIXTime
   -- reflinks
-  strike BlockTimeStrikeId
-  -- constraints
-  UniqueBlocktimeStrikeObservationStrike strike -- unique per strike
-  deriving Eq Show Generic
-
-|]
+  , strike :: BlockTimeStrikeId
+  }
+  deriving (Eq, Show, Generic)
 
 data BlockTimeStrikeFilter = BlockTimeStrikeFilter
   { blockTimeStrikeFilterStrikeMediantimeGTE        :: Maybe POSIXTime
@@ -200,14 +182,6 @@ instance ToJSON SlowFast where
   toJSON Fast = toJSON ("fast" :: Text)
 instance FromJSON SlowFast where
   parseJSON = withText "SlowFast" $! pure . verifySlowFast
-instance PersistField SlowFast where
-  toPersistValue Slow = toPersistValue False
-  toPersistValue Fast = toPersistValue True
-  fromPersistValue (PersistBool False) = Prelude.Right Slow
-  fromPersistValue (PersistBool True) = Prelude.Right Fast
-  fromPersistValue _ = Left $ "fromPersistValue SlowFastGuess, unsupported value"
-instance PersistFieldSql SlowFast where
-  sqlType _ = SqlBool
 
 instance ToSchema SlowFast where
   declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
@@ -261,60 +235,6 @@ instance FromHttpApiData BlockTimeStrikeFilter where
   parseQueryParam v = case Aeson.eitherDecodeStrict (Text.encodeUtf8 v) of
     Left some -> Left (Text.pack some)
     Right some -> Right some
-instance BuildFilter BlockTimeStrike BlockTimeStrikeFilter where
-  sortOrder (filter, _) = maybe Descend sortOrderFromStrikeSortOrder (blockTimeStrikeFilterSort filter)
-  buildFilter ( BlockTimeStrikeFilter
-                mstrikeMediantimeGTE
-                mstrikeMediantimeLTE
-                mstrikeMediantimeEQ
-                mstrikeMediantimeNEQ
-                mstrikeBlockHeightGTE
-                mstrikeBlockHeightLTE
-                mstrikeBlockHeightEQ
-                mstrikeBlockHeightNEQ
-                _  -- mobservedBlockHashEQ
-                _  -- mobservedBlockHashNEQ
-                _  -- mobservedResultEQ
-                _  -- mobservedResultNEQ
-                _ -- sort
-                _ -- class
-                _ -- linesPerPage
-              , _
-              ) = List.concat
-    [ maybe [] (\v-> [BlockTimeStrikeStrikeMediantime >=. v]) mstrikeMediantimeGTE
-    , maybe [] (\v-> [BlockTimeStrikeStrikeMediantime <=. v]) mstrikeMediantimeLTE
-    , maybe [] (\v-> [BlockTimeStrikeStrikeMediantime ==. v]) mstrikeMediantimeEQ
-    , maybe [] (\v-> [BlockTimeStrikeStrikeMediantime !=. v]) mstrikeMediantimeNEQ
-    , maybe [] (\v-> [BlockTimeStrikeBlock >=. v]) mstrikeBlockHeightGTE
-    , maybe [] (\v-> [BlockTimeStrikeBlock <=. v]) mstrikeBlockHeightLTE
-    , maybe [] (\v-> [BlockTimeStrikeBlock ==. v]) mstrikeBlockHeightEQ
-    , maybe [] (\v-> [BlockTimeStrikeBlock !=. v]) mstrikeBlockHeightNEQ
-    ]
-instance BuildFilter BlockTimeStrikeObserved BlockTimeStrikeFilter where
-  sortOrder (filter, _) = maybe Descend sortOrderFromStrikeSortOrder (blockTimeStrikeFilterSort filter)
-  buildFilter ( BlockTimeStrikeFilter
-                _
-                _
-                _
-                _
-                _
-                _
-                _
-                _
-                mobservedBlockHashEQ
-                mobservedBlockHashNEQ
-                mobservedResultEQ
-                mobservedResultNEQ
-                _ -- sort
-                _ -- class
-                _ -- linesPerPage
-              , _
-              ) = List.concat
-    [ maybe [] (\v-> [BlockTimeStrikeObservedJudgementBlockHash ==. v]) mobservedBlockHashEQ
-    , maybe [] (\v-> [BlockTimeStrikeObservedJudgementBlockHash !=. v]) mobservedBlockHashNEQ
-    , maybe [] (\v-> [BlockTimeStrikeObservedIsFast ==. v]) mobservedResultEQ
-    , maybe [] (\v-> [BlockTimeStrikeObservedIsFast !=. v]) mobservedResultNEQ
-    ]
 
 -- | we need to use separate sort order as we can sort strikes by guesses count
 data StrikeSortOrder

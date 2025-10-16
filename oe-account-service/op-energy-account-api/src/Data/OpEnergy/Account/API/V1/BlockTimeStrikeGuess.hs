@@ -1,21 +1,12 @@
 {-# LANGUAGE DataKinds                  #-}
-{-# LANGUAGE OverloadedStrings          #-}
-{-# LANGUAGE TypeOperators              #-}
-{-# LANGUAGE DeriveDataTypeable         #-}
 {-# LANGUAGE DeriveGeneric              #-}
-{-# LANGUAGE DeriveAnyClass             #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings          #-}
-{-# LANGUAGE EmptyDataDecls             #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE DuplicateRecordFields      #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
-{-# LANGUAGE QuasiQuotes                #-}
-{-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE GADTs                      #-}
 {-# LANGUAGE UndecidableInstances       #-}
-{-# LANGUAGE StandaloneDeriving         #-}
 {-# LANGUAGE DerivingStrategies         #-}
 module Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess where
 
@@ -29,9 +20,6 @@ import qualified Data.Text.Encoding as Text
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.List as List
 
-import           Database.Persist.TH
-import           Database.Persist
-import           Database.Persist.Sql
 import           Database.Persist.Pagination
 import           Data.Default
 import           Data.Proxy
@@ -42,34 +30,31 @@ import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic
 import           Data.OpEnergy.Account.API.V1.UUID
 import           Data.OpEnergy.Account.API.V1.Common
-import           Data.OpEnergy.Account.API.V1.FilterRequest
 import           Data.OpEnergy.API.V1.Block(BlockHeight)
 import           Data.OpEnergy.API.V1.Positive(Positive)
 import           Data.OpEnergy.API.V1.Natural(Natural)
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
 
-share [mkPersist sqlSettings, mkMigrate "migrateBlockTimeStrikeGuess"] [persistLowerCase|
-BlockTimeStrikeGuess
+data BlockTimeStrikeGuess = BlockTimeStrikeGuess
   -- data
-  isFast SlowFast
+  { isFast :: SlowFast
   -- metadata
-  creationTime POSIXTime
+  , creationTime :: POSIXTime
   -- reflinks
-  strike BlockTimeStrikeId
-  person PersonId
+  , strike :: BlockTimeStrikeId
+  , person :: PersonId
   -- constraints
-  UniqueBlockTimeStrikeGuessPersonStrike person strike -- only 1 guess per strike is allowed for person
-  deriving Eq Show Generic
+  }
+  deriving (Eq, Show, Generic)
 
 -- this table's goal is to contain precalculated guesses count for a given strike. The reason
 -- it exists is to eliminate a need of walking through the db in order to return a result
 -- sorted by guesses count
-CalculatedBlockTimeStrikeGuessesCount
-  strike BlockTimeStrikeId
-  guessesCount (Natural Int)
-  UniqueCalculatedBlockTimeStrikeGuessesCountStrike strike -- allow only one record per strike
-  deriving Eq Show Generic
-|]
+data CalculatedBlockTimeStrikeGuessesCount = CalculatedBlockTimeStrikeGuessesCount
+  { strike :: BlockTimeStrikeId
+  , guessesCount :: Natural Int
+  }
+  deriving (Eq, Show, Generic)
 
 -- | This is the datatype for representing strike's guess through API
 -- Suffix 'Public' here is just for separating datatypes between API (with
@@ -191,136 +176,6 @@ instance FromHttpApiData BlockTimeStrikeGuessResultPublicFilter where
   parseQueryParam v = case Aeson.eitherDecodeStrict (Text.encodeUtf8 v) of
     Left some -> Left (Text.pack some)
     Right some -> Right some
-instance BuildFilter BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter where
-  sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultPublicFilterSort filter)
-  buildFilter ( BlockTimeStrikeGuessResultPublicFilter
-                _
-                _
-                -- guess
-                mGuessEQ
-                mGuessNEQ
-                -- observedResult
-                _
-                _
-                -- strike block height
-                _
-                _
-                _
-                _
-                -- strike strikeMediantime
-                _
-                _
-                _
-                _
-                -- sort
-                _
-                _
-                _ -- lines per page
-              , _
-              ) = List.concat
-    [ maybe [] (\v-> [BlockTimeStrikeGuessIsFast ==. v]) mGuessEQ
-    , maybe [] (\v-> [BlockTimeStrikeGuessIsFast !=. v]) mGuessNEQ
-    ]
-instance BuildFilter Person BlockTimeStrikeGuessResultPublicFilter where
-  sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultPublicFilterSort filter)
-  buildFilter ( BlockTimeStrikeGuessResultPublicFilter
-                mPersonEQ
-                mPersonNEQ
-                -- guess
-                _
-                _
-                -- observedResult
-                _
-                _
-                -- strike block height
-                _
-                _
-                _
-                _
-                -- strike strikeMediantime
-                _
-                _
-                _
-                _
-                -- sort
-                _
-                _
-                _ -- lines per page
-              , _
-              ) = List.concat
-    [ maybe [] (\v-> [ PersonUuid ==. v ]) mPersonEQ
-    , maybe [] (\v-> [ PersonUuid !=. v ]) mPersonNEQ
-    ]
-instance BuildFilter BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter where
-  sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultPublicFilterSort filter)
-  buildFilter ( BlockTimeStrikeGuessResultPublicFilter
-                -- person
-                _
-                _
-                -- guess
-                _
-                _
-                -- observedResult
-                _
-                _
-                -- strike block height
-                mStrikeBlockHeightGTE
-                mStrikeBlockHeightLTE
-                mStrikeBlockHeightEQ
-                mStrikeBlockHeightNEQ
-                -- strike strikeMediantime
-                mStrikeMediantimeGTE
-                mStrikeMediantimeLTE
-                mStrikeMediantimeEQ
-                mStrikeMediantimeNEQ
-                -- sort
-                _
-                _
-                _ -- lines per page
-              , _
-              ) = List.concat
-        -- strike block height
-    [ maybe [] (\v -> [ BlockTimeStrikeBlock >=. v]) mStrikeBlockHeightGTE
-    , maybe [] (\v -> [ BlockTimeStrikeBlock <=. v]) mStrikeBlockHeightLTE
-    , maybe [] (\v -> [ BlockTimeStrikeBlock ==. v]) mStrikeBlockHeightEQ
-    , maybe [] (\v -> [ BlockTimeStrikeBlock !=. v]) mStrikeBlockHeightNEQ
-    , maybe [] (\v -> [ BlockTimeStrikeStrikeMediantime >=. v]) mStrikeMediantimeGTE
-    , maybe [] (\v -> [ BlockTimeStrikeStrikeMediantime <=. v]) mStrikeMediantimeLTE
-    , maybe [] (\v -> [ BlockTimeStrikeStrikeMediantime ==. v]) mStrikeMediantimeEQ
-    , maybe [] (\v -> [ BlockTimeStrikeStrikeMediantime !=. v]) mStrikeMediantimeNEQ
-    ]
-instance BuildFilter BlockTimeStrikeObserved BlockTimeStrikeGuessResultPublicFilter where
-  sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultPublicFilterSort filter)
-  buildFilter ( BlockTimeStrikeGuessResultPublicFilter
-                -- person
-                _
-                _
-                -- guess
-                _
-                _
-                -- observedResult
-                mObservedResultEQ
-                mObservedResultNEQ
-                -- strike block height
-                _
-                _
-                _
-                _
-                -- strike strikeMediantime
-                _
-                _
-                _
-                _
-                -- sort
-                _
-                _
-                _ -- lines per page
-              , _
-              ) = List.concat
-        -- strike observed result
-    [ maybe [] (\v -> [ BlockTimeStrikeObservedIsFast ==. v]) mObservedResultEQ
-    , maybe [] (\v -> [ BlockTimeStrikeObservedIsFast !=. v]) mObservedResultNEQ
-    ]
 
 defaultBlockTimeStrikeGuessResultPublicFilter :: BlockTimeStrikeGuessResultPublicFilter
 defaultBlockTimeStrikeGuessResultPublicFilter =  BlockTimeStrikeGuessResultPublicFilter

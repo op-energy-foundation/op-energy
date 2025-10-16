@@ -37,32 +37,36 @@ import           Prometheus(MonadMonitor)
 
 
 import           Data.Text.Show (tshow)
-import           Data.OpEnergy.Account.API.V1.Account
+import qualified Data.OpEnergy.Account.API.V1.Account as API
 import           Data.OpEnergy.API.V1.Block
 import           Data.OpEnergy.API.V1.Natural
 import           Data.OpEnergy.API.V1.Positive( naturalFromPositive, fromPositive)
-import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
-import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
-import           Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic
-import           Data.OpEnergy.Account.API.V1.PagingResult
-import           Data.OpEnergy.Account.API.V1.FilterRequest
-import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
+import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrike            as API
+import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic      as API
+import qualified Data.OpEnergy.Account.API.V1.PagingResult               as API
+import qualified Data.OpEnergy.Account.API.V1.FilterRequest              as API
+import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass as API
 import           Data.OpEnergy.API.V1.Error(throwJSON)
-import           OpEnergy.Account.Server.V1.Config (Config(..))
-import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging, profile, withDBTransaction )
-import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
-import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
-import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledStrikeCreation as BlockTimeScheduledStrikeCreation
-import           OpEnergy.PagingResult
-import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeObserve as Observe
-import qualified OpEnergy.BlockTimeStrike.Server.V1.Context as Context
+
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 import           OpEnergy.Error( eitherThrowJSON)
+import           OpEnergy.PagingResult
+import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
+import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledStrikeCreation as BlockTimeScheduledStrikeCreation
+import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeObserve as Observe
+import qualified OpEnergy.BlockTimeStrike.Server.V1.Context as Context
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeFilter as BlockTimeStrikeFilter
+import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
+import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
+import           OpEnergy.BlockTimeStrike.Server.V1.SlowFast
+import           OpEnergy.Account.Server.V1.Config (Config(..))
+import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
+import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging, profile, withDBTransaction )
+import           OpEnergy.Account.Server.V1.Person
 
 -- | O(ln accounts).
 -- Tries to create future block time strike. Requires authenticated user and blockheight should be in the future
-createBlockTimeStrikeFuture :: AccountToken-> BlockHeight-> Natural Int-> AppM ()
+createBlockTimeStrikeFuture :: API.AccountToken-> BlockHeight-> Natural Int-> AppM ()
 createBlockTimeStrikeFuture token blockHeight strikeMediantime = profile "createBlockTimeStrike" $ do
   State{ config = Config{ configBlockTimeStrikeMinimumBlockAheadCurrentTip = configBlockTimeStrikeMinimumBlockAheadCurrentTip}
        , blockTimeState = BlockTime.State{ latestUnconfirmedBlockHeight = latestUnconfirmedBlockHeightV }
@@ -97,7 +101,10 @@ createBlockTimeStrikeFuture token blockHeight strikeMediantime = profile "create
             Nothing -> do
               throwJSON err500 (("something went wrong")::Text)
   where
-    createBlockTimeStrikeEnsuredConditions :: (MonadIO m, MonadMonitor m) => (Entity Person) -> AppT m (Maybe ())
+    createBlockTimeStrikeEnsuredConditions
+      :: (MonadIO m, MonadMonitor m)
+      => Entity Person
+      -> AppT m (Maybe ())
     createBlockTimeStrikeEnsuredConditions _ = do
       nowUTC <- liftIO getCurrentTime
       let now = utcTimeToPOSIXSeconds nowUTC
@@ -134,9 +141,9 @@ data IsSortByGuessesCountNeeded
 -- | returns list of BlockTimeStrikePublic records
 getBlockTimeStrikesPage
   :: Maybe (Natural Int)
-  -> Maybe (FilterRequest BlockTimeStrike BlockTimeStrikeFilter)
-  -> AppM (PagingResult BlockTimeStrikeWithGuessesCountPublic)
-getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
+  -> Maybe (API.FilterRequest API.BlockTimeStrike API.BlockTimeStrikeFilter)
+  -> AppM (API.PagingResult API.BlockTimeStrikeWithGuessesCountPublic)
+getBlockTimeStrikesPage mpage mfilterAPI = profile "getBlockTimeStrikesPage" $ do
   latestUnconfirmedBlockHeightV <- asks (BlockTime.latestUnconfirmedBlockHeight . blockTimeState)
   configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip <- asks (configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip . config)
   latestConfirmedBlockV <- asks (BlockTime.latestConfirmedBlock . blockTimeState)
@@ -156,10 +163,22 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
               $ TVar.readTVar latestConfirmedBlockV
               )
       let
-          staticPartFilter =  (maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter)
+          staticPartFilter = maybe
+                               []
+                               ( API.buildFilter
+                               . API.unFilterRequest
+                               . API.mapFilter
+                               )
+                               mfilter
           strikeFilter =
             BlockTimeStrikeFilter.buildFilterByClass
-              (maybe Nothing (blockTimeStrikeFilterClass . fst . unFilterRequest) mfilter)
+              ( maybe
+                Nothing
+                ( API.blockTimeStrikeFilterClass
+                . fst
+                . API.unFilterRequest
+                ) mfilter
+              )
               latestUnconfirmedBlockHeight
               latestConfirmedBlock
               configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
@@ -167,38 +186,44 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
       exceptTMaybeT "getBlockTimeStrikePast failed"
         $ getBlockTimeStrikePast strikeFilter
   where
-    sort = maybe Descend (sortOrder . unFilterRequest) mfilter
+    mfilter = fmap coerceFilterRequestBlockTimeStrike mfilterAPI
+    sort = maybe
+             Descend
+             ( API.sortOrder
+             . API.unFilterRequest
+             )
+             mfilter
     getBlockTimeStrikePast
       :: [Filter BlockTimeStrike]
       -> ReaderT
          State
          Handler
-         (Maybe (PagingResult BlockTimeStrikeWithGuessesCountPublic))
+         (Maybe (API.PagingResult API.BlockTimeStrikeWithGuessesCountPublic))
     getBlockTimeStrikePast strikeFilter = do
       recordsPerReply <- asks (configRecordsPerReply . config)
       let
           linesPerPage = maybe
             recordsPerReply
             ( fromMaybe recordsPerReply
-            . blockTimeStrikeFilterLinesPerPage
+            . API.blockTimeStrikeFilterLinesPerPage
             . fst
-            . unFilterRequest
+            . API.unFilterRequest
             )
             mfilter
       let
           eGuessesCount = case maybe
-                StrikeSortOrderDescend
-                ( fromMaybe StrikeSortOrderDescend
-                . blockTimeStrikeFilterSort
+                API.StrikeSortOrderDescend
+                ( fromMaybe API.StrikeSortOrderDescend
+                . API.blockTimeStrikeFilterSort
                 . fst
-                . unFilterRequest
+                . API.unFilterRequest
                 )
                 mfilter
               of
-            StrikeSortOrderAscend -> SortByGuessesCountNotNeeded
-            StrikeSortOrderDescend -> SortByGuessesCountNotNeeded
-            StrikeSortOrderAscendGuessesCount ->  SortByGuessesCountNeeded
-            StrikeSortOrderDescendGuessesCount -> SortByGuessesCountNeeded
+            API.StrikeSortOrderAscend -> SortByGuessesCountNotNeeded
+            API.StrikeSortOrderDescend -> SortByGuessesCountNotNeeded
+            API.StrikeSortOrderAscendGuessesCount ->  SortByGuessesCountNeeded
+            API.StrikeSortOrderDescendGuessesCount -> SortByGuessesCountNeeded
       case eGuessesCount of
         SortByGuessesCountNotNeeded -> pagingResult
           mpage
@@ -293,17 +318,17 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
         let
             anyStrikeClassContraintByFilter = maybe
               Nothing
-              ( blockTimeStrikeFilterClass
+              ( API.blockTimeStrikeFilterClass
               . fst
-              . unFilterRequest
+              . API.unFilterRequest
               ) mfilter
         case anyStrikeClassContraintByFilter of
           Nothing -> do
             let
                 observedStrikeFilter = maybe
-                  [] ( buildFilter
-                     . unFilterRequest
-                     . mapFilter
+                  [] ( API.buildFilter
+                     . API.unFilterRequest
+                     . API.mapFilter
                      ) mfilter
             anyObservedStrike <- selectFirst
               ( ( BlockTimeStrikeObservedStrike ==. strikeId
@@ -317,17 +342,17 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
                 return (Just (Just observedBlockFitsFilter))
               (_observedStrikeFilterExistsButObservedStrikeMissing :_ , Nothing) ->
                 return Nothing
-          Just BlockTimeStrikeFilterClassGuessable->
+          Just API.BlockTimeStrikeFilterClassGuessable->
             return (Just Nothing) -- strike has not been observed and strikeFilter should ensure, that it is in the future with proper guess threshold
-          Just BlockTimeStrikeFilterClassOutcomeUnknown-> do
+          Just API.BlockTimeStrikeFilterClassOutcomeUnknown-> do
             return (Just Nothing) -- hasn't been observed
-          Just BlockTimeStrikeFilterClassOutcomeKnown-> do
+          Just API.BlockTimeStrikeFilterClassOutcomeKnown-> do
             -- now get possible observed data for strike
             anyObservedStrikeFitsOutcomeKnownClass <- selectFirst
               ( (BlockTimeStrikeObservedStrike ==. strikeId)
-              : maybe [] ( buildFilter
-                          . unFilterRequest
-                          . mapFilter
+              : maybe [] ( API.buildFilter
+                          . API.unFilterRequest
+                          . API.mapFilter
                           ) mfilter
               )
               []
@@ -340,12 +365,12 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
          , Maybe (Entity BlockTimeStrikeObserved)
          , Natural Int
          )
-      -> BlockTimeStrikeWithGuessesCountPublic
+      -> API.BlockTimeStrikeWithGuessesCountPublic
     renderBlockTimeStrikePublic (Entity _ strike, mObserved, guessesCount) =
-      BlockTimeStrikeWithGuessesCountPublic
-        { blockTimeStrikeWithGuessesCountPublicStrike = BlockTimeStrikePublic
+      API.BlockTimeStrikeWithGuessesCountPublic
+        { blockTimeStrikeWithGuessesCountPublicStrike = API.BlockTimeStrikePublic
           { blockTimeStrikePublicObservedResult = fmap
-            (\(Entity _ v)-> blockTimeStrikeObservedIsFast v)
+            (\(Entity _ v)-> apiModelSlowFast $ blockTimeStrikeObservedIsFast v)
             mObserved
           , blockTimeStrikePublicObservedBlockMediantime = fmap
             (\(Entity _ v)-> blockTimeStrikeObservedJudgementBlockMediantime v)
@@ -391,7 +416,7 @@ getBlockTimeStrikesPage mpage mfilter = profile "getBlockTimeStrikesPage" $ do
 getBlockTimeStrike
   :: BlockHeight
   -> Natural Int
-  -> AppM BlockTimeStrikeWithGuessesCountPublic
+  -> AppM API.BlockTimeStrikeWithGuessesCountPublic
 getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $ do
   mret <- actualGetBlockTimeStrike
   case mret of
@@ -439,13 +464,13 @@ getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $
       return (strikeE, guessesCount, mObserved)
     renderBlockTimeStrikeWithGuessesCountPublic
       :: (Entity BlockTimeStrike, Natural Int, Maybe (Entity BlockTimeStrikeObserved))
-      -> BlockTimeStrikeWithGuessesCountPublic
+      -> API.BlockTimeStrikeWithGuessesCountPublic
     renderBlockTimeStrikeWithGuessesCountPublic
         (Entity _ strike, guessesCount, mObserved) =
-      BlockTimeStrikeWithGuessesCountPublic
-        { blockTimeStrikeWithGuessesCountPublicStrike = BlockTimeStrikePublic
+      API.BlockTimeStrikeWithGuessesCountPublic
+        { blockTimeStrikeWithGuessesCountPublicStrike = API.BlockTimeStrikePublic
           { blockTimeStrikePublicObservedResult = fmap
-            (\(Entity _ v)-> blockTimeStrikeObservedIsFast v)
+            (\(Entity _ v)-> apiModelSlowFast $ blockTimeStrikeObservedIsFast v)
             mObserved
           , blockTimeStrikePublicObservedBlockMediantime = fmap
             (\(Entity _ v)-> blockTimeStrikeObservedJudgementBlockMediantime v)

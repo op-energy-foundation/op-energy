@@ -38,29 +38,34 @@ import           Database.Persist.Pagination
 import           Prometheus(MonadMonitor)
 
 
-import           Data.OpEnergy.Account.API.V1.Account
+import qualified Data.OpEnergy.Account.API.V1.Account as API
 import           Data.OpEnergy.API.V1.Positive( naturalFromPositive
                                               , fromPositive
                                               , Positive
                                               )
 import           Data.OpEnergy.API.V1.Block
 import           Data.OpEnergy.API.V1.Natural
-import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
-import           Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic
-import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
-import           Data.OpEnergy.Account.API.V1.PagingResult
-import           Data.OpEnergy.Account.API.V1.FilterRequest
+import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrike as API
+import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic as API
+import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess as API
+import qualified Data.OpEnergy.Account.API.V1.PagingResult as API
+import qualified Data.OpEnergy.Account.API.V1.FilterRequest as API
 import           Data.OpEnergy.Account.API.V1.UUID
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
 import           Data.OpEnergy.API.V1.Error (throwJSON)
-import           OpEnergy.Account.Server.V1.Config (Config(..))
-import           OpEnergy.Account.Server.V1.Class ( AppT, AppM, State(..), runLogging, profile, withDBTransaction)
-import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
-import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
+
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 import           OpEnergy.Error( eitherThrowJSON)
 import           OpEnergy.PagingResult( pagingResult)
+import           OpEnergy.Account.Server.V1.Config (Config(..))
+import           OpEnergy.Account.Server.V1.Class ( AppT, AppM, State(..), runLogging, profile, withDBTransaction)
+import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
+import           OpEnergy.Account.Server.V1.Person
+import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeFilter as BlockTimeStrikeFilter
+import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
+import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
+import           OpEnergy.BlockTimeStrike.Server.V1.SlowFast
 
 mgetBlockTimeStrikeFuture
   :: (MonadIO m, MonadMonitor m)
@@ -79,11 +84,11 @@ mgetBlockTimeStrikeFuture blockHeight strikeMediantime = profile "mgetBlockTimeS
 -- | O(ln accounts).
 -- Tries to create future block time strike. Requires authenticated user and blockheight should be in the future
 createBlockTimeStrikeFutureGuess
-  :: AccountToken
+  :: API.AccountToken
   -> BlockHeight
   -> Natural Int
-  -> SlowFast
-  -> AppM BlockTimeStrikeGuessPublic
+  -> API.SlowFast
+  -> AppM API.BlockTimeStrikeGuessPublic
 createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess = profile "createBlockTimeStrikeFutureGuess" $ do
   configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip <- asks (configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip . config)
   latestConfirmedBlockV <- asks (BlockTime.latestConfirmedBlock . blockTimeState)
@@ -121,20 +126,25 @@ createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess = prof
               mret <- createBlockTimeStrikeFutureGuess personKey strikeKey guess
               case mret of
                 Nothing -> throwJSON err500 ("something went wrong"::Text)
-                Just v -> return $ BlockTimeStrikeGuessPublic
-                  { person = personUuid person
-                  , strike = strike
-                  , creationTime = blockTimeStrikeGuessCreationTime v
-                  , guess = guess
+                Just v -> return $ API.BlockTimeStrikeGuessPublic
+                  { API.person = apiModelUUIDPerson $ personUuid person
+                  , API.strike = apiModelBlockTimeStrike strike
+                  , API.creationTime = blockTimeStrikeGuessCreationTime v
+                  , API.guess = guess
                   }
   where
-    createBlockTimeStrikeFutureGuess :: (MonadMonitor m, MonadIO m) => Key Person-> Key BlockTimeStrike-> SlowFast-> AppT m (Maybe BlockTimeStrikeGuess)
+    createBlockTimeStrikeFutureGuess
+      :: (MonadMonitor m, MonadIO m)
+      => Key Person
+      -> Key BlockTimeStrike
+      -> API.SlowFast
+      -> AppT m (Maybe BlockTimeStrikeGuess)
     createBlockTimeStrikeFutureGuess personKey strikeKey guess = profile "createBlockTimeStrikeFutureGuess" $ do
       nowUTC <- liftIO getCurrentTime
       let now = utcTimeToPOSIXSeconds nowUTC
       withDBTransaction "" $ do
         let value = BlockTimeStrikeGuess
-              { blockTimeStrikeGuessIsFast = guess
+              { blockTimeStrikeGuessIsFast = modelApiSlowFast guess
               , blockTimeStrikeGuessCreationTime = now
               , blockTimeStrikeGuessPerson = personKey
               , blockTimeStrikeGuessStrike = strikeKey
@@ -158,9 +168,9 @@ createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess = prof
 -- returns list BlockTimeStrikePast records
 getBlockTimeStrikeGuessResultsPage
   :: Maybe (Natural Int)
-  -> Maybe (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
-  -> AppM (PagingResult BlockTimeStrikeGuessResultPublic)
-getBlockTimeStrikeGuessResultsPage mpage mfilter = profile "getBlockTimeStrikeGuessResultsPage" $ do
+  -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultPublicFilter)
+  -> AppM (API.PagingResult API.BlockTimeStrikeGuessResultPublic)
+getBlockTimeStrikeGuessResultsPage mpage mfilterAPI = profile "getBlockTimeStrikeGuessResultsPage" $ do
   mconfirmedBlockV <- asks ( BlockTime.latestConfirmedBlock . blockTimeState)
   mconfirmedBlock <- liftIO $ TVar.readTVarIO mconfirmedBlockV
   case mconfirmedBlock of
@@ -176,9 +186,9 @@ getBlockTimeStrikeGuessResultsPage mpage mfilter = profile "getBlockTimeStrikeGu
           linesPerPage = maybe
             recordsPerReply
             ( fromMaybe recordsPerReply
-            . blockTimeStrikeGuessResultPublicFilterLinesPerPage
+            . API.blockTimeStrikeGuessResultPublicFilterLinesPerPage
             . fst
-            . unFilterRequest
+            . API.unFilterRequest
             )
             mfilter
       mret <- withDBTransaction "" $ C.runConduit
@@ -195,14 +205,17 @@ getBlockTimeStrikeGuessResultsPage mpage mfilter = profile "getBlockTimeStrikeGu
                   then Just (fromIntegral (fromNatural page + 1))
                   else Nothing
                 results = List.take (fromPositive linesPerPage) guessesTail
-            return $ PagingResult
-              { pagingResultNextPage = newPage
-              , pagingResultResults = results
+            return $ API.PagingResult
+              { API.pagingResultNextPage = newPage
+              , API.pagingResultResults = results
               }
   where
-    sort = maybe Descend (sortOrder . unFilterRequest . id1 . mapFilter) mfilter
+    mfilter = fmap coerceFilterRequestBlockTimeStrikeGuess mfilterAPI
+    sort = maybe Descend (API.sortOrder . API.unFilterRequest . id1 . API.mapFilter) mfilter
       where
-        id1 :: FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter -> FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter
+        id1
+          :: API.FilterRequest BlockTimeStrike API.BlockTimeStrikeGuessResultPublicFilter
+          -> API.FilterRequest BlockTimeStrike API.BlockTimeStrikeGuessResultPublicFilter
         id1 = id -- helping typechecker
     filters recordsPerReply confirmedBlock =
       fetchConfirmedStrikes recordsPerReply confirmedBlock
@@ -222,7 +235,7 @@ getBlockTimeStrikeGuessResultsPage mpage mfilter = profile "getBlockTimeStrikeGu
          ()
     fetchConfirmedStrikes recordsPerReply confirmedBlock = streamEntities
       ((BlockTimeStrikeBlock <=. blockHeaderHeight confirmedBlock)
-      : maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter
+      : maybe [] (API.buildFilter . API.unFilterRequest . API.mapFilter) mfilter
       )
       BlockTimeStrikeId
       (PageSize (fromPositive recordsPerReply + 1))
@@ -234,15 +247,15 @@ getBlockTimeStrikeGuessResultsPage mpage mfilter = profile "getBlockTimeStrikeGu
 -- | returns list BlockTimeStrikeGuess records
 getBlockTimeStrikesGuessesPage
   :: Maybe (Natural Int)
-  -> Maybe (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
-  -> AppM (PagingResult BlockTimeStrikeGuessResultPublic)
-getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuessesPage" $ do
+  -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultPublicFilter)
+  -> AppM (API.PagingResult API.BlockTimeStrikeGuessResultPublic)
+getBlockTimeStrikesGuessesPage mpage mfilterAPI = profile "getBlockTimeStrikesGuessesPage" $ do
   latestUnconfirmedBlockHeightV <- asks (BlockTime.latestUnconfirmedBlockHeight . blockTimeState)
   configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip <- asks (configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip . config)
   latestConfirmedBlockV <- asks (BlockTime.latestConfirmedBlock . blockTimeState)
   recordsPerReply <- asks (configRecordsPerReply . config)
   let
-      linesPerPage = maybe recordsPerReply (maybe recordsPerReply id . blockTimeStrikeGuessResultPublicFilterLinesPerPage . fst . unFilterRequest ) mfilter
+      linesPerPage = maybe recordsPerReply (maybe recordsPerReply id . API.blockTimeStrikeGuessResultPublicFilterLinesPerPage . fst . API.unFilterRequest ) mfilter
   eitherThrowJSON
     (\reason-> do
       let msg = "getBlockTimeStrikesGuessesPage: " <> reason
@@ -261,7 +274,7 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
       let
           finalStrikesFilter =
             BlockTimeStrikeFilter.buildFilterByClass
-              (maybe Nothing (blockTimeStrikeGuessResultPublicFilterClass . fst . unFilterRequest) mfilter)
+              (maybe Nothing (API.blockTimeStrikeGuessResultPublicFilterClass . fst . API.unFilterRequest) mfilter)
               latestUnconfirmedBlockHeight
               latestConfirmedBlock
               configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
@@ -275,13 +288,16 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
           BlockTimeStrikeGuessId
           $ streamGuessStrikeObservedResultAndOwner finalStrikesFilter linesPerPage
   where
+    mfilter = fmap coerceFilterRequestBlockTimeStrikeGuess mfilterAPI
     strikeFilter :: [Filter BlockTimeStrike]
-    strikeFilter = maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter
+    strikeFilter = maybe [] (API.buildFilter . API.unFilterRequest . API.mapFilter) mfilter
     guessFilter :: [ Filter BlockTimeStrikeGuess]
-    guessFilter = maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter
-    sort = maybe Descend (sortOrder . unFilterRequest . id1 . mapFilter) mfilter
+    guessFilter = maybe [] (API.buildFilter . API.unFilterRequest . API.mapFilter) mfilter
+    sort = maybe Descend (API.sortOrder . API.unFilterRequest . id1 . API.mapFilter) mfilter
       where
-        id1 :: FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter -> FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter
+        id1
+          :: API.FilterRequest BlockTimeStrike API.BlockTimeStrikeGuessResultPublicFilter
+          -> API.FilterRequest BlockTimeStrike API.BlockTimeStrikeGuessResultPublicFilter
         id1 = id -- helping typechecker
 
     streamGuessStrikeObservedResultAndOwner
@@ -289,7 +305,7 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
       -> Positive Int
       -> ConduitT
            (Entity BlockTimeStrikeGuess)
-           BlockTimeStrikeGuessResultPublic
+           API.BlockTimeStrikeGuessResultPublic
            (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
            ()
     streamGuessStrikeObservedResultAndOwner finalFilter linesPerPage
@@ -327,9 +343,9 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
             (guess, strikeE@(Entity strikeId _)) = do
           case maybe
               Nothing
-              (blockTimeStrikeGuessResultPublicFilterClass
+              (API.blockTimeStrikeGuessResultPublicFilterClass
               . fst
-              . unFilterRequest
+              . API.unFilterRequest
               )
               mfilter of
             Nothing -> do
@@ -361,7 +377,7 @@ getBlockTimeStrikesGuessesPage mpage mfilter = profile "getBlockTimeStrikesGuess
             (Entity _ guess, _, _) =
           streamEntities
             (( PersonId ==. blockTimeStrikeGuessPerson guess )
-            : maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter
+            : maybe [] (API.buildFilter . API.unFilterRequest . API.mapFilter) mfilter
             )
             PersonId
             (PageSize (fromPositive linesPerPage + 1))
@@ -389,12 +405,19 @@ getBlockTimeStrikeGuessesPage
   :: BlockHeight
   -> Natural Int
   -> Maybe (Natural Int)
-  -> Maybe (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
-  -> AppM (PagingResult BlockTimeStrikeGuessResultPublic)
-getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilter = profile "getBlockTimeStrikeGuessesPage" $ do
+  -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultPublicFilter)
+  -> AppM (API.PagingResult API.BlockTimeStrikeGuessResultPublic)
+getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilterAPI = profile "getBlockTimeStrikeGuessesPage" $ do
   recordsPerReply <- asks (configRecordsPerReply . config)
   let
-      linesPerPage = maybe recordsPerReply (maybe recordsPerReply id . blockTimeStrikeGuessResultPublicFilterLinesPerPage . fst . unFilterRequest ) mfilter
+      linesPerPage = maybe
+                       recordsPerReply
+                       ( fromMaybe recordsPerReply
+                       . API.blockTimeStrikeGuessResultPublicFilterLinesPerPage
+                       . fst
+                       . API.unFilterRequest
+                       )
+                       mfilter
   mret <- withDBTransaction "" $ do
     C.runConduit
       $ filters linesPerPage
@@ -410,15 +433,18 @@ getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilter = profi
               then Just (fromIntegral (fromNatural page + 1))
               else Nothing
             results = List.take (fromPositive linesPerPage) guessesTail
-        return $ PagingResult
-          { pagingResultNextPage = newPage
-          , pagingResultResults = results
+        return $ API.PagingResult
+          { API.pagingResultNextPage = newPage
+          , API.pagingResultResults = results
           }
   where
     page = fromMaybe 0 mpage
-    sort = maybe Descend (sortOrder . unFilterRequest . id1 . mapFilter) mfilter
+    mfilter = fmap coerceFilterRequestBlockTimeStrikeGuess mfilterAPI
+    sort = maybe Descend (API.sortOrder . API.unFilterRequest . id1 . API.mapFilter) mfilter
       where
-        id1 :: FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter -> FilterRequest BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter
+        id1
+          :: API.FilterRequest BlockTimeStrike API.BlockTimeStrikeGuessResultPublicFilter
+          -> API.FilterRequest BlockTimeStrike API.BlockTimeStrikeGuessResultPublicFilter
         id1 = id -- helping typechecker
     filters recordsPerReply =
       fetchBlockTimeStrikeByHeightAndMediantime recordsPerReply sort
@@ -433,10 +459,10 @@ getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilter = profi
 
 -- | returns BlockTimeStrikeGuessPublic by strike and person, taken from account token
 getBlockTimeStrikeGuess
-  :: AccountToken
+  :: API.AccountToken
   -> BlockHeight
   -> Natural Int
-  -> AppM BlockTimeStrikeGuessResultPublic
+  -> AppM API.BlockTimeStrikeGuessResultPublic
 getBlockTimeStrikeGuess token blockHeight strikeMediantime = profile "getBlockTimeStrikeGuess" $ do
   mperson <- mgetPersonByAccountToken token
   case mperson of
@@ -488,10 +514,10 @@ getBlockTimeStrikeGuess token blockHeight strikeMediantime = profile "getBlockTi
       return (strikeE, guessE, mObserved)
 
 getBlockTimeStrikeGuessPerson
-  :: UUID Person
+  :: UUID API.Person
   -> BlockHeight
   -> Natural Int
-  -> AppM BlockTimeStrikeGuessResultPublic
+  -> AppM API.BlockTimeStrikeGuessResultPublic
 getBlockTimeStrikeGuessPerson uuid blockHeight strikeMediantime = profile "getBlockTimeStrikeGuessPerson" $ do
   mperson <- mgetPersonByUUID uuid
   case mperson of
@@ -519,7 +545,7 @@ getBlockTimeStrikeGuessPerson uuid blockHeight strikeMediantime = profile "getBl
   where
     mgetPersonByUUID uuid = do
       withDBTransaction "" $ do
-        selectFirst [ PersonUuid ==. uuid ][]
+        selectFirst [ PersonUuid ==. modelApiUUIDPerson uuid ][]
     actualGetStrikeGuess (Entity personKey person) blockHeight strikeMediantime = do
       recordsPerReply <- asks (configRecordsPerReply . config)
       withDBTransaction "" $ do
@@ -573,46 +599,46 @@ renderBlockTimeStrikeGuessResultPublicByPerson
      , Entity BlockTimeStrikeGuess
      , Maybe (Entity BlockTimeStrikeObserved)
      )
-  -> BlockTimeStrikeGuessResultPublic
+  -> API.BlockTimeStrikeGuessResultPublic
 renderBlockTimeStrikeGuessResultPublicByPerson person
     (Entity _ strike, Entity _ guess, mObserved) =
-  BlockTimeStrikeGuessResultPublic
-    { person = personUuid person
-    , strike = BlockTimeStrikePublic
-      { blockTimeStrikePublicObservedResult = fmap
+  API.BlockTimeStrikeGuessResultPublic
+    { API.person = apiModelUUIDPerson $ personUuid person
+    , API.strike = API.BlockTimeStrikePublic
+      { API.blockTimeStrikePublicObservedResult = fmap
           (\(Entity _ result)->
-            blockTimeStrikeObservedIsFast result
+            apiModelSlowFast $ blockTimeStrikeObservedIsFast result
           )
           mObserved
-      , blockTimeStrikePublicObservedBlockMediantime = fmap
+      , API.blockTimeStrikePublicObservedBlockMediantime = fmap
           (\(Entity _ result)->
             blockTimeStrikeObservedJudgementBlockMediantime result
           )
           mObserved
-      , blockTimeStrikePublicObservedBlockHash = fmap
+      , API.blockTimeStrikePublicObservedBlockHash = fmap
           (\(Entity _ result)->
             blockTimeStrikeObservedJudgementBlockHash result
           )
           mObserved
-      , blockTimeStrikePublicObservedBlockHeight = fmap
+      , API.blockTimeStrikePublicObservedBlockHeight = fmap
           (\(Entity _ result)->
             blockTimeStrikeObservedJudgementBlockHeight result
           )
           mObserved
-      , blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
-      , blockTimeStrikePublicStrikeMediantime =
+      , API.blockTimeStrikePublicBlock = blockTimeStrikeBlock strike
+      , API.blockTimeStrikePublicStrikeMediantime =
         blockTimeStrikeStrikeMediantime strike
-      , blockTimeStrikePublicCreationTime =
+      , API.blockTimeStrikePublicCreationTime =
         blockTimeStrikeCreationTime strike
       }
-    , creationTime = blockTimeStrikeGuessCreationTime guess
-    , guess = blockTimeStrikeGuessIsFast guess
+    , API.creationTime = blockTimeStrikeGuessCreationTime guess
+    , API.guess = apiModelSlowFast $ blockTimeStrikeGuessIsFast guess
     }
 
 fetchBlockTimeStrikeGuessByStrike
   :: Positive Int
   -> SortOrder
-  -> Maybe (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
+  -> Maybe (API.FilterRequest BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultPublicFilter)
   -> Entity BlockTimeStrike
   -> ConduitT
      ()
@@ -622,7 +648,7 @@ fetchBlockTimeStrikeGuessByStrike
 fetchBlockTimeStrikeGuessByStrike recordsPerReply sort mfilter (Entity strikeId _) = do
   streamEntities
     ( ( BlockTimeStrikeGuessStrike ==. strikeId )
-    : maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter
+    : maybe [] (API.buildFilter . API.unFilterRequest . API.mapFilter) mfilter
     )
     BlockTimeStrikeGuessId
     (PageSize (fromPositive recordsPerReply + 1))
@@ -632,7 +658,7 @@ fetchBlockTimeStrikeGuessByStrike recordsPerReply sort mfilter (Entity strikeId 
 fetchGuessPersonByBlockTimeStrikeGuess
   :: Positive Int
   -> SortOrder
-  -> Maybe (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
+  -> Maybe (API.FilterRequest BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultPublicFilter)
   -> ( Entity BlockTimeStrike, Entity BlockTimeStrikeGuess)
   -> ConduitT
      ()
@@ -643,7 +669,7 @@ fetchGuessPersonByBlockTimeStrikeGuess
     recordsPerReply sort mfilter (_, Entity _ guess ) = do
   streamEntities
     ( ( PersonId ==. blockTimeStrikeGuessPerson guess )
-    : maybe [] (buildFilter . unFilterRequest . mapFilter) mfilter
+    : maybe [] (API.buildFilter . API.unFilterRequest . API.mapFilter) mfilter
     )
     PersonId
     (PageSize (fromPositive recordsPerReply + 1))
@@ -675,14 +701,14 @@ renderBlockTimeStrikeGuessResultPublic
      , Entity Person
      , Maybe (Entity BlockTimeStrikeObserved)
      )
-  -> BlockTimeStrikeGuessResultPublic
+  -> API.BlockTimeStrikeGuessResultPublic
 renderBlockTimeStrikeGuessResultPublic
     (Entity _ strike, Entity _ guess, Entity _ person, mObserved) =
-  BlockTimeStrikeGuessResultPublic
-    { person = personUuid person
-    , strike = BlockTimeStrikePublic
+  API.BlockTimeStrikeGuessResultPublic
+    { person = apiModelUUIDPerson $ personUuid person
+    , strike = API.BlockTimeStrikePublic
       { blockTimeStrikePublicObservedResult = fmap
-        (\(Entity _ result) -> blockTimeStrikeObservedIsFast result)
+        (\(Entity _ result) -> apiModelSlowFast $ blockTimeStrikeObservedIsFast result)
         mObserved
       , blockTimeStrikePublicObservedBlockMediantime = fmap
         (\(Entity _ result) ->
@@ -706,7 +732,7 @@ renderBlockTimeStrikeGuessResultPublic
         blockTimeStrikeCreationTime strike
       }
     , creationTime = blockTimeStrikeGuessCreationTime guess
-    , guess = blockTimeStrikeGuessIsFast guess
+    , guess = apiModelSlowFast $ blockTimeStrikeGuessIsFast guess
     }
 
 fetchBlockTimeStrikeGuessByStrikeAndPerson

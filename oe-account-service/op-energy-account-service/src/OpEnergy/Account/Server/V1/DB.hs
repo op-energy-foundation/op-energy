@@ -37,13 +37,14 @@ import           Data.Conduit ((.|), runConduit )
 import qualified Data.Conduit.List as C
 import           Database.Persist.Pagination
 
-import           OpEnergy.Account.Server.V1.Config
-import           Data.OpEnergy.Account.API.V1.Account
-import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
-import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
 import           Data.OpEnergy.API.V1.Positive(fromPositive)
 import           Data.OpEnergy.API.V1.Natural(verifyNatural, fromNatural)
+
+import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.Account.Server.V1.DB.Migrations
+import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
+import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
+import           OpEnergy.Account.Server.V1.Person
 import           OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.SplitBlockTimeStrikeObservedFromBlockTimeStrike
                    ( transformBlockTimeStrikeGuessGuessFromTextToBool
                    , splitBlockTimeStrikeObservedFromBlockTimeStrike

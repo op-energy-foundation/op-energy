@@ -1,16 +1,15 @@
-{-# LANGUAGE FlexibleContexts  #-}
+{-# LANGUAGE FlexibleContexts       #-}
+{-# LANGUAGE MultiParamTypeClasses  #-}
 module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeFilter
   ( buildFilterByClass
   ) where
 
-
 import           Database.Persist
-
 
 import           Data.OpEnergy.API.V1.Block
 import           Data.OpEnergy.API.V1.Positive( naturalFromPositive, Positive)
-import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
+import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
 
 
 -- | this function builds a strike filter with given dynamic variables like
