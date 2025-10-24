@@ -3,11 +3,13 @@
 {-# LANGUAGE GADTs                      #-}
 module OpEnergy.PagingResult
   ( pagingResult
+  , pagingLoopSource
   ) where
 
 import qualified Data.List as List
 import           Control.Monad.Trans.Reader ( ReaderT)
-import           Control.Monad(forM_)
+import           Control.Monad(when, forM_)
+import           Data.Maybe
 
 import qualified Data.Conduit as C
 import           Data.Conduit ((.|), runConduit, ConduitT)
@@ -48,7 +50,7 @@ pagingResult
 pagingResult mpage recordsPerReply filter sortOrder field next = profile "pagingResult" $ do
   mret <- withDBTransaction "" $ do
     pageResults <- runConduit
-      $ loopSource Nothing
+      $ pagingLoopSource Nothing recordsPerReply filter sortOrder field
       .| next
       .| skipToNeededPage -- navigate to page
       .| C.take (fromPositive recordsPerReply + 1) -- we take +1 to understand if there is a next page available
@@ -67,29 +69,51 @@ pagingResult mpage recordsPerReply filter sortOrder field next = profile "paging
         }
   where
     skipToNeededPage = (C.drop (fromNatural page * fromPositive recordsPerReply) >> C.awaitForever C.yield)
-    page = maybe 0 id mpage
-    loopSource moffset = do
-      let
-          offset = maybe 0 id moffset
-      rows <- lift $ selectList
-        filter
-        [ LimitTo (recordsPerReplyInt + 1)
-        , OffsetBy offset
-        , sort
-        ]
-      let
-          rowsLen = List.length rows
-          isMoreRowsThanRecordsPerReplyAvailable = rowsLen > recordsPerReplyInt
-      if rowsLen < 1
-        then return ()
-        else do
-          forM_ (List.take recordsPerReplyInt rows) C.yield
-          if isMoreRowsThanRecordsPerReplyAvailable
-            then loopSource (Just (offset + recordsPerReplyInt))
-            else return ()
-      where
-        sort = case sortOrder of
-          Descend-> Desc field
-          Ascend -> Asc field
-        recordsPerReplyInt = fromPositive recordsPerReply
+    page = fromMaybe 0 mpage
+
+pagingLoopSource
+  :: ( PersistEntity r
+     , PersistField typ
+     , PersistEntityBackend r ~ SqlBackend
+     , Ord typ
+     , MonadIO m
+     )
+  => Maybe (Natural Int)
+  -> Positive Int
+  -> [Filter r]
+  -> SortOrder
+  -> EntityField r typ
+  -> ConduitT
+    ()
+    (Entity r)
+    (ReaderT SqlBackend m)
+    ()
+pagingLoopSource moffset recordsPerReply filter sortOrder field = do
+  let
+      offset = maybe 0 fromNatural moffset
+  rows <- lift $ selectList
+    filter
+    [ LimitTo (recordsPerReplyInt + 1)
+    , OffsetBy offset
+    , sort
+    ]
+  let
+      rowsLen = List.length rows
+      isMoreRowsThanRecordsPerReplyAvailable = rowsLen > recordsPerReplyInt
+  if rowsLen < 1
+    then return ()
+    else do
+      forM_ (List.take recordsPerReplyInt rows) C.yield
+      when isMoreRowsThanRecordsPerReplyAvailable $ do
+        pagingLoopSource
+          (Just (verifyNatural $ offset + recordsPerReplyInt))
+          recordsPerReply
+          filter
+          sortOrder
+          field
+  where
+    sort = case sortOrder of
+      Descend-> Desc field
+      Ascend -> Asc field
+    recordsPerReplyInt = fromPositive recordsPerReply
 
