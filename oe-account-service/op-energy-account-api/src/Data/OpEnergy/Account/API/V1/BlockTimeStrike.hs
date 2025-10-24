@@ -29,6 +29,8 @@ import qualified Data.Text.Encoding as Text
 import           Data.Time.Clock.POSIX(POSIXTime)
 import qualified Data.List as List
 import qualified Data.ByteString.Lazy as BS
+import           Data.Word(Word32, Word64)
+import qualified Unsafe.Coerce as U
 
 import           Servant.API(ToHttpApiData(..), FromHttpApiData(..))
 import           Database.Persist.TH
@@ -37,8 +39,12 @@ import           Database.Persist.Sql
 import           Database.Persist.Pagination
 import           Data.Proxy
 import           Data.Default
+import           Test.QuickCheck(Arbitrary(..))
+import qualified Test.QuickCheck as QC
 
-import           Data.OpEnergy.API.V1.Block(BlockHeight, defaultBlockHeight)
+import           Data.OpEnergy.API.V1.Block( BlockHeight
+                                           , defaultBlockHeight
+                                           )
 import           Data.OpEnergy.Account.API.V1.Account
 import           Data.OpEnergy.API.V1.Block(BlockHash)
 import           Data.OpEnergy.API.V1.Positive(Positive)
@@ -129,6 +135,21 @@ defaultBlockTimeStrikeFilter = BlockTimeStrikeFilter
   , blockTimeStrikeFilterLinesPerPage          = Just 100
   }
 
+instance Arbitrary BlockTimeStrike where
+  arbitrary = do
+    height <- arbitrary
+    let
+        mediantime = genesisMediantime + fromIntegral height * 600
+    mediantimeInt <- (QC.choose (mediantime - 400, mediantime + 400)::(QC.Gen Int))
+    let
+        strikeMediantime = realToFrac mediantimeInt
+    creationTimeInt <- (QC.choose (mediantime - 600, mediantime - 500):: (QC.Gen Int))
+    let
+        creationTime = fromIntegral creationTimeInt
+    return $! BlockTimeStrike height strikeMediantime creationTime
+    where
+      genesisMediantime = 1732551056
+
 defaultBlockTimeStrike :: BlockTimeStrike
 defaultBlockTimeStrike = BlockTimeStrike
   { blockTimeStrikeBlock = defaultBlockHeight
@@ -189,6 +210,21 @@ instance FromJSON BlockTimeStrikeObservedPublic where
   parseJSON = commonParseJSON
 instance Default BlockTimeStrikeObservedPublic where
   def = defaultBlockTimeStrikeObservedPublic
+instance Arbitrary BlockTimeStrikeObservedPublic where
+  arbitrary = do
+    creationTime <- (QC.choose (genesisMediantime, genesisMediantime + 60000)::(QC.Gen Word32))
+    mediantimeInt <- (QC.choose (genesisMediantime, genesisMediantime + 60000)::(QC.Gen Word32))
+    mediantime <- (\v -> case v of
+                    0 -> Nothing
+                    _ -> Just mediantimeInt
+                  ) <$> QC.choose (0, 1::Int)
+    BlockTimeStrikeObservedPublic
+      <$> arbitrary
+      <*> return (fromIntegral creationTime)
+      <*> arbitrary
+      <*> (return $! maybe Nothing (Just . fromIntegral) mediantime)
+    where
+      genesisMediantime = 1732551056
 
 data SlowFast
   = Slow
@@ -228,6 +264,12 @@ instance FromHttpApiData SlowFast where
   parseUrlPiece "slow" = Prelude.Right Slow
   parseUrlPiece "fast" = Prelude.Right Fast
   parseUrlPiece _ = Left "wrong SlowFast value"
+instance Arbitrary SlowFast where
+  arbitrary = do
+    choice <- QC.choose (0::Int, 1)
+    return $ if choice == 0
+      then Slow
+      else Fast
 
 defaultSlowFast :: SlowFast
 defaultSlowFast = Slow
@@ -315,6 +357,26 @@ instance BuildFilter BlockTimeStrikeObserved BlockTimeStrikeFilter where
     , maybe [] (\v-> [BlockTimeStrikeObservedIsFast ==. v]) mobservedResultEQ
     , maybe [] (\v-> [BlockTimeStrikeObservedIsFast !=. v]) mobservedResultNEQ
     ]
+
+instance Arbitrary BlockTimeStrikeId where
+  arbitrary = do
+    U.unsafeCoerce <$> (arbitrary :: QC.Gen Word64)
+instance Arbitrary BlockTimeStrikeObserved where
+  arbitrary = do
+    height <- arbitrary
+    let
+        mediantime = genesisMediantime + fromIntegral height * 600
+    mediantimeInt <- fromIntegral <$> (QC.choose (mediantime - 400, mediantime + 400)::(QC.Gen Word32))
+    creationTime <- fromIntegral <$> (QC.choose (mediantime - 400, mediantime + 400)::(QC.Gen Word32))
+    BlockTimeStrikeObserved
+      <$> (return mediantimeInt) -- mediantime of the judgement block.
+      <*> arbitrary
+      <*> return height
+      <*> arbitrary
+      <*> return creationTime
+      <*> arbitrary
+    where
+      genesisMediantime = 1732551056
 
 -- | we need to use separate sort order as we can sort strikes by guesses count
 data StrikeSortOrder
