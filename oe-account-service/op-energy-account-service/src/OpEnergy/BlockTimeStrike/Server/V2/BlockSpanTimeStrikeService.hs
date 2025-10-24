@@ -5,8 +5,8 @@
 {-# LANGUAGE RecordWildCards          #-}
 {-# LANGUAGE EmptyDataDecls          #-}
 {-# LANGUAGE GADTs                     #-}
-module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
-  ( createBlockTimeStrikeFuture
+module OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeService
+  ( createBlockSpanTimeStrikeFuture
   , newTipHandlerLoop
   , getBlockTimeStrikesPage
   , getBlockTimeStrike
@@ -15,7 +15,9 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
 import           Servant (err400, err500, Handler)
 import           Control.Monad.Trans.Reader ( ask, asks, ReaderT)
 import           Control.Monad.Logger( logError, logInfo, NoLoggingT)
-import           Control.Monad(forever)
+import           Control.Monad( when, forever)
+import           Data.Time.Clock(getCurrentTime)
+import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
 import qualified Control.Concurrent.STM as STM
 import qualified Control.Concurrent.STM.TVar as TVar
 import qualified Control.Concurrent.MVar as MVar
@@ -24,7 +26,11 @@ import           Data.Conduit( (.|) )
 import qualified Data.Conduit as C
 import qualified Data.Conduit.List as C
 import           Control.Monad.Trans
-import           Control.Monad.Trans.Except( runExceptT, ExceptT (..))
+import           Control.Monad.Trans.Except
+                   ( runExceptT
+                   , ExceptT (..)
+                   , throwE
+                   )
 import           Control.Monad.Trans.Resource( ResourceT)
 import           Data.Maybe( fromMaybe)
 
@@ -38,7 +44,11 @@ import           Data.Text.Show (tshow)
 import qualified Data.OpEnergy.Account.API.V1.Account as API
 import           Data.OpEnergy.API.V1.Block
 import           Data.OpEnergy.API.V1.Natural
-import           Data.OpEnergy.API.V1.Positive( fromPositive)
+import           Data.OpEnergy.API.V1.Positive
+                   ( naturalFromPositive
+                   , fromPositive
+                   , Positive
+                   )
 import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrike            as API
 import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic      as API
 import qualified Data.OpEnergy.Account.API.V1.PagingResult               as API
@@ -46,35 +56,68 @@ import qualified Data.OpEnergy.Account.API.V1.FilterRequest              as API
 import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass as API
 import           Data.OpEnergy.API.V1.Error(throwJSON)
 
-import           OpEnergy.ExceptMaybe(exceptTMaybeT)
+import           OpEnergy.ExceptMaybe
+                   ( exceptTMaybeT
+                   , eitherLogThrowOrReturn
+                   , runExceptPrefixT
+                   )
 import           OpEnergy.Error( eitherThrowJSON)
 import           OpEnergy.PagingResult
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
-import qualified OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeScheduledStrikeCreation
-                 as BlockTimeScheduledStrikeCreation
-import qualified OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeObserve
-                 as Observe
+import qualified OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeScheduledStrikeCreation as BlockTimeScheduledStrikeCreation
+import qualified OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeObserve as Observe
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Context as Context
-import qualified OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeFilter
-                 as BlockTimeStrikeFilter
+import qualified OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeFilter as BlockTimeStrikeFilter
 import qualified OpEnergy.BlockTimeStrike.Server.V2.DBModel as DB
 import           OpEnergy.BlockTimeStrike.Server.V1.SlowFast
 import           OpEnergy.Account.Server.V1.Config (Config(..))
-import qualified OpEnergy.Account.Server.V1.Config as Config
+import qualified OpEnergy.Account.Server.V1.Config  as Config
+import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
 import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging, profile, withDBTransaction )
-import qualified OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeService
-                 as V2
+import           OpEnergy.Account.Server.V1.Person
 
 -- | O(ln accounts).
 -- Tries to create future block time strike. Requires authenticated user and blockheight should be in the future
-createBlockTimeStrikeFuture :: API.AccountToken-> BlockHeight-> Natural Int-> AppM ()
-createBlockTimeStrikeFuture token blockHeight strikeMediantime =
-    let name = "createBlockTimeStrikeFuture"
-    in profile name $ do
-  configDefaultBlockSpanTimeStrikeSpanSize <- asks
-    $ Config.configDefaultBlockSpanTimeStrikeSpanSize . config
-  V2.createBlockSpanTimeStrikeFuture
-    token blockHeight configDefaultBlockSpanTimeStrikeSpanSize strikeMediantime
+createBlockSpanTimeStrikeFuture
+  :: API.AccountToken
+  -> BlockHeight
+  -> Positive Int
+  -> Natural Int
+  -> AppM ()
+createBlockSpanTimeStrikeFuture token blockHeight spanSize strikeMediantime =
+    let name = "createBlockSpanTimeStrikeFuture"
+    in profile name $ eitherLogThrowOrReturn $ runExceptPrefixT name $ do
+  configBlockTimeStrikeMinimumBlockAheadCurrentTip <- lift $ asks
+    $ Config.configBlockTimeStrikeMinimumBlockAheadCurrentTip . config
+  latestUnconfirmedBlockHeightV <- lift $ asks
+    $ BlockTime.latestUnconfirmedBlockHeight . blockTimeState
+  tip <- exceptTMaybeT "there is no current observed tip yet"
+    $ liftIO $ TVar.readTVarIO latestUnconfirmedBlockHeightV
+  when (tip > fromIntegral strikeMediantime)
+    $ throwE "strikeMediantime is in the past, which is not expected"
+  when ( tip + naturalFromPositive configBlockTimeStrikeMinimumBlockAheadCurrentTip
+         > blockHeight
+       )
+    $ throwE "block height for new block time strike should be in the future \
+             \+ minimum configBlockTimeStrikeMinimumBlockAheadCurrentTip"
+  person <- exceptTMaybeT "person was not able to authenticate itself"
+    $ mgetPersonByAccountToken token
+  exceptTMaybeT "something went wrong"
+    $ createBlockTimeStrikeEnsuredConditions person
+  where
+    createBlockTimeStrikeEnsuredConditions
+      :: (MonadIO m, MonadMonitor m)
+      => Entity Person
+      -> AppT m (Maybe ())
+    createBlockTimeStrikeEnsuredConditions _ = do
+      nowUTC <- liftIO getCurrentTime
+      let now = utcTimeToPOSIXSeconds nowUTC
+      withDBTransaction "" $ insert_ $! DB.BlockSpanTimeStrike
+        { DB.blockSpanTimeStrikeBlock = blockHeight
+        , DB.blockSpanTimeStrikeMediantime = fromIntegral strikeMediantime
+        , DB.blockSpanTimeStrikeCreationTime = now
+        , DB.blockSpanTimeStrikeSpanSize = spanSize
+        }
 
 -- | this function is an entry point for a process, that creates blocktime past strikes when such block is being
 -- confirmed. After BlockTimeStrikePast creation, it will add record to the BlockTimeStrikeFutureObservedBlock table
@@ -255,7 +298,9 @@ getBlockTimeStrikesPage mpage mfilterAPI = profile "getBlockTimeStrikesPage" $ d
          ]
     fetchStrikeByGuessesCount strikeFilter guessE@(Entity _ guessesCount) = do
       mstrike <- selectFirst
-        ((DB.BlockSpanTimeStrikeId ==. DB.calculatedBlockSpanTimeStrikeGuessesCountStrike guessesCount)
+        (( DB.BlockSpanTimeStrikeId
+           ==. DB.calculatedBlockSpanTimeStrikeGuessesCountStrike guessesCount
+         )
          :strikeFilter
         )
         []
@@ -335,16 +380,22 @@ getBlockTimeStrikesPage mpage mfilterAPI = profile "getBlockTimeStrikesPage" $ d
       API.BlockTimeStrikeWithGuessesCountPublic
         { blockTimeStrikeWithGuessesCountPublicStrike = API.BlockTimeStrikePublic
           { blockTimeStrikePublicObservedResult = fmap
-            (\(Entity _ v)-> apiModelSlowFast $ DB.blockSpanTimeStrikeObservedIsFast v)
+            (\(Entity _ v)-> apiModelSlowFast
+              $ DB.blockSpanTimeStrikeObservedIsFast v
+            )
             mObserved
           , blockTimeStrikePublicObservedBlockMediantime = fmap
-            (\(Entity _ v)-> DB.blockSpanTimeStrikeObservedJudgementBlockMediantime v)
+            (\(Entity _ v)->
+              DB.blockSpanTimeStrikeObservedJudgementBlockMediantime v
+            )
             mObserved
           , blockTimeStrikePublicObservedBlockHash = fmap
             (\(Entity _ v)-> DB.blockSpanTimeStrikeObservedJudgementBlockHash v)
             mObserved
           , blockTimeStrikePublicObservedBlockHeight = fmap
-            (\(Entity _ v)-> DB.blockSpanTimeStrikeObservedJudgementBlockHeight v)
+            (\(Entity _ v)->
+              DB.blockSpanTimeStrikeObservedJudgementBlockHeight v
+            )
             mObserved
           , blockTimeStrikePublicBlock = DB.blockSpanTimeStrikeBlock strike
           , blockTimeStrikePublicStrikeMediantime =
@@ -397,7 +448,8 @@ getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $
         C.runConduit
           $ streamEntities
             [ DB.BlockSpanTimeStrikeBlock ==. blockHeight
-            , DB.BlockSpanTimeStrikeMediantime ==. fromIntegral strikeMediantime
+            , DB.BlockSpanTimeStrikeMediantime ==.
+              fromIntegral strikeMediantime
             ]
             DB.BlockSpanTimeStrikeId
             (PageSize (fromPositive recordsPerReply + 1))
@@ -417,7 +469,9 @@ getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $
         []
       let guessesCount = maybe
             0
-            (\(Entity _ v) -> DB.calculatedBlockSpanTimeStrikeGuessesCountGuessesCount v)
+            (\(Entity _ v) ->
+              DB.calculatedBlockSpanTimeStrikeGuessesCountGuessesCount v
+            )
             mguessesCount
       return (strikeE, guessesCount)
     maybeFetchObserved
