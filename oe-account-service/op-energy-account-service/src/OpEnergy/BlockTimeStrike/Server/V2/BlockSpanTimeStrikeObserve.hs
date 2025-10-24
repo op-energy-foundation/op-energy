@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell          #-}
 {-# LANGUAGE EmptyDataDecls           #-}
 {-# LANGUAGE OverloadedStrings          #-}
-module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeObserve
+module OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeObserve
   ( observeStrikes
   , withLeastUnobservedConfirmedBlock
   ) where
@@ -29,7 +29,6 @@ import           Data.Text.Show (tshow)
 import           Data.OpEnergy.Client as Blockspan
 import           Data.OpEnergy.API.V1.Block
 import           Data.OpEnergy.API.V1.Positive( Positive, fromPositive)
-import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
 import           OpEnergy.BlockTimeStrike.Server.V1.SlowFast
 import           OpEnergy.Account.Server.V1.Config (Config(..))
 import           OpEnergy.Account.Server.V1.Class ( AppT
@@ -41,12 +40,14 @@ import           OpEnergy.Account.Server.V1.Class ( AppT
                                                   )
 import           OpEnergy.BlockTimeStrike.Server.V1.Context(Context, unContext)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Context as Context
-import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeJudgement
+import           OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeJudgement
                    ( BlockObserved
                    , BlockMediantimeReachedBlockNotObserved
                    , JudgementBlock
                    )
-import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeJudgement as Judgement
+import qualified OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeJudgement
+                 as Judgement
+import qualified OpEnergy.BlockTimeStrike.Server.V2.DBModel as DB
 import           OpEnergy.Account.Server.V1.DB.Migrations
 
 
@@ -82,21 +83,21 @@ observeStrikes confirmedBlock = profile "observeStrikesByBlockHeight" $ do
     :: Positive Int
     -> C.ConduitT
        ()
-       ( Entity BlockTimeStrike)
+       ( Entity DB.BlockSpanTimeStrike)
        (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
        ()
   queryStrikesThatMaybeObserved recordsPerReply = do
     let
         isStrikeBlockConfirmed =
-          BlockTimeStrikeBlock <=. blockHeaderHeight (unContext confirmedBlock)
+          DB.BlockSpanTimeStrikeBlock <=. blockHeaderHeight (unContext confirmedBlock)
         isStrikeMediantimeObserved =
-          BlockTimeStrikeStrikeMediantime
+          DB.BlockSpanTimeStrikeMediantime
           <=. ( fromIntegral $! blockHeaderMediantime (unContext confirmedBlock))
     streamEntities
       (   [isStrikeBlockConfirmed]
       ||. [isStrikeMediantimeObserved]
       )
-      BlockTimeStrikeId
+      DB.BlockSpanTimeStrikeId
       (PageSize (fromPositive recordsPerReply))
       Descend
       (Range Nothing Nothing)
@@ -104,14 +105,16 @@ observeStrikes confirmedBlock = profile "observeStrikesByBlockHeight" $ do
   -- previously, so only unobserved strikes will be passed further down the
   -- stream
   filterUnobservedStrikes
-    :: Entity BlockTimeStrike
+    :: Entity DB.BlockSpanTimeStrike
     -> (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
-       [ Either (Context BlockObserved (Entity BlockTimeStrike))
-                 (Context BlockMediantimeReachedBlockNotObserved (Entity BlockTimeStrike))
+       [ Either (Context BlockObserved (Entity DB.BlockSpanTimeStrike))
+                (Context BlockMediantimeReachedBlockNotObserved
+                  (Entity DB.BlockSpanTimeStrike)
+                )
        ]
   filterUnobservedStrikes strikeE@(Entity strikeId _) = do
     let isStrikeOutcomeObserved =
-          BlockTimeStrikeObservedStrike ==. strikeId
+          DB.BlockSpanTimeStrikeObservedStrike ==. strikeId
     isStrikeOutcomeNotObserved <- fmap not $ exists
       [ isStrikeOutcomeObserved ]
     if isStrikeOutcomeNotObserved
@@ -122,11 +125,11 @@ observeStrikes confirmedBlock = profile "observeStrikesByBlockHeight" $ do
       else return []
   calculateResult
     :: Either
-       (Context BlockObserved (Entity BlockTimeStrike))
-       (Context BlockMediantimeReachedBlockNotObserved (Entity BlockTimeStrike))
+       (Context BlockObserved (Entity DB.BlockSpanTimeStrike))
+       (Context BlockMediantimeReachedBlockNotObserved (Entity DB.BlockSpanTimeStrike))
     -> ( Either
-         (Context BlockObserved (Entity BlockTimeStrike))
-         (Context BlockMediantimeReachedBlockNotObserved (Entity BlockTimeStrike))
+         (Context BlockObserved (Entity DB.BlockSpanTimeStrike))
+         (Context BlockMediantimeReachedBlockNotObserved (Entity DB.BlockSpanTimeStrike))
        , SlowFast
        )
   calculateResult estrike =
@@ -135,18 +138,20 @@ observeStrikes confirmedBlock = profile "observeStrikesByBlockHeight" $ do
     )
   calculateResultCount
     :: C.ConduitT
-       BlockTimeStrikeObservedId
+       DB.BlockSpanTimeStrikeObservedId
        C.Void
        (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
        Int
   calculateResultCount = C.length
   insertStrikeResult
-    :: ( Either (Context BlockObserved (Entity BlockTimeStrike))
-                (Context BlockMediantimeReachedBlockNotObserved (Entity BlockTimeStrike))
+    :: ( Either (Context BlockObserved (Entity DB.BlockSpanTimeStrike))
+                (Context BlockMediantimeReachedBlockNotObserved
+                  (Entity DB.BlockSpanTimeStrike)
+                )
        , SlowFast
        )
     -> (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
-       BlockTimeStrikeObservedId
+       DB.BlockSpanTimeStrikeObservedId
   insertStrikeResult ( estrikeC , calculatedResult) = do
     let
         Entity strikeId _ = case estrikeC of
@@ -154,15 +159,15 @@ observeStrikes confirmedBlock = profile "observeStrikesByBlockHeight" $ do
           Right strikeE -> unContext strikeE
         judgementBlock = unContext judgementBlockC
     now <- liftIO getPOSIXTime
-    insert $ BlockTimeStrikeObserved
-      { blockTimeStrikeObservedStrike = strikeId
-      , blockTimeStrikeObservedJudgementBlockHash =
+    insert $ DB.BlockSpanTimeStrikeObserved
+      { DB.blockSpanTimeStrikeObservedStrike = strikeId
+      , DB.blockSpanTimeStrikeObservedJudgementBlockHash =
         blockHeaderHash judgementBlock
-      , blockTimeStrikeObservedJudgementBlockMediantime =
+      , DB.blockSpanTimeStrikeObservedJudgementBlockMediantime =
         fromIntegral (blockHeaderMediantime judgementBlock)
-      , blockTimeStrikeObservedCreationTime = now
-      , blockTimeStrikeObservedIsFast = calculatedResult
-      , blockTimeStrikeObservedJudgementBlockHeight =
+      , DB.blockSpanTimeStrikeObservedCreationTime = now
+      , DB.blockSpanTimeStrikeObservedIsFast = calculatedResult
+      , DB.blockSpanTimeStrikeObservedJudgementBlockHeight =
         blockHeaderHeight judgementBlock
       }
 

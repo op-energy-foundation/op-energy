@@ -1,6 +1,6 @@
 -- | This module's main purpose is to contain a scheduled routine to create future time strikes automatically.
 {-# LANGUAGE TemplateHaskell          #-}
-module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledStrikeCreation
+module OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeScheduledStrikeCreation
   ( maybeCreateStrikes
   ) where
 
@@ -18,14 +18,16 @@ import           Prometheus(MonadMonitor)
 import           Data.OpEnergy.Client as Blockspan
 
 import           Data.OpEnergy.API.V1.Block
-import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
 import           Data.OpEnergy.API.V1.Positive
 import           Data.OpEnergy.API.V1.Natural
+import           Data.Text.Show
+
 import           OpEnergy.Account.Server.V1.Class as Account (profile, AppT, State(..), runLogging, withDBTransaction)
 import           OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import           OpEnergy.Account.Server.V1.Config
 import qualified OpEnergy.Account.Server.V1.Config as Config
-import           Data.Text.Show
+
+import qualified OpEnergy.BlockTimeStrike.Server.V2.DBModel as DB
 
 -- | This function is being called when latest confirmed block had been discovered. You should expect, that it can be called by recieving notification from the blockspan service either at discover or at a time of connection of block time service to blockspan service. So it is expected, that it will run at each restart of the blockspan service or at reconnection to blockspan service or at blocktime service restart.
 maybeCreateStrikes
@@ -47,7 +49,7 @@ ensureGuessableStrikeExistsAhead
   => BlockHeader
   -> AppT m ()
 ensureGuessableStrikeExistsAhead confirmedTip = profile "ensureGuessableStrikeExistsAhead" $ do
-  Account.State{ config = Config
+  Account.State{ config = config@Config
          { configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip = configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
          , configBlockTimeStrikeShouldExistsAheadCurrentTip = configBlockTimeStrikeShouldExistsAheadCurrentTip
          }
@@ -67,21 +69,28 @@ ensureGuessableStrikeExistsAhead confirmedTip = profile "ensureGuessableStrikeEx
         now <- liftIO getCurrentTime
         withDBTransaction "" $ do
           futureStrikesE <- selectList
-            [ BlockTimeStrikeBlock >=. minimumStrikeHeight
-            , BlockTimeStrikeBlock <=. maximumStrikeHeight
+            [ DB.BlockSpanTimeStrikeBlock >=. minimumStrikeHeight
+            , DB.BlockSpanTimeStrikeBlock <=. maximumStrikeHeight
             ] []
-          let futureStrikes = List.map (\(Entity _ strike) -> blockTimeStrikeBlock strike) futureStrikesE
-          let nonExistentStrikeHeights = List.filter
+          let
+              futureStrikes = List.map
+                (\(Entity _ strike) -> DB.blockSpanTimeStrikeBlock strike
+                )
+                futureStrikesE
+              nonExistentStrikeHeights = List.filter
                 (\height-> height `notElem` futureStrikes)
                 [ minimumStrikeHeight .. maximumStrikeHeight ]
           forM_ nonExistentStrikeHeights $ \height-> do
-            insert (BlockTimeStrike { blockTimeStrikeBlock = height
-                                    , blockTimeStrikeStrikeMediantime =
-                                      fromIntegral
-                                      $ blockHeaderMediantime confirmedTip
-                                      + fromIntegral ((fromNatural (height - blockHeaderHeight confirmedTip)) * 600) -- assume 10 minutes time slices for strike mediantime
-                                    , blockTimeStrikeCreationTime = utcTimeToPOSIXSeconds now
-                                    })
+            insert $! DB.BlockSpanTimeStrike
+              { DB.blockSpanTimeStrikeBlock = height
+              , DB.blockSpanTimeStrikeMediantime =
+                fromIntegral
+                $ blockHeaderMediantime confirmedTip
+                + fromIntegral (fromNatural (height - blockHeaderHeight confirmedTip) * 600) -- assume 10 minutes time slices for strike mediantime
+              , DB.blockSpanTimeStrikeCreationTime = utcTimeToPOSIXSeconds now
+              , DB.blockSpanTimeStrikeSpanSize =
+                Config.configDefaultBlockSpanTimeStrikeSpanSize config
+              }
           return nonExistentStrikeHeights
       when (List.length nonExistentBlockHeights > 0) $ do
         runLogging $ $(logInfo) ("ensureStrikeExistsAhead: created future strikes: " <> (tshow nonExistentBlockHeights))
@@ -94,6 +103,8 @@ ensureNextEpochGuessableStrikeExists
   => BlockHeader
   -> AppT m ()
 ensureNextEpochGuessableStrikeExists confirmedTip = profile "ensureNextEpochGuessableStrikeExists" $ do
+  configDefaultBlockSpanTimeStrikeSpanSize <- asks
+    (Config.configDefaultBlockSpanTimeStrikeSpanSize . config)
   configBlockspanURL <- asks (Config.configBlockspanURL . config)
   let
       epochBlocks = 2016
@@ -109,8 +120,8 @@ ensureNextEpochGuessableStrikeExists confirmedTip = profile "ensureNextEpochGues
                                + (fromIntegral ( fromNatural epochBlocks * 600))
   mmNextEpochBlockStrikeCreated <- withDBTransaction "" $ do
     anyNextEpochBlockStrikeExist <- selectFirst
-      [ BlockTimeStrikeBlock ==. nextEpochStartBlockHeight
-      , BlockTimeStrikeStrikeMediantime ==. fromIntegral nextEpochZeroDifficultyAdjustmentBlockMediantime
+      [ DB.BlockSpanTimeStrikeBlock ==. nextEpochStartBlockHeight
+      , DB.BlockSpanTimeStrikeMediantime ==. fromIntegral nextEpochZeroDifficultyAdjustmentBlockMediantime
       ][]
     case anyNextEpochBlockStrikeExist of
       Just _ -> let
@@ -119,10 +130,12 @@ ensureNextEpochGuessableStrikeExists confirmedTip = profile "ensureNextEpochGues
       Nothing -> let
           thereIsNoBlockTimeStrikeExistCreateNewOne = do
             now <- liftIO getPOSIXTime
-            fmap Just $! insert $! BlockTimeStrike
-              { blockTimeStrikeBlock = nextEpochStartBlockHeight
-              , blockTimeStrikeStrikeMediantime = fromIntegral nextEpochZeroDifficultyAdjustmentBlockMediantime
-              , blockTimeStrikeCreationTime = now
+            fmap Just $! insert $! DB.BlockSpanTimeStrike
+              { DB.blockSpanTimeStrikeBlock = nextEpochStartBlockHeight
+              , DB.blockSpanTimeStrikeMediantime = fromIntegral nextEpochZeroDifficultyAdjustmentBlockMediantime
+              , DB.blockSpanTimeStrikeCreationTime = now
+              , DB.blockSpanTimeStrikeSpanSize =
+                configDefaultBlockSpanTimeStrikeSpanSize
               }
         in thereIsNoBlockTimeStrikeExistCreateNewOne
   case mmNextEpochBlockStrikeCreated of

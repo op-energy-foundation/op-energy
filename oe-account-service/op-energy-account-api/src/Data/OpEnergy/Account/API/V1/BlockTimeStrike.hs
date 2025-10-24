@@ -20,7 +20,7 @@ import qualified Data.Text.Encoding as Text
 import           Data.Time.Clock.POSIX(POSIXTime)
 import qualified Data.List as List
 import qualified Data.ByteString.Lazy as BS
-import           Data.Word(Word64)
+import           Data.Word( Word32)
 
 import           Servant.API(ToHttpApiData(..), FromHttpApiData(..))
 import           Database.Persist.Pagination
@@ -34,30 +34,6 @@ import qualified Data.OpEnergy.API.V1.Hash as BlockHash (defaultHash)
 import           Data.OpEnergy.Account.API.V1.FilterRequest()
 import           Data.OpEnergy.Account.API.V1.Common
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
-
-data BlockTimeStrike = BlockTimeStrike
-  { blockTimeStrikeBlock            :: BlockHeight
-  , blockTimeStrikeStrikeMediantime :: POSIXTime
-  , blockTimeStrikeCreationTime     :: POSIXTime
-  }
-  deriving (Eq, Show, Generic)
-
-newtype BlockTimeStrikeId = BlockTimeStrikeId
-  { unBlockTimeStrikeId :: Word64
-  }
-  deriving (Eq, Show, Generic)
-
-data BlockTimeStrikeObserved = BlockTimeStrikeObserved
-  { judgementBlockMediantime :: POSIXTime -- mediantime of the judgement block.
-  , judgementBlockHash :: BlockHash -- hash of the judgement block.
-  , judgementBlockHeight :: BlockHeight -- height of the judgement block.
-  , isFast :: SlowFast
-  -- metadata
-  , creationTime :: POSIXTime
-  -- reflinks
-  , strike :: BlockTimeStrikeId
-  }
-  deriving (Eq, Show, Generic)
 
 data BlockTimeStrikeFilter = BlockTimeStrikeFilter
   { blockTimeStrikeFilterStrikeMediantimeGTE        :: Maybe POSIXTime
@@ -111,50 +87,50 @@ defaultBlockTimeStrikeFilter = BlockTimeStrikeFilter
   , blockTimeStrikeFilterLinesPerPage          = Just 100
   }
 
-defaultBlockTimeStrike :: BlockTimeStrike
-defaultBlockTimeStrike = BlockTimeStrike
-  { blockTimeStrikeBlock = defaultBlockHeight
-  , blockTimeStrikeStrikeMediantime = defaultPOSIXTime
-  , blockTimeStrikeCreationTime = defaultPOSIXTime
-  }
-instance ToSchema BlockTimeStrike where
-  declareNamedSchema proxy = genericDeclareNamedSchema (commonSchemaOptions (def1 proxy)) proxy
-    & mapped.schema.type_ ?~ SwaggerObject
-    & mapped.schema.example ?~ toJSON defaultBlockTimeStrike
-    & mapped.schema.required .~
-      [ "block"
-      , "strikeMediantime"
-      , "creationTime"
-      ]
-    where
-      def1 :: Default a => Proxy a -> a
-      def1 _ = def
-instance ToJSON BlockTimeStrike where
-  toJSON = commonToJSON genericToJSON
-  toEncoding = commonToJSON genericToEncoding
-instance FromJSON BlockTimeStrike where
-  parseJSON = commonParseJSON
-instance Default BlockTimeStrike where
-  def = defaultBlockTimeStrike
+-- defaultBlockTimeStrike :: BlockTimeStrike
+-- defaultBlockTimeStrike = BlockTimeStrike
+--   { blockTimeStrikeBlock = defaultBlockHeight
+--   , blockTimeStrikeStrikeMediantime = defaultPOSIXTime
+--   , blockTimeStrikeCreationTime = defaultPOSIXTime
+--   }
+-- instance ToSchema BlockTimeStrike where
+--   declareNamedSchema proxy = genericDeclareNamedSchema (commonSchemaOptions (def1 proxy)) proxy
+--     & mapped.schema.type_ ?~ SwaggerObject
+--     & mapped.schema.example ?~ toJSON defaultBlockTimeStrike
+--     & mapped.schema.required .~
+--       [ "block"
+--       , "strikeMediantime"
+--       , "creationTime"
+--       ]
+--     where
+--       def1 :: Default a => Proxy a -> a
+--       def1 _ = def
+-- instance ToJSON BlockTimeStrike where
+--   toJSON = commonToJSON genericToJSON
+--   toEncoding = commonToJSON genericToEncoding
+-- instance FromJSON BlockTimeStrike where
+--   parseJSON = commonParseJSON
+-- instance Default BlockTimeStrike where
+--   def = defaultBlockTimeStrike
 
-data BlockTimeStrikeObservedPublic =  BlockTimeStrikeObservedPublic
-  { blockTimeStrikeObservedPublicBlockHash :: Maybe BlockHash
-  , blockTimeStrikeObservedPublicCreationTime :: POSIXTime
-  , blockTimeStrikeObservedPublicResult :: SlowFast
-  , blockTimeStrikeObservedPublicBlockMediantime :: Maybe POSIXTime
+data BlockTimeStrikeObserved =  BlockTimeStrikeObserved
+  { blockTimeStrikeObservedBlockHash :: Maybe BlockHash
+  , blockTimeStrikeObservedCreationTime :: POSIXTime
+  , blockTimeStrikeObservedResult :: SlowFast
+  , blockTimeStrikeObservedBlockMediantime :: Maybe POSIXTime
   }
   deriving (Eq, Show, Generic)
-defaultBlockTimeStrikeObservedPublic :: BlockTimeStrikeObservedPublic
-defaultBlockTimeStrikeObservedPublic =  BlockTimeStrikeObservedPublic
-  { blockTimeStrikeObservedPublicBlockHash = Just BlockHash.defaultHash
-  , blockTimeStrikeObservedPublicCreationTime = defaultPOSIXTime
-  , blockTimeStrikeObservedPublicResult = Slow
-  , blockTimeStrikeObservedPublicBlockMediantime = Just 1
+defaultBlockTimeStrikeObserved :: BlockTimeStrikeObserved
+defaultBlockTimeStrikeObserved =  BlockTimeStrikeObserved
+  { blockTimeStrikeObservedBlockHash = Just BlockHash.defaultHash
+  , blockTimeStrikeObservedCreationTime = defaultPOSIXTime
+  , blockTimeStrikeObservedResult = Slow
+  , blockTimeStrikeObservedBlockMediantime = Just 1
   }
-instance ToSchema BlockTimeStrikeObservedPublic where
+instance ToSchema BlockTimeStrikeObserved where
   declareNamedSchema proxy = genericDeclareNamedSchema (commonSchemaOptions (def1 proxy)) proxy
     & mapped.schema.type_ ?~ SwaggerObject
-    & mapped.schema.example ?~ toJSON defaultBlockTimeStrikeObservedPublic
+    & mapped.schema.example ?~ toJSON defaultBlockTimeStrikeObserved
     & mapped.schema.required .~
       [ "blockHash"
       , "creationTime"
@@ -164,13 +140,13 @@ instance ToSchema BlockTimeStrikeObservedPublic where
     where
       def1 :: Default a => Proxy a -> a
       def1 _ = def
-instance ToJSON BlockTimeStrikeObservedPublic where
+instance ToJSON BlockTimeStrikeObserved where
   toJSON = commonToJSON genericToJSON
   toEncoding = commonToJSON genericToEncoding
-instance FromJSON BlockTimeStrikeObservedPublic where
+instance FromJSON BlockTimeStrikeObserved where
   parseJSON = commonParseJSON
-instance Default BlockTimeStrikeObservedPublic where
-  def = defaultBlockTimeStrikeObservedPublic
+instance Default BlockTimeStrikeObserved where
+  def = defaultBlockTimeStrikeObserved
 
 data SlowFast
   = Slow
@@ -285,3 +261,128 @@ verifyStrikeSortOrder v =
   case verifyStrikeSortOrderEither v of
     Right some -> some
     Left some -> error $ Text.unpack some
+
+-- | this data type defines data structure, that will be used in API to
+-- represent BlockTimeStrike with possible observed result and judgement
+-- block's data
+-- Suffix '' here is just for separating datatypes between API (with
+--  suffix) and DB (without suffix)
+data BlockTimeStrike = BlockTimeStrike
+  { blockTimeStrikeBlock :: BlockHeight
+  , blockTimeStrikeStrikeMediantime :: POSIXTime
+  , blockTimeStrikeCreationTime :: POSIXTime
+  , blockTimeStrikeObservedResult :: Maybe SlowFast
+  , blockTimeStrikeObservedBlockMediantime :: Maybe POSIXTime
+  , blockTimeStrikeObservedBlockHash :: Maybe BlockHash
+  , blockTimeStrikeObservedBlockHeight :: Maybe BlockHeight
+  }
+  deriving (Eq, Show, Generic)
+instance FromJSON BlockTimeStrike where
+  parseJSON = commonParseJSON
+instance ToJSON BlockTimeStrike where
+  -- alter serialization names
+  toJSON = commonToJSON genericToJSON
+  toEncoding = commonToJSON genericToEncoding
+instance ToSchema BlockTimeStrike where
+  declareNamedSchema proxy = genericDeclareNamedSchema (commonSchemaOptions (def1 proxy)) proxy
+    & mapped.schema.type_ ?~ SwaggerObject
+    & mapped.schema.description ?~ (Text.unlines
+        [ "defines BlockTimeStrike data structure. where:"
+        , "- block - block height"
+        , "- strikeMediantime - mediantime of a given strike"
+        , "- creationTime - time when strike had been created"
+        , "- observedResult - if exist, then contains observed result of the strike"
+        , "- observedBlockMediantime - contains mediantime of the 'judgement' block"
+        , "- observedBlockHash - contains hash of the 'judgement' block"
+        , "- observedBlockHeight - contains height of the 'judgement' block."
+        , "where:"
+        , "- judgement block is the block, that used to calculate result against."
+        , "  judgement block is used accordigly to the following rules:"
+        , "  assume:"
+        , "      1. CONFIRMED_MEDIANTIME(n) - is a mediantime of the confirmed block with height n;"
+        , "      2. CONFIRMED_BLOCKHASH(n) - is a hash of the confirmed block with height n;"
+        , "      3. latestConfirmedHeight - height of the latest confirmed height we have"
+        , "      4. strikeBlockHeight - block height of the strike, ie 'block' field's value"
+        , ""
+        , "  then we will have following cases:"
+        , "    1. strikeBlockHeight > latestConfirmedHeight"
+        , "       && strikeMediantime > CONFIRMED_MEDIANTIME(latestConfirmedHeight)"
+        , "    2. strikeBlockHeight <= latestConfirmedHeight"
+        , "    3. strikeMediantime <= CONFIRMED_MEDIANTIME(latestConfirmedHeight)"
+        , ""
+        , "  case 1: base case: when result can't be calculated, so observed* fields' values are absent/null"
+        , ""
+        , "  case 2: when strike's block had been discovered."
+        , "    so the judgement block's height here is the same as strike's 'block' field's value. In this case:"
+        , "      - observedResult = \"fast\" if strikeMediantime > CONFIRMED_MEDIANTIME(judgementBlockHeight) (ie, when block had been discovered faster than defined by strike), or \"slow\" otherwise"
+        , "      - observedBlockHeight = the same as 'block' field's value"
+        , "      - observedBlockMediantime = CONFIRMED_MEDIANTIME(judgementBlockHeight)"
+        , "      - observedBlockHash = CONFIRMED_BLOCKHASH(judgementBlockHeight)"
+        , ""
+        , "  case 3: when strike's block hadn't been discovered, but strikeMediantime had been reached"
+        , "    so the judgement block's height here is found as:"
+        , "      thus CONFIRMED_MEDIANTIME(N-1) < strikeMediantime <= CONFIRMED_MEDIANTIME(judgementBlockHeight) <= CONFIRMED_MEDIANTIME(latestConfirmedHeight)"
+        , "      and: n-1 < judgementBlockHeight < latestConfirmedHeight < strikeBlockHeight"
+        , "      and: CONFIRMED_MEDIANTIME(strikeBlockHeight) is not exist"
+        , "      - observedResult = \"slow\" as block discover is slower than expected by strike"
+        , "      - observedBlockHeight = judgementBlockHeight"
+        , "      - observedBlockMediantime = CONFIRMED_MEDIANTIME(judgementBlockHeight)"
+        , "      - observedBlockHash = CONFIRMED_BLOCKHASH(judgementBlockHeight)"
+        ])
+    & mapped.schema.example ?~ toJSON defaultBlockTimeStrike
+    & mapped.schema.required .~
+        [ "block"
+        , "strikeMediantime"
+        , "creationTime"
+        ]
+    where
+      def1 :: Default a => Proxy a -> a
+      def1 _ = def
+instance Default BlockTimeStrike where
+  def = defaultBlockTimeStrike
+defaultBlockTimeStrike :: BlockTimeStrike
+defaultBlockTimeStrike =  BlockTimeStrike
+  { blockTimeStrikeBlock = defaultBlockHeight
+  , blockTimeStrikeStrikeMediantime = 2
+  , blockTimeStrikeCreationTime = 1
+  , blockTimeStrikeObservedResult = Just defaultSlowFast
+  , blockTimeStrikeObservedBlockMediantime = Just 3
+  , blockTimeStrikeObservedBlockHash = Just BlockHash.defaultHash
+  , blockTimeStrikeObservedBlockHeight = Just defaultBlockHeight
+  }
+
+data BlockTimeStrikeWithGuessesCount = BlockTimeStrikeWithGuessesCount
+  { blockTimeStrikeWithGuessesCountStrike :: BlockTimeStrike
+    -- ^ past strike
+  , blockTimeStrikeWithGuessesCountGuessesCount :: Word32
+    -- ^ amount of guesses
+  }
+  deriving (Show, Generic)
+instance FromJSON BlockTimeStrikeWithGuessesCount where
+  parseJSON = commonParseJSON
+instance ToJSON BlockTimeStrikeWithGuessesCount where
+  -- alter serialization names
+  toJSON = commonToJSON genericToJSON
+  toEncoding = commonToJSON genericToEncoding
+instance ToSchema BlockTimeStrikeWithGuessesCount where
+  declareNamedSchema proxy = genericDeclareNamedSchema (commonSchemaOptions (def1 proxy)) proxy
+    & mapped.schema.type_ ?~ SwaggerObject
+    & mapped.schema.description ?~ "This object defines strike and it's guesses count"
+    & mapped.schema.example ?~ toJSON defaultBlockTimeStrikeWithGuessesCount
+    & mapped.schema.required .~
+      [ "strike"
+      , "guessesCount"
+      ]
+    where
+      def1 :: Default a => Proxy a -> a
+      def1 _ = def
+
+
+instance Default BlockTimeStrikeWithGuessesCount where
+  def = defaultBlockTimeStrikeWithGuessesCount
+defaultBlockTimeStrikeWithGuessesCount :: BlockTimeStrikeWithGuessesCount
+defaultBlockTimeStrikeWithGuessesCount = BlockTimeStrikeWithGuessesCount
+  { blockTimeStrikeWithGuessesCountStrike = defaultBlockTimeStrike
+  , blockTimeStrikeWithGuessesCountGuessesCount = 0
+  }
+
