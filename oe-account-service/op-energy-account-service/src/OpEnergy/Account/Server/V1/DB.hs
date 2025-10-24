@@ -25,32 +25,29 @@ import qualified Data.Text.Encoding as TE
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.IO.Unlift(MonadUnliftIO)
 import           Control.Monad.Logger    (MonadLoggerIO, NoLoggingT )
-import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Reader (ReaderT)
-import           Control.Monad (void, forM_)
+import           Control.Monad ( forM_)
 import           Control.Monad.Trans.Resource(ResourceT)
 import qualified Data.List as List
 
 import           Database.Persist.Postgresql
-import qualified Data.Conduit as C
-import           Data.Conduit ((.|), runConduit )
-import qualified Data.Conduit.List as C
-import           Database.Persist.Pagination
 
 import           Data.OpEnergy.API.V1.Positive(fromPositive)
 import           Data.OpEnergy.API.V1.Natural(verifyNatural, fromNatural)
 
 import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.Account.Server.V1.DB.Migrations
-import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
-import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
 import           OpEnergy.Account.Server.V1.Person
 import           OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.SplitBlockTimeStrikeObservedFromBlockTimeStrike
                    ( transformBlockTimeStrikeGuessGuessFromTextToBool
                    , splitBlockTimeStrikeObservedFromBlockTimeStrike
                    , createBlockTimeStrikeObservedTable
                    )
-
+import qualified OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.BlockTimeStrikeToBlockSpanTimeStrike
+                 as BlockTimeStrikeToBlockSpanTimeStrike
+import qualified OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeCalculateGuessesCount
+                 as CalculateBlockTimeStrikeCalculateGuessesCount
+import qualified OpEnergy.BlockTimeStrike.Server.V2.DBModel as DB
 
 
 -- | connect to DB. Returns connection pool
@@ -68,8 +65,7 @@ getConnection config = do
   liftIO $ flip runSqlPersistMPool pool $ do
     -- print migrations to stdout just for information to get of schema difference
     printMigration migrateAccount
-    printMigration migrateBlockTimeStrike
-    printMigration migrateBlockTimeStrikeGuess
+    printMigration DB.migrateModels
     printMigration migrateBlockTimeStrikeDB
 
     -- at this point we start to run our custom migrations, that can't be handled by persisten itself
@@ -79,14 +75,12 @@ getConnection config = do
     -- print migrations once again to see the difference after custom migrations had been
     -- completed to stdout just for information to get of schema difference
     printMigration migrateAccount
-    printMigration migrateBlockTimeStrike
-    printMigration migrateBlockTimeStrikeGuess
+    printMigration DB.migrateModels
     printMigration migrateBlockTimeStrikeDB
 
     -- actually run target migrations by persistent
     runMigration migrateAccount -- perform necessary migrations. currently only BlockHeader table's migrations
-    runMigration migrateBlockTimeStrike
-    runMigration migrateBlockTimeStrikeGuess
+    runMigration DB.migrateModels
     runMigration migrateBlockTimeStrikeDB
 
   return pool
@@ -196,41 +190,14 @@ blockTimeStrikeDBMigrations =
     -- the rest is expected to be a migrations, that should handle incompatible migrations over some DB schema versions that are already running
 
     -- initial calculations of the block strike guesses count
-  , calculateBlockTimeStrikeCalculateGuessesCount
+  , CalculateBlockTimeStrikeCalculateGuessesCount.migration
     -- create BlockTimeStrikeObserved from BlockTimeStrike
   , createBlockTimeStrikeObservedTable
   , splitBlockTimeStrikeObservedFromBlockTimeStrike
     -- block_time_strike_guess.guess field need to be migrated from text into int
   , transformBlockTimeStrikeGuessGuessFromTextToBool
+  , BlockTimeStrikeToBlockSpanTimeStrike.migration
   ]
-  where
-    -- | this migration perform calculation of guesses count for existing strike in order to
-    -- fill appropriate CalculatedBlockTimeStrikeGuessesCount table
-    calculateBlockTimeStrikeCalculateGuessesCount config = do
-      runConduit
-        $ streamEntities -- search for strikes
-          []
-          BlockTimeStrikeId
-          (PageSize ((fromPositive recordsPerReply) + 1))
-          Descend
-          (Range Nothing Nothing)
-        .| ( C.awaitForever $ \(Entity strikeId _)-> do
-             guessesCount <- lift $ verifyNatural <$> count [ BlockTimeStrikeGuessStrike ==. strikeId ] -- count guesses
-             mguessesRecord <- lift $ selectFirst [ CalculatedBlockTimeStrikeGuessesCountStrike ==. strikeId ][]
-             case mguessesRecord of
-               Nothing -> do -- insert new row for appropriate strike
-                 void $ lift $ insert $ CalculatedBlockTimeStrikeGuessesCount
-                   { calculatedBlockTimeStrikeGuessesCountGuessesCount = guessesCount
-                   , calculatedBlockTimeStrikeGuessesCountStrike = strikeId
-                   }
-               Just (Entity guessesRecordId _)-> do -- update existing strike
-                 lift $ update guessesRecordId
-                   [ CalculatedBlockTimeStrikeGuessesCountGuessesCount =. guessesCount
-                   ]
-           )
-        .| C.sinkNull
-      where
-        recordsPerReply = configRecordsPerReply config
 
 -- | custom migration procedure
 -- for now, it is expected, that each migration have no clue about db version and thus none
@@ -258,7 +225,9 @@ migrateBlockTimeStrikeDBSchema config = do
       Nothing -> do -- fallback to default version of 0
         (mBlockTimeStrikeTableExistButVersionUnknown::[Single Bool]) <- rawSql
           "SELECT EXISTS (SELECT FROM information_schema.tables where table_name = ? and table_schema='public');"
-          [ PersistText $! unEntityNameDB (tableDBName (undefined :: BlockTimeStrike))]
+          [ PersistText $! unEntityNameDB
+            (tableDBName (undefined :: DB.BlockSpanTimeStrike))
+          ]
         let
             currentDBVersion = case mBlockTimeStrikeTableExistButVersionUnknown of
               ((Single True):_)  -> needToApplyCustomMigrations
