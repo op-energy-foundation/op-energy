@@ -26,6 +26,7 @@ import           Data.Time.Clock.POSIX(POSIXTime)
 import qualified Data.List as List
 import           Data.Word(Word64)
 import           GHC.Generics
+import           Data.Maybe(fromMaybe)
 
 import           Database.Persist
 import           Database.Persist.Sql
@@ -58,9 +59,9 @@ Person
   deriving Eq Show Generic
 |]
 
-instance API.BuildFilter Person API.BlockTimeStrikeGuessResultPublicFilter where
-  sortOrder (filter, _) = maybe Descend id (API.blockTimeStrikeGuessResultPublicFilterSort filter)
-  buildFilter ( API.BlockTimeStrikeGuessResultPublicFilter
+instance API.BuildFilter Person API.BlockTimeStrikeGuessResultFilter where
+  sortOrder (filter, _) = fromMaybe Descend (API.blockTimeStrikeGuessResultFilterSort filter)
+  buildFilter ( API.BlockTimeStrikeGuessResultFilter
                 mPersonEQ
                 mPersonNEQ
                 -- guess
