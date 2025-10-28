@@ -58,7 +58,7 @@ import qualified OpEnergy.BlockTimeStrike.Server.V1.Context as Context
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeFilter as BlockTimeStrikeFilter
 import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
 import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
-import           OpEnergy.BlockTimeStrike.Server.V1.SlowFast
+import qualified OpEnergy.BlockTimeStrike.Server.V1.SlowFast as SlowFast
 import           OpEnergy.Account.Server.V1.Config (Config(..))
 import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
 import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging, profile, withDBTransaction )
@@ -370,7 +370,7 @@ getBlockTimeStrikesPage mpage mfilterAPI = profile "getBlockTimeStrikesPage" $ d
       API.BlockTimeStrikeWithGuessesCountPublic
         { blockTimeStrikeWithGuessesCountPublicStrike = API.BlockTimeStrikePublic
           { blockTimeStrikePublicObservedResult = fmap
-            (\(Entity _ v)-> apiModelSlowFast $ blockTimeStrikeObservedIsFast v)
+            (\(Entity _ v)-> SlowFast.apiModel $ blockTimeStrikeObservedIsFast v)
             mObserved
           , blockTimeStrikePublicObservedBlockMediantime = fmap
             (\(Entity _ v)-> blockTimeStrikeObservedJudgementBlockMediantime v)
@@ -470,7 +470,7 @@ getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $
       API.BlockTimeStrikeWithGuessesCountPublic
         { blockTimeStrikeWithGuessesCountPublicStrike = API.BlockTimeStrikePublic
           { blockTimeStrikePublicObservedResult = fmap
-            (\(Entity _ v)-> apiModelSlowFast $ blockTimeStrikeObservedIsFast v)
+            (\(Entity _ v)-> SlowFast.apiModel $ blockTimeStrikeObservedIsFast v)
             mObserved
           , blockTimeStrikePublicObservedBlockMediantime = fmap
             (\(Entity _ v)-> blockTimeStrikeObservedJudgementBlockMediantime v)

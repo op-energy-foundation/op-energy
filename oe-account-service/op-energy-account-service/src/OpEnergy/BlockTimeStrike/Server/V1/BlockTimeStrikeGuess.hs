@@ -40,7 +40,8 @@ import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess as API
 import qualified Data.OpEnergy.Account.API.V1.FilterRequest as API
 
 import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
-import           OpEnergy.BlockTimeStrike.Server.V1.SlowFast
+import           OpEnergy.BlockTimeStrike.Server.V1.SlowFast (SlowFast)
+import qualified OpEnergy.BlockTimeStrike.Server.V1.SlowFast as SlowFast
 import           OpEnergy.Account.Server.V1.Person
 
 share [mkPersist sqlSettings, mkMigrate "migrateBlockTimeStrikeGuess"] [persistLowerCase|
@@ -93,8 +94,14 @@ instance API.BuildFilter BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultPubl
                 _ -- lines per page
               , _
               ) = List.concat
-    [ maybe [] (\v-> [BlockTimeStrikeGuessIsFast ==. modelApiSlowFast v]) mGuessEQ
-    , maybe [] (\v-> [BlockTimeStrikeGuessIsFast !=. modelApiSlowFast v]) mGuessNEQ
+    [ maybe
+      []
+      (\v-> [ BlockTimeStrikeGuessIsFast ==. SlowFast.modelApi v])
+      mGuessEQ
+    , maybe
+      []
+      (\v-> [BlockTimeStrikeGuessIsFast !=. SlowFast.modelApi v])
+      mGuessNEQ
     ]
 
 coerceFilterRequestBlockTimeStrikeGuess
