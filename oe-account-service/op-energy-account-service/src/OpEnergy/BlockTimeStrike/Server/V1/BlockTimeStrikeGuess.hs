@@ -67,9 +67,9 @@ CalculatedBlockTimeStrikeGuessesCount
   deriving Eq Show Generic
 |]
 
-instance API.BuildFilter BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultPublicFilter where
-  sortOrder (filter, _) = fromMaybe Descend (API.blockTimeStrikeGuessResultPublicFilterSort filter)
-  buildFilter ( API.BlockTimeStrikeGuessResultPublicFilter
+instance API.BuildFilter BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultFilter where
+  sortOrder (filter, _) = fromMaybe Descend (API.blockTimeStrikeGuessResultFilterSort filter)
+  buildFilter ( API.BlockTimeStrikeGuessResultFilter
                 _
                 _
                 -- guess
@@ -106,7 +106,7 @@ instance API.BuildFilter BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultPubl
 
 coerceFilterRequestBlockTimeStrikeGuess
   :: API.BuildFilter BlockTimeStrikeGuess a
-  => API.FilterRequest API.BlockTimeStrikeGuessPublic a
+  => API.FilterRequest API.BlockTimeStrikeGuess a
   -> API.FilterRequest BlockTimeStrikeGuess a
 coerceFilterRequestBlockTimeStrikeGuess = API.FilterRequest
   . (\(f, _)-> (f, Proxy))

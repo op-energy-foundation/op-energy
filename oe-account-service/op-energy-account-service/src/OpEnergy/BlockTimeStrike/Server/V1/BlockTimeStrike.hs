@@ -38,7 +38,6 @@ import           Data.OpEnergy.API.V1.Block
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
 import           Data.OpEnergy.Account.API.V1.FilterRequest
 import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrike as API
-import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic as API
 import           OpEnergy.BlockTimeStrike.Server.V1.SlowFast(SlowFast)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.SlowFast as SlowFast
 
@@ -72,9 +71,9 @@ BlockTimeStrikeObserved
 
 |]
 
-instance BuildFilter BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter where
-  sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultPublicFilterSort filter)
-  buildFilter ( BlockTimeStrikeGuessResultPublicFilter
+instance BuildFilter BlockTimeStrike BlockTimeStrikeGuessResultFilter where
+  sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultFilterSort filter)
+  buildFilter ( BlockTimeStrikeGuessResultFilter
                 -- person
                 _
                 _
@@ -112,7 +111,7 @@ instance BuildFilter BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter wher
     ]
 coerceFilterRequestBlockTimeStrike
   :: BuildFilter BlockTimeStrike a
-  => FilterRequest API.BlockTimeStrikePublic a
+  => FilterRequest API.BlockTimeStrike a
   -> FilterRequest BlockTimeStrike a
 coerceFilterRequestBlockTimeStrike = FilterRequest
   . (\(f, _)-> (f, Proxy))
@@ -151,9 +150,9 @@ instance BuildFilter BlockTimeStrikeObserved API.BlockTimeStrikeFilter where
                      ]) mobservedResultNEQ
     ]
 
-instance BuildFilter BlockTimeStrikeObserved BlockTimeStrikeGuessResultPublicFilter where
-  sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultPublicFilterSort filter)
-  buildFilter ( BlockTimeStrikeGuessResultPublicFilter
+instance BuildFilter BlockTimeStrikeObserved BlockTimeStrikeGuessResultFilter where
+  sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultFilterSort filter)
+  buildFilter ( BlockTimeStrikeGuessResultFilter
                 -- person
                 _
                 _
@@ -224,28 +223,19 @@ instance BuildFilter BlockTimeStrike API.BlockTimeStrikeFilter where
 
 apiModelBlockTimeStrike
   :: BlockTimeStrike
+  -> Maybe BlockTimeStrikeObserved
   -> API.BlockTimeStrike
-apiModelBlockTimeStrike v = API.BlockTimeStrike
+apiModelBlockTimeStrike v mObserved = API.BlockTimeStrike
   { API.blockTimeStrikeBlock = blockTimeStrikeBlock v
   , API.blockTimeStrikeStrikeMediantime = blockTimeStrikeStrikeMediantime v
   , API.blockTimeStrikeCreationTime = blockTimeStrikeCreationTime v
-  }
-
-apiModelBlockTimeStrikePublic
-  :: BlockTimeStrike
-  -> Maybe BlockTimeStrikeObserved
-  -> API.BlockTimeStrikePublic
-apiModelBlockTimeStrikePublic v mObserved = API.BlockTimeStrikePublic
-  { API.blockTimeStrikePublicBlock = blockTimeStrikeBlock v
-  , API.blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime v
-  , API.blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime v
-  , API.blockTimeStrikePublicObservedResult =
+  , API.blockTimeStrikeObservedResult =
     fmap ( SlowFast.apiModel . blockTimeStrikeObservedIsFast) mObserved
-  , API.blockTimeStrikePublicObservedBlockMediantime =
+  , API.blockTimeStrikeObservedBlockMediantime =
     fmap blockTimeStrikeObservedJudgementBlockMediantime mObserved
-  , API.blockTimeStrikePublicObservedBlockHash =
+  , API.blockTimeStrikeObservedBlockHash =
     fmap blockTimeStrikeObservedJudgementBlockHash mObserved
-  , API.blockTimeStrikePublicObservedBlockHeight =
+  , API.blockTimeStrikeObservedBlockHeight =
     fmap blockTimeStrikeObservedJudgementBlockHeight mObserved
   }
 

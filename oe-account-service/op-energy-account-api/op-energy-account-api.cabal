@@ -47,7 +47,6 @@ library
                    , Data.OpEnergy.Account.API.V1
                    , Data.OpEnergy.Account.API.V1.Account
                    , Data.OpEnergy.Account.API.V1.BlockTimeStrike
-                   , Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic
                    , Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
                    , Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
                    , Data.OpEnergy.Account.API.V1.Hash
