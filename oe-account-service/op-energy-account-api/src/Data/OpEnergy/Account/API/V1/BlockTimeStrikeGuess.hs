@@ -8,7 +8,11 @@
 {-# LANGUAGE GADTs                      #-}
 {-# LANGUAGE UndecidableInstances       #-}
 {-# LANGUAGE DerivingStrategies         #-}
-module Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess where
+module Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
+  ( BlockTimeStrikeGuessPublic(..)
+  , BlockTimeStrikeGuessResultPublic(..)
+  , BlockTimeStrikeGuessResultPublicFilter(..)
+  ) where
 
 import           Data.Swagger
 import           Control.Lens
@@ -112,7 +116,7 @@ instance Default BlockTimeStrikeGuessResultPublic where
 defaultBlockTimeStrikeGuessResultPublic :: BlockTimeStrikeGuessResultPublic
 defaultBlockTimeStrikeGuessResultPublic = BlockTimeStrikeGuessResultPublic
   { person = defaultUUID
-  , strike = defaultBlockTimeStrikePublic
+  , strike = def
   , creationTime = defaultPOSIXTime
   , guess = def
   }
