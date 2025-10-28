@@ -99,7 +99,7 @@ instance API.BuildFilter BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultPubl
 
 coerceFilterRequestBlockTimeStrikeGuess
   :: API.BuildFilter BlockTimeStrikeGuess a
-  => API.FilterRequest API.BlockTimeStrikeGuess a
+  => API.FilterRequest API.BlockTimeStrikeGuessPublic a
   -> API.FilterRequest BlockTimeStrikeGuess a
 coerceFilterRequestBlockTimeStrikeGuess = API.FilterRequest
   . (\(f, _)-> (f, Proxy))

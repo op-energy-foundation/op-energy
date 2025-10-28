@@ -38,6 +38,7 @@ import           Data.OpEnergy.API.V1.Block
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
 import           Data.OpEnergy.Account.API.V1.FilterRequest
 import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrike as API
+import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic as API
 import           OpEnergy.BlockTimeStrike.Server.V1.SlowFast(SlowFast)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.SlowFast as SlowFast
 
@@ -111,7 +112,7 @@ instance BuildFilter BlockTimeStrike BlockTimeStrikeGuessResultPublicFilter wher
     ]
 coerceFilterRequestBlockTimeStrike
   :: BuildFilter BlockTimeStrike a
-  => FilterRequest API.BlockTimeStrike a
+  => FilterRequest API.BlockTimeStrikePublic a
   -> FilterRequest BlockTimeStrike a
 coerceFilterRequestBlockTimeStrike = FilterRequest
   . (\(f, _)-> (f, Proxy))

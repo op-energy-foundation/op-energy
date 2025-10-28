@@ -45,9 +45,9 @@ import           Data.OpEnergy.API.V1.Positive( naturalFromPositive
                                               )
 import           Data.OpEnergy.API.V1.Block
 import           Data.OpEnergy.API.V1.Natural
-import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrike as API
 import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic as API
 import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess as API
+import qualified Data.OpEnergy.Account.API.V1.SlowFast as API
 import qualified Data.OpEnergy.Account.API.V1.PagingResult as API
 import qualified Data.OpEnergy.Account.API.V1.FilterRequest as API
 import           Data.OpEnergy.Account.API.V1.UUID
@@ -168,7 +168,7 @@ createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess = prof
 -- returns list BlockTimeStrikePast records
 getBlockTimeStrikeGuessResultsPage
   :: Maybe (Natural Int)
-  -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultPublicFilter)
+  -> Maybe (API.FilterRequest API.BlockTimeStrikeGuessPublic API.BlockTimeStrikeGuessResultPublicFilter)
   -> AppM (API.PagingResult API.BlockTimeStrikeGuessResultPublic)
 getBlockTimeStrikeGuessResultsPage mpage mfilterAPI = profile "getBlockTimeStrikeGuessResultsPage" $ do
   mconfirmedBlockV <- asks ( BlockTime.latestConfirmedBlock . blockTimeState)
@@ -247,7 +247,7 @@ getBlockTimeStrikeGuessResultsPage mpage mfilterAPI = profile "getBlockTimeStrik
 -- | returns list BlockTimeStrikeGuess records
 getBlockTimeStrikesGuessesPage
   :: Maybe (Natural Int)
-  -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultPublicFilter)
+  -> Maybe (API.FilterRequest API.BlockTimeStrikeGuessPublic API.BlockTimeStrikeGuessResultPublicFilter)
   -> AppM (API.PagingResult API.BlockTimeStrikeGuessResultPublic)
 getBlockTimeStrikesGuessesPage mpage mfilterAPI = profile "getBlockTimeStrikesGuessesPage" $ do
   latestUnconfirmedBlockHeightV <- asks (BlockTime.latestUnconfirmedBlockHeight . blockTimeState)
@@ -405,7 +405,7 @@ getBlockTimeStrikeGuessesPage
   :: BlockHeight
   -> Natural Int
   -> Maybe (Natural Int)
-  -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultPublicFilter)
+  -> Maybe (API.FilterRequest API.BlockTimeStrikeGuessPublic API.BlockTimeStrikeGuessResultPublicFilter)
   -> AppM (API.PagingResult API.BlockTimeStrikeGuessResultPublic)
 getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilterAPI = profile "getBlockTimeStrikeGuessesPage" $ do
   recordsPerReply <- asks (configRecordsPerReply . config)

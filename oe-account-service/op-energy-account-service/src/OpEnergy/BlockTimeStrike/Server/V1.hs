@@ -40,6 +40,7 @@ import           Data.OpEnergy.Account.API.V1
 import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrike as API
 import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic as API
 import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess as API
+import qualified Data.OpEnergy.Account.API.V1.SlowFast as API
 import qualified Data.OpEnergy.Account.API.V1.FilterRequest as API
 import qualified Data.OpEnergy.Account.API.V1.PagingResult as API
 import qualified Data.OpEnergy.Account.API.V1.UUID as API
@@ -72,19 +73,19 @@ blockTimeServer = websocketHandler
       )
   :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.getBlockTimeStrikesPage
         ) :: Maybe (Natural Int)
-          -> Maybe (API.FilterRequest API.BlockTimeStrike API.BlockTimeStrikeFilter)
+          -> Maybe (API.FilterRequest API.BlockTimeStrikePublic API.BlockTimeStrikeFilter)
           -> AppM (API.PagingResult API.BlockTimeStrikeWithGuessesCountPublic)
        )
   :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikesGuessesPage
         ) :: Maybe (Natural Int)
-          -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultPublicFilter)
+          -> Maybe (API.FilterRequest API.BlockTimeStrikeGuessPublic API.BlockTimeStrikeGuessResultPublicFilter)
           -> AppM (API.PagingResult API.BlockTimeStrikeGuessResultPublic)
        )
   :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessesPage
         ) :: BlockHeight
           -> Natural Int
           -> Maybe (Natural Int)
-          -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultPublicFilter)
+          -> Maybe (API.FilterRequest API.BlockTimeStrikeGuessPublic API.BlockTimeStrikeGuessResultPublicFilter)
           -> AppM (API.PagingResult API.BlockTimeStrikeGuessResultPublic)
        )
 

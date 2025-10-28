@@ -141,7 +141,7 @@ data IsSortByGuessesCountNeeded
 -- | returns list of BlockTimeStrikePublic records
 getBlockTimeStrikesPage
   :: Maybe (Natural Int)
-  -> Maybe (API.FilterRequest API.BlockTimeStrike API.BlockTimeStrikeFilter)
+  -> Maybe (API.FilterRequest API.BlockTimeStrikePublic API.BlockTimeStrikeFilter)
   -> AppM (API.PagingResult API.BlockTimeStrikeWithGuessesCountPublic)
 getBlockTimeStrikesPage mpage mfilterAPI = profile "getBlockTimeStrikesPage" $ do
   latestUnconfirmedBlockHeightV <- asks (BlockTime.latestUnconfirmedBlockHeight . blockTimeState)
