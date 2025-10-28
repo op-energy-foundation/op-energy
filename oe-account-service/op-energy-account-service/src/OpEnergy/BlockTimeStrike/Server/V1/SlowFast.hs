@@ -13,7 +13,7 @@ import           GHC.Generics
 import           Database.Persist
 import           Database.Persist.Sql
 
-import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrike as API
+import qualified Data.OpEnergy.Account.API.V1.SlowFast as API
 
 
 data SlowFast
