@@ -65,7 +65,7 @@ import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeFilter as BlockTimeStrikeFilter
 import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
 import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
-import           OpEnergy.BlockTimeStrike.Server.V1.SlowFast
+import qualified OpEnergy.BlockTimeStrike.Server.V1.SlowFast as SlowFast
 
 mgetBlockTimeStrikeFuture
   :: (MonadIO m, MonadMonitor m)
@@ -128,7 +128,7 @@ createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess = prof
                 Nothing -> throwJSON err500 ("something went wrong"::Text)
                 Just v -> return $ API.BlockTimeStrikeGuessPublic
                   { API.person = apiModelUUIDPerson $ personUuid person
-                  , API.strike = apiModelBlockTimeStrike strike
+                  , API.strike = apiModelBlockTimeStrikePublic strike Nothing
                   , API.creationTime = blockTimeStrikeGuessCreationTime v
                   , API.guess = guess
                   }
@@ -144,7 +144,7 @@ createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess = prof
       let now = utcTimeToPOSIXSeconds nowUTC
       withDBTransaction "" $ do
         let value = BlockTimeStrikeGuess
-              { blockTimeStrikeGuessIsFast = modelApiSlowFast guess
+              { blockTimeStrikeGuessIsFast = SlowFast.modelApi guess
               , blockTimeStrikeGuessCreationTime = now
               , blockTimeStrikeGuessPerson = personKey
               , blockTimeStrikeGuessStrike = strikeKey
@@ -607,7 +607,7 @@ renderBlockTimeStrikeGuessResultPublicByPerson person
     , API.strike = API.BlockTimeStrikePublic
       { API.blockTimeStrikePublicObservedResult = fmap
           (\(Entity _ result)->
-            apiModelSlowFast $ blockTimeStrikeObservedIsFast result
+            SlowFast.apiModel $ blockTimeStrikeObservedIsFast result
           )
           mObserved
       , API.blockTimeStrikePublicObservedBlockMediantime = fmap
@@ -632,7 +632,7 @@ renderBlockTimeStrikeGuessResultPublicByPerson person
         blockTimeStrikeCreationTime strike
       }
     , API.creationTime = blockTimeStrikeGuessCreationTime guess
-    , API.guess = apiModelSlowFast $ blockTimeStrikeGuessIsFast guess
+    , API.guess = SlowFast.apiModel $ blockTimeStrikeGuessIsFast guess
     }
 
 fetchBlockTimeStrikeGuessByStrike
@@ -708,7 +708,7 @@ renderBlockTimeStrikeGuessResultPublic
     { person = apiModelUUIDPerson $ personUuid person
     , strike = API.BlockTimeStrikePublic
       { blockTimeStrikePublicObservedResult = fmap
-        (\(Entity _ result) -> apiModelSlowFast $ blockTimeStrikeObservedIsFast result)
+        (\(Entity _ result) -> SlowFast.apiModel $ blockTimeStrikeObservedIsFast result)
         mObserved
       , blockTimeStrikePublicObservedBlockMediantime = fmap
         (\(Entity _ result) ->
@@ -732,7 +732,7 @@ renderBlockTimeStrikeGuessResultPublic
         blockTimeStrikeCreationTime strike
       }
     , creationTime = blockTimeStrikeGuessCreationTime guess
-    , guess = apiModelSlowFast $ blockTimeStrikeGuessIsFast guess
+    , guess = SlowFast.apiModel $ blockTimeStrikeGuessIsFast guess
     }
 
 fetchBlockTimeStrikeGuessByStrikeAndPerson
