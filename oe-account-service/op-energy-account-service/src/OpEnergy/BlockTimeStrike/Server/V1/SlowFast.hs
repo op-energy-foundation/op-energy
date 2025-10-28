@@ -3,8 +3,8 @@
 module OpEnergy.BlockTimeStrike.Server.V1.SlowFast
   ( SlowFast(..)
   , verifySlowFastEither
-  , apiModelSlowFast
-  , modelApiSlowFast
+  , apiModel
+  , modelApi
   ) where
 
 import           Data.Text(Text)
@@ -35,16 +35,17 @@ verifySlowFastEither "slow" = Right Slow
 verifySlowFastEither "fast" = Right Fast
 verifySlowFastEither v = Left ("verifySlowFast: wrong value: " <> v)
 
-apiModelSlowFast
+apiModel
   :: SlowFast
   -> API.SlowFast
-apiModelSlowFast v = case v of
+apiModel v = case v of
   Slow -> API.Slow
   Fast -> API.Fast
 
-modelApiSlowFast
+modelApi
   :: API.SlowFast
   -> SlowFast
-modelApiSlowFast v = case v of
+modelApi v = case v of
   API.Slow -> Slow
   API.Fast -> Fast
+
