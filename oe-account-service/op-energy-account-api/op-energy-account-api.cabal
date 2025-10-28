@@ -51,6 +51,7 @@ library
                    , Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
                    , Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
                    , Data.OpEnergy.Account.API.V1.Hash
+                   , Data.OpEnergy.Account.API.V1.SlowFast
                    , Data.OpEnergy.Account.API.V1.UUID
                    , Data.OpEnergy.Account.API.V1.PagingResult
                    , Data.OpEnergy.Account.API.V1.FilterRequest

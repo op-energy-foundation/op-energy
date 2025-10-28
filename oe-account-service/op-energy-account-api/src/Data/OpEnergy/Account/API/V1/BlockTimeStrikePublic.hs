@@ -13,10 +13,9 @@ import           Data.Word
 import           Data.Time.Clock.POSIX(POSIXTime)
 import qualified Data.Text as Text
 
-import           Data.OpEnergy.API.V1.Block(BlockHash)
 import qualified Data.OpEnergy.API.V1.Hash as BlockHash (defaultHash)
-import           Data.OpEnergy.API.V1.Block(BlockHeight, defaultBlockHeight)
-import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
+import           Data.OpEnergy.API.V1.Block(BlockHash, BlockHeight, defaultBlockHeight)
+import           Data.OpEnergy.Account.API.V1.SlowFast
 import           Data.OpEnergy.Account.API.V1.Common
 import           Data.Default
 import           Data.Proxy(Proxy(..))
@@ -104,7 +103,7 @@ defaultBlockTimeStrikePublic =  BlockTimeStrikePublic
   { blockTimeStrikePublicBlock = defaultBlockHeight
   , blockTimeStrikePublicStrikeMediantime = 2
   , blockTimeStrikePublicCreationTime = 1
-  , blockTimeStrikePublicObservedResult = Just defaultSlowFast
+  , blockTimeStrikePublicObservedResult = Just def
   , blockTimeStrikePublicObservedBlockMediantime = Just 3
   , blockTimeStrikePublicObservedBlockHash = Just BlockHash.defaultHash
   , blockTimeStrikePublicObservedBlockHeight = Just defaultBlockHeight

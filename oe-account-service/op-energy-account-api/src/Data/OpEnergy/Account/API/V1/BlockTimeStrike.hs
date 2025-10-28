@@ -34,6 +34,7 @@ import qualified Data.OpEnergy.API.V1.Hash as BlockHash (defaultHash)
 import           Data.OpEnergy.Account.API.V1.FilterRequest()
 import           Data.OpEnergy.Account.API.V1.Common
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
+import           Data.OpEnergy.Account.API.V1.SlowFast
 
 data BlockTimeStrike = BlockTimeStrike
   { blockTimeStrikeBlock            :: BlockHeight
@@ -171,45 +172,6 @@ instance FromJSON BlockTimeStrikeObservedPublic where
   parseJSON = commonParseJSON
 instance Default BlockTimeStrikeObservedPublic where
   def = defaultBlockTimeStrikeObservedPublic
-
-data SlowFast
-  = Slow
-  | Fast
-  deriving (Eq, Enum, Show, Bounded, Ord, Generic)
-
-instance ToJSON SlowFast where
-  toJSON Slow = toJSON ("slow" :: Text)
-  toJSON Fast = toJSON ("fast" :: Text)
-instance FromJSON SlowFast where
-  parseJSON = withText "SlowFast" $! pure . verifySlowFast
-
-instance ToSchema SlowFast where
-  declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
-    & mapped.schema.description ?~
-      ( Text.unlines
-        [ ""
-        ]
-      )
-    & mapped.schema.example ?~ toJSON (map toJSON $ enumFrom Slow)
-instance ToParamSchema SlowFast where
-  toParamSchema _ = mempty
-    & type_ ?~ SwaggerString
-    & enum_ ?~ (map toJSON $ enumFrom Slow)
-instance ToHttpApiData SlowFast where
-  toUrlPiece Slow = "slow"
-  toUrlPiece Fast = "fast"
-instance FromHttpApiData SlowFast where
-  parseUrlPiece "slow" = Prelude.Right Slow
-  parseUrlPiece "fast" = Prelude.Right Fast
-  parseUrlPiece _ = Left "wrong SlowFast value"
-
-defaultSlowFast :: SlowFast
-defaultSlowFast = Slow
-
-verifySlowFast :: Text-> SlowFast
-verifySlowFast "slow" = Slow
-verifySlowFast "fast" = Fast
-verifySlowFast v = error ("verifySlowFast: wrong value: " ++ Text.unpack v)
 
 instance ToParamSchema BlockTimeStrikeFilter where
   toParamSchema v = mempty

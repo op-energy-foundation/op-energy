@@ -34,6 +34,7 @@ import           Data.OpEnergy.API.V1.Block(BlockHeight)
 import           Data.OpEnergy.API.V1.Positive(Positive)
 import           Data.OpEnergy.API.V1.Natural(Natural)
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
+import           Data.OpEnergy.Account.API.V1.SlowFast
 
 data BlockTimeStrikeGuess = BlockTimeStrikeGuess
   -- data
@@ -85,7 +86,7 @@ defaultBlockTimeStrikeGuessPublic = BlockTimeStrikeGuessPublic
   { person = defaultUUID
   , strike = defaultBlockTimeStrike
   , creationTime = defaultPOSIXTime
-  , guess = defaultSlowFast
+  , guess = def
   }
 
 data BlockTimeStrikeGuessResultPublic = BlockTimeStrikeGuessResultPublic
@@ -113,7 +114,7 @@ defaultBlockTimeStrikeGuessResultPublic = BlockTimeStrikeGuessResultPublic
   { person = defaultUUID
   , strike = defaultBlockTimeStrikePublic
   , creationTime = defaultPOSIXTime
-  , guess = defaultSlowFast
+  , guess = def
   }
 
 data BlockTimeStrikeGuessResultPublicFilter = BlockTimeStrikeGuessResultPublicFilter
