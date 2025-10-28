@@ -64,30 +64,76 @@ type AccountV1API
 
 type BlockTimeV1API
   = "ws"
-    :> Description "websockets handler. The goal is to be able to recieve notifications about newly created blocktime strikes and/or guesses"
+    :> Description "websockets handler. The goal is to be able to recieve \
+                   \notifications about newly created blocktime strikes and/or \
+                   \guesses"
     :> WebSocket
 
   :<|> "strike"
-    :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "Authorization" AccountToken -- require authentication
+    :> Header'
+       '[ Required
+        , Strict
+        , Description "Account token gotten from /login or /register"
+        ]
+        "Authorization"
+        AccountToken -- require authentication
     :> Capture "BlockHeight" BlockHeight
     :> Capture "StrikeMediantime" (Natural Int)
-    :> Description "Creates new time strike by given BlockHeight and strike mediantime. Requires authentication. Where: BlockHeight - height of the block in the future. It is expected, that it should be at least at 12 block in the future than current confirmed tip. StrikeMediantime is a POSIX time in the future."
+    :> Description "Creates new time strike by given BlockHeight and strike \
+                   \mediantime. Requires authentication. Where: \
+                   \BlockHeight - height of the block in the future. It is \
+                   \expected, that it should be at least at 12 block in the \
+                   \future than current confirmed tip. StrikeMediantime is a \
+                   \POSIX time in the future."
     :> Post '[JSON] ()
 
   :<|> "strike"
     :> "guess"
-    :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "Authorization" AccountToken -- require authentication
+    :> Header'
+       '[ Required
+        , Strict
+        , Description "Account token gotten from /login or /register"
+        ]
+       "Authorization"
+       AccountToken -- require authentication
     :> Capture "BlockHeight" BlockHeight
     :> Capture "StrikeMediantime" (Natural Int)
     :> Capture "guess" SlowFast
-    :> Description "creates a guess for the given future time strike. Requires authentication."
+    :> Description "creates a guess for the given future time strike. Requires \
+                   \authentication."
     :> Post '[JSON] BlockTimeStrikeGuessPublic
 
   :<|> "strikes"
     :> "page"
-    :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
-    :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter. Available filter options are listed in the format of current field. Meaning of fields' suffixes: 'GTE' - 'great-than-or-equal', 'LTE'- 'less-than-or-equal', 'EQ' - equal, 'NEQ' - 'not equal'. 'sort' field can have those values: 'descend', 'ascend', 'ascend_guesses_count' or 'descend_guesses_count'. '*_guesses_count' options changes sort orders by guesses count instead of block strike id. 'class' field can have those values: 'guessable', 'outcomeKnown', 'outcomeUnknown'" ] "filter" (FilterRequest BlockTimeStrikePublic BlockTimeStrikeFilter)
-    :> Description "returns list of strikes. By default, results are ordered by strike id in descending order. (ie, from newer to older)"
+    :> QueryParam'
+       '[ Optional
+        , Strict
+        , Description "defines page count to get"
+        ]
+       "page"
+       (Natural Int)
+    :> QueryParam'
+       '[ Optional
+        , Strict
+        , Description "possible filter as a string in JSON format. you can \
+                      \pass any combination of it's unique fields to build a \
+                      \filter. Available filter options are listed in the \
+                      \format of current field. Meaning of fields' suffixes: \
+                      \'GTE' - 'great-than-or-equal', \
+                      \'LTE'- 'less-than-or-equal', \
+                      \'EQ' - equal, 'NEQ' - 'not equal'. \
+                      \'sort' field can have those values: 'descend', \
+                      \'ascend', 'ascend_guesses_count' or \
+                      \'descend_guesses_count'. '*_guesses_count' options \
+                      \changes sort orders by guesses count instead of block \
+                      \strike id. 'class' field can have those values: \
+                      \'guessable', 'outcomeKnown', 'outcomeUnknown'"
+        ]
+       "filter"
+       (FilterRequest BlockTimeStrikePublic BlockTimeStrikeFilter)
+    :> Description "returns list of strikes. By default, results are ordered \
+                   \by strike id in descending order. \
+                   \(ie, from newer to older)"
     :> Get '[JSON] (PagingResult BlockTimeStrikeWithGuessesCountPublic)
 
   :<|> "strikes"
@@ -167,7 +213,13 @@ type BlockTimeV1API
 
   :<|> "strike"
     :> "guess"
-    :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "Authorization" AccountToken -- require authentication
+    :> Header'
+       '[ Required
+        , Strict
+        , Description "Account token gotten from /login or /register"
+        ]
+        "Authorization"
+        AccountToken -- require authentication
     :> Capture "BlockHeight" BlockHeight
     :> Capture "StrikeMediantime" (Natural Int)
     :> Description "returns user's guess for the given blocktime strike."
