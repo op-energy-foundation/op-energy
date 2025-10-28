@@ -4,8 +4,8 @@
 {-# LANGUAGE OverloadedLists            #-}
 {-# LANGUAGE DeriveGeneric              #-}
 module Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic
-  ( BlockTimeStrikePublic
-  , BlockTimeStrikeWithGuessesCountPublic
+  ( BlockTimeStrikePublic(..)
+  , BlockTimeStrikeWithGuessesCountPublic(..)
   ) where
 
 import           Data.Swagger
@@ -37,7 +37,7 @@ data BlockTimeStrikePublic = BlockTimeStrikePublic
   , blockTimeStrikePublicObservedBlockHash :: Maybe BlockHash
   , blockTimeStrikePublicObservedBlockHeight :: Maybe BlockHeight
   }
-  deriving (Show, Generic)
+  deriving (Eq, Show, Generic)
 instance FromJSON BlockTimeStrikePublic where
   parseJSON = commonParseJSON
 instance ToJSON BlockTimeStrikePublic where
