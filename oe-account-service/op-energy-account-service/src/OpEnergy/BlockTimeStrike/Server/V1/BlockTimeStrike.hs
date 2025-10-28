@@ -144,10 +144,10 @@ instance BuildFilter BlockTimeStrikeObserved API.BlockTimeStrikeFilter where
     [ maybe [] (\v-> [BlockTimeStrikeObservedJudgementBlockHash ==. v]) mobservedBlockHashEQ
     , maybe [] (\v-> [BlockTimeStrikeObservedJudgementBlockHash !=. v]) mobservedBlockHashNEQ
     , maybe [] (\v-> [ BlockTimeStrikeObservedIsFast
-                       ==. SlowFast.modelApiSlowFast v
+                       ==. SlowFast.modelApi v
                      ]) mobservedResultEQ
     , maybe [] (\v-> [ BlockTimeStrikeObservedIsFast
-                       !=. SlowFast.modelApiSlowFast v
+                       !=. SlowFast.modelApi v
                      ]) mobservedResultNEQ
     ]
 
@@ -181,10 +181,10 @@ instance BuildFilter BlockTimeStrikeObserved BlockTimeStrikeGuessResultPublicFil
               ) = List.concat
         -- strike observed result
     [ maybe [] (\v -> [ BlockTimeStrikeObservedIsFast
-                        ==. SlowFast.modelApiSlowFast v
+                        ==. SlowFast.modelApi v
                       ]) mObservedResultEQ
     , maybe [] (\v -> [ BlockTimeStrikeObservedIsFast
-                        !=. SlowFast.modelApiSlowFast v
+                        !=. SlowFast.modelApi v
                       ]) mObservedResultNEQ
     ]
 
@@ -229,6 +229,24 @@ apiModelBlockTimeStrike v = API.BlockTimeStrike
   { API.blockTimeStrikeBlock = blockTimeStrikeBlock v
   , API.blockTimeStrikeStrikeMediantime = blockTimeStrikeStrikeMediantime v
   , API.blockTimeStrikeCreationTime = blockTimeStrikeCreationTime v
+  }
+
+apiModelBlockTimeStrikePublic
+  :: BlockTimeStrike
+  -> Maybe BlockTimeStrikeObserved
+  -> API.BlockTimeStrikePublic
+apiModelBlockTimeStrikePublic v mObserved = API.BlockTimeStrikePublic
+  { API.blockTimeStrikePublicBlock = blockTimeStrikeBlock v
+  , API.blockTimeStrikePublicStrikeMediantime = blockTimeStrikeStrikeMediantime v
+  , API.blockTimeStrikePublicCreationTime = blockTimeStrikeCreationTime v
+  , API.blockTimeStrikePublicObservedResult =
+    fmap ( SlowFast.apiModel . blockTimeStrikeObservedIsFast) mObserved
+  , API.blockTimeStrikePublicObservedBlockMediantime =
+    fmap blockTimeStrikeObservedJudgementBlockMediantime mObserved
+  , API.blockTimeStrikePublicObservedBlockHash =
+    fmap blockTimeStrikeObservedJudgementBlockHash mObserved
+  , API.blockTimeStrikePublicObservedBlockHeight =
+    fmap blockTimeStrikeObservedJudgementBlockHeight mObserved
   }
 
 modelApiBlockTimeStrike
