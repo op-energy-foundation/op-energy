@@ -43,7 +43,6 @@ import           Data.OpEnergy.API.V1.Positive( naturalFromPositive
 import           Data.OpEnergy.API.V1.Block
 import           Data.OpEnergy.API.V1.Natural
 import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrike as API
-import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic as API
 import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess as GuessAPI
 import qualified Data.OpEnergy.Account.API.V1.PagingResult as API
 import qualified Data.OpEnergy.Account.API.V1.FilterRequest as API
@@ -93,7 +92,7 @@ createBlockSpanTimeStrikeFutureGuess
   -> Positive Int
   -> Natural Int
   -> API.SlowFast
-  -> AppM GuessAPI.BlockTimeStrikeGuessPublic
+  -> AppM GuessAPI.BlockTimeStrikeGuess
 createBlockSpanTimeStrikeFutureGuess
     token blockHeight spanSize strikeMediantime guess =
     let name = "createBlockSpanTimeStrikeFutureGuess"
@@ -120,7 +119,7 @@ createBlockSpanTimeStrikeFutureGuess
     $ mgetBlockSpanTimeStrikeFuture blockHeight spanSize strikeMediantime
   newGuess <- exceptTMaybeT "something went wrong"
     $ createBlockSpanTimeStrikeFutureGuess personKey strikeKey guess
-  return $ GuessAPI.BlockTimeStrikeGuessPublic
+  return $ GuessAPI.BlockTimeStrikeGuess
     { GuessAPI.person = apiModelUUIDPerson $ personUuid person
     , GuessAPI.strike =
       DB.apiBlockTimeStrikeModelBlockSpanTimeStrike strike
@@ -170,8 +169,8 @@ createBlockSpanTimeStrikeFutureGuess
 -- returns list BlockTimeStrikePast records
 getBlockSpanTimeStrikeGuessResultsPage
   :: Maybe (Natural Int)
-  -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultPublicFilter)
-  -> AppM (API.PagingResult API.BlockTimeStrikeGuessResultPublic)
+  -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultFilter)
+  -> AppM (API.PagingResult API.BlockTimeStrikeGuessResult)
 getBlockSpanTimeStrikeGuessResultsPage mpage mfilterAPI =
     let name = "getBlockSpanTimeStrikeGuessResultsPage"
     in profile name $ eitherLogThrowOrReturn $ runExceptPrefixT name $ do
@@ -184,7 +183,7 @@ getBlockSpanTimeStrikeGuessResultsPage mpage mfilterAPI =
       linesPerPage = maybe
         recordsPerReply
         ( fromMaybe recordsPerReply
-        . API.blockTimeStrikeGuessResultPublicFilterLinesPerPage
+        . API.blockTimeStrikeGuessResultFilterLinesPerPage
         . fst
         . API.unFilterRequest
         )
@@ -195,7 +194,7 @@ getBlockSpanTimeStrikeGuessResultsPage mpage mfilterAPI =
       .| ( C.drop (fromNatural page * fromPositive linesPerPage)
          >> C.awaitForever C.yield
          ) -- navigate to page
-      .| C.map renderBlockTimeStrikeGuessResultPublic
+      .| C.map renderBlockTimeStrikeGuessResult
       .| C.take (fromPositive linesPerPage + 1) -- we take +1 to understand if there is a next page available
   let
       newPage =
@@ -213,8 +212,8 @@ getBlockSpanTimeStrikeGuessResultsPage mpage mfilterAPI =
     sort = maybe Descend (API.sortOrder . API.unFilterRequest . id1 . API.mapFilter) mfilter
       where
         id1
-          :: API.FilterRequest DB.BlockSpanTimeStrike API.BlockTimeStrikeGuessResultPublicFilter
-          -> API.FilterRequest DB.BlockSpanTimeStrike API.BlockTimeStrikeGuessResultPublicFilter
+          :: API.FilterRequest DB.BlockSpanTimeStrike API.BlockTimeStrikeGuessResultFilter
+          -> API.FilterRequest DB.BlockSpanTimeStrike API.BlockTimeStrikeGuessResultFilter
         id1 = id -- helping typechecker
     filters recordsPerReply confirmedBlock =
       fetchConfirmedStrikes recordsPerReply confirmedBlock
@@ -250,8 +249,8 @@ getBlockSpanTimeStrikeGuessResultsPage mpage mfilterAPI =
 -- | returns list BlockTimeStrikeGuess records
 getBlockSpanTimeStrikesGuessesPage
   :: Maybe (Natural Int)
-  -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultPublicFilter)
-  -> AppM (API.PagingResult API.BlockTimeStrikeGuessResultPublic)
+  -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultFilter)
+  -> AppM (API.PagingResult API.BlockTimeStrikeGuessResult)
 getBlockSpanTimeStrikesGuessesPage mpage mfilterAPI =
     let name = "getBlockSpanTimeStrikesGuessesPage"
     in profile name $ eitherLogThrowOrReturn $ runExceptPrefixT name $ do
@@ -266,7 +265,7 @@ getBlockSpanTimeStrikesGuessesPage mpage mfilterAPI =
       linesPerPage = maybe
         recordsPerReply
         ( fromMaybe recordsPerReply
-        . API.blockTimeStrikeGuessResultPublicFilterLinesPerPage
+        . API.blockTimeStrikeGuessResultFilterLinesPerPage
         . fst
         . API.unFilterRequest
         )
@@ -284,7 +283,7 @@ getBlockSpanTimeStrikesGuessesPage mpage mfilterAPI =
         BlockTimeStrikeFilter.buildFilterByClass
           ( maybe
             Nothing
-            ( API.blockTimeStrikeGuessResultPublicFilterClass
+            ( API.blockTimeStrikeGuessResultFilterClass
             . fst
             . API.unFilterRequest
             )
@@ -311,8 +310,8 @@ getBlockSpanTimeStrikesGuessesPage mpage mfilterAPI =
     sort = maybe Descend (API.sortOrder . API.unFilterRequest . id1 . API.mapFilter) mfilter
       where
         id1
-          :: API.FilterRequest DB.BlockSpanTimeStrike API.BlockTimeStrikeGuessResultPublicFilter
-          -> API.FilterRequest DB.BlockSpanTimeStrike API.BlockTimeStrikeGuessResultPublicFilter
+          :: API.FilterRequest DB.BlockSpanTimeStrike API.BlockTimeStrikeGuessResultFilter
+          -> API.FilterRequest DB.BlockSpanTimeStrike API.BlockTimeStrikeGuessResultFilter
         id1 = id -- helping typechecker
 
     streamGuessStrikeObservedResultAndOwner
@@ -320,15 +319,15 @@ getBlockSpanTimeStrikesGuessesPage mpage mfilterAPI =
       -> Positive Int
       -> ConduitT
            (Entity DB.BlockSpanTimeStrikeGuess)
-           API.BlockTimeStrikeGuessResultPublic
+           API.BlockTimeStrikeGuessResult
            (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
            ()
     streamGuessStrikeObservedResultAndOwner finalFilter linesPerPage
       =  C.zipConcatMapMC fetchPerGuessBlockTimeStrikeByGuess
       .| C.mapM possiblyFetchObservedResultAndZipWithGuessAndStrike
       .| C.zipConcatMapMC fetchPerGuessOwnerAndZipObservedResultGuessAndStrike
-      .| C.map reorgTupleToFitRenderBlockTimeGuessResultPublic
-      .| C.map renderBlockTimeStrikeGuessResultPublic
+      .| C.map reorgTupleToFitRenderBlockTimeGuessResult
+      .| C.map renderBlockTimeStrikeGuessResult
       where
         -- unique
         fetchPerGuessBlockTimeStrikeByGuess
@@ -359,7 +358,7 @@ getBlockSpanTimeStrikesGuessesPage mpage mfilterAPI =
             (guess, strikeE@(Entity strikeId _)) = do
           case maybe
               Nothing
-              (API.blockTimeStrikeGuessResultPublicFilterClass
+              (API.blockTimeStrikeGuessResultFilterClass
               . fst
               . API.unFilterRequest
               )
@@ -402,7 +401,7 @@ getBlockSpanTimeStrikesGuessesPage mpage mfilterAPI =
             )
             sort
             PersonId
-        reorgTupleToFitRenderBlockTimeGuessResultPublic
+        reorgTupleToFitRenderBlockTimeGuessResult
           :: ( ( Entity DB.BlockSpanTimeStrikeGuess
                , Entity DB.BlockSpanTimeStrike
                , Maybe (Entity DB.BlockSpanTimeStrikeObserved)
@@ -414,7 +413,7 @@ getBlockSpanTimeStrikesGuessesPage mpage mfilterAPI =
              , Entity Person
              , Maybe (Entity DB.BlockSpanTimeStrikeObserved)
              )
-        reorgTupleToFitRenderBlockTimeGuessResultPublic
+        reorgTupleToFitRenderBlockTimeGuessResult
             ((guessE, strikeE, mObserved), personE) =
           (strikeE, guessE, personE, mObserved)
 
@@ -424,8 +423,8 @@ getBlockSpanTimeStrikeGuessesPage
   :: BlockHeight
   -> Natural Int
   -> Maybe (Natural Int)
-  -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultPublicFilter)
-  -> AppM (API.PagingResult API.BlockTimeStrikeGuessResultPublic)
+  -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultFilter)
+  -> AppM (API.PagingResult API.BlockTimeStrikeGuessResult)
 getBlockSpanTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilterAPI =
     let name = "getBlockSpanTimeStrikeGuessesPage"
     in profile name $ eitherLogThrowOrReturn $ runExceptPrefixT name $ do
@@ -434,7 +433,7 @@ getBlockSpanTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilterAPI 
       linesPerPage = maybe
                        recordsPerReply
                        ( fromMaybe recordsPerReply
-                       . API.blockTimeStrikeGuessResultPublicFilterLinesPerPage
+                       . API.blockTimeStrikeGuessResultFilterLinesPerPage
                        . fst
                        . API.unFilterRequest
                        )
@@ -444,7 +443,7 @@ getBlockSpanTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilterAPI 
       C.runConduit
         $ filters linesPerPage
         .| (C.drop (fromNatural page * fromPositive linesPerPage) >> C.awaitForever C.yield) -- navigate to page
-        .| C.map renderBlockTimeStrikeGuessResultPublic
+        .| C.map renderBlockTimeStrikeGuessResult
         .| C.take (fromPositive linesPerPage + 1) -- we take +1 to understand if there is a next page available
   let newPage =
         if List.length guessesTail > fromPositive linesPerPage
@@ -461,8 +460,8 @@ getBlockSpanTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilterAPI 
     sort = maybe Descend (API.sortOrder . API.unFilterRequest . id1 . API.mapFilter) mfilter
       where
         id1
-          :: API.FilterRequest DB.BlockSpanTimeStrike API.BlockTimeStrikeGuessResultPublicFilter
-          -> API.FilterRequest DB.BlockSpanTimeStrike API.BlockTimeStrikeGuessResultPublicFilter
+          :: API.FilterRequest DB.BlockSpanTimeStrike API.BlockTimeStrikeGuessResultFilter
+          -> API.FilterRequest DB.BlockSpanTimeStrike API.BlockTimeStrikeGuessResultFilter
         id1 = id -- helping typechecker
     filters recordsPerReply =
       fetchBlockTimeStrikeByHeightAndMediantime recordsPerReply sort
@@ -475,12 +474,12 @@ getBlockSpanTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilterAPI 
          )
       .| C.mapM maybeFetchObservedStrikeByStrikeGuessAndPersonAndFlatten
 
--- | returns BlockTimeStrikeGuessPublic by strike and person, taken from account token
+-- | returns BlockTimeStrikeGuess by strike and person, taken from account token
 getBlockSpanTimeStrikeGuess
   :: API.AccountToken
   -> BlockHeight
   -> Natural Int
-  -> AppM API.BlockTimeStrikeGuessResultPublic
+  -> AppM API.BlockTimeStrikeGuessResult
 getBlockSpanTimeStrikeGuess token blockHeight strikeMediantime =
     let name = "getBlockSpanTimeStrikeGuess"
     in profile name $ eitherLogThrowOrReturn $ runExceptPrefixT name $ do
@@ -505,7 +504,7 @@ getBlockSpanTimeStrikeGuess token blockHeight strikeMediantime =
                personKey
              )
           .| C.mapM maybeFetchObservedStrike
-          .| C.map (renderBlockTimeStrikeGuessResultPublicByPerson person)
+          .| C.map (renderBlockTimeStrikeGuessResultByPerson person)
           .| C.head
     maybeFetchObservedStrike
       :: (Entity DB.BlockSpanTimeStrike, Entity DB.BlockSpanTimeStrikeGuess)
@@ -524,7 +523,7 @@ getBlockSpanTimeStrikeGuessPerson
   :: UUID API.Person
   -> BlockHeight
   -> Natural Int
-  -> AppM API.BlockTimeStrikeGuessResultPublic
+  -> AppM API.BlockTimeStrikeGuessResult
 getBlockSpanTimeStrikeGuessPerson uuid blockHeight strikeMediantime =
     let name = "getBlockSpanTimeStrikeGuessPerson"
     in profile name $ eitherLogThrowOrReturn $ runExceptPrefixT name $ do
@@ -549,7 +548,7 @@ getBlockSpanTimeStrikeGuessPerson uuid blockHeight strikeMediantime =
                recordsPerReply personKey
              )
           .| C.mapM maybeFetchBlockTimeStrikeObserved
-          .| C.map (renderBlockTimeStrikeGuessResultPublicByPerson person)
+          .| C.map (renderBlockTimeStrikeGuessResultByPerson person)
           .| C.head
     maybeFetchBlockTimeStrikeObserved
       :: (Entity DB.BlockSpanTimeStrike, Entity DB.BlockSpanTimeStrikeGuess)
@@ -587,42 +586,42 @@ fetchBlockTimeStrikeByHeightAndMediantime
     sort
     DB.BlockSpanTimeStrikeId
 
-renderBlockTimeStrikeGuessResultPublicByPerson
+renderBlockTimeStrikeGuessResultByPerson
   :: Person
   -> ( Entity DB.BlockSpanTimeStrike
      , Entity DB.BlockSpanTimeStrikeGuess
      , Maybe (Entity DB.BlockSpanTimeStrikeObserved)
      )
-  -> API.BlockTimeStrikeGuessResultPublic
-renderBlockTimeStrikeGuessResultPublicByPerson person
+  -> API.BlockTimeStrikeGuessResult
+renderBlockTimeStrikeGuessResultByPerson person
     (Entity _ strike, Entity _ guess, mObserved) =
-  API.BlockTimeStrikeGuessResultPublic
+  API.BlockTimeStrikeGuessResult
     { API.person = apiModelUUIDPerson $ personUuid person
-    , API.strike = API.BlockTimeStrikePublic
-      { API.blockTimeStrikePublicObservedResult = fmap
+    , API.strike = API.BlockTimeStrike
+      { API.blockTimeStrikeObservedResult = fmap
           (\(Entity _ result)->
             apiModelSlowFast $ DB.blockSpanTimeStrikeObservedIsFast result
           )
           mObserved
-      , API.blockTimeStrikePublicObservedBlockMediantime = fmap
+      , API.blockTimeStrikeObservedBlockMediantime = fmap
           (\(Entity _ result)->
             DB.blockSpanTimeStrikeObservedJudgementBlockMediantime result
           )
           mObserved
-      , API.blockTimeStrikePublicObservedBlockHash = fmap
+      , API.blockTimeStrikeObservedBlockHash = fmap
           (\(Entity _ result)->
             DB.blockSpanTimeStrikeObservedJudgementBlockHash result
           )
           mObserved
-      , API.blockTimeStrikePublicObservedBlockHeight = fmap
+      , API.blockTimeStrikeObservedBlockHeight = fmap
           (\(Entity _ result)->
             DB.blockSpanTimeStrikeObservedJudgementBlockHeight result
           )
           mObserved
-      , API.blockTimeStrikePublicBlock = DB.blockSpanTimeStrikeBlock strike
-      , API.blockTimeStrikePublicStrikeMediantime =
+      , API.blockTimeStrikeBlock = DB.blockSpanTimeStrikeBlock strike
+      , API.blockTimeStrikeStrikeMediantime =
         DB.blockSpanTimeStrikeMediantime strike
-      , API.blockTimeStrikePublicCreationTime =
+      , API.blockTimeStrikeCreationTime =
         DB.blockSpanTimeStrikeCreationTime strike
       }
     , API.creationTime = DB.blockSpanTimeStrikeGuessCreationTime guess
@@ -632,7 +631,7 @@ renderBlockTimeStrikeGuessResultPublicByPerson person
 fetchBlockTimeStrikeGuessByStrike
   :: Positive Int
   -> SortOrder
-  -> Maybe (API.FilterRequest DB.BlockSpanTimeStrikeGuess API.BlockTimeStrikeGuessResultPublicFilter)
+  -> Maybe (API.FilterRequest DB.BlockSpanTimeStrikeGuess API.BlockTimeStrikeGuessResultFilter)
   -> Entity DB.BlockSpanTimeStrike
   -> ConduitT
      ()
@@ -652,7 +651,7 @@ fetchBlockTimeStrikeGuessByStrike recordsPerReply sort mfilter (Entity strikeId 
 fetchGuessPersonByBlockTimeStrikeGuess
   :: Positive Int
   -> SortOrder
-  -> Maybe (API.FilterRequest DB.BlockSpanTimeStrikeGuess API.BlockTimeStrikeGuessResultPublicFilter)
+  -> Maybe (API.FilterRequest DB.BlockSpanTimeStrikeGuess API.BlockTimeStrikeGuessResultFilter)
   -> ( Entity DB.BlockSpanTimeStrike, Entity DB.BlockSpanTimeStrikeGuess)
   -> ConduitT
      ()
@@ -689,42 +688,42 @@ maybeFetchObservedStrikeByStrikeGuessAndPersonAndFlatten
     []
   return (strikeE, guessE, personE, mObserved)
 
-renderBlockTimeStrikeGuessResultPublic
+renderBlockTimeStrikeGuessResult
   :: ( Entity DB.BlockSpanTimeStrike
      , Entity DB.BlockSpanTimeStrikeGuess
      , Entity Person
      , Maybe (Entity DB.BlockSpanTimeStrikeObserved)
      )
-  -> API.BlockTimeStrikeGuessResultPublic
-renderBlockTimeStrikeGuessResultPublic
+  -> API.BlockTimeStrikeGuessResult
+renderBlockTimeStrikeGuessResult
     (Entity _ strike, Entity _ guess, Entity _ person, mObserved) =
-  API.BlockTimeStrikeGuessResultPublic
+  API.BlockTimeStrikeGuessResult
     { person = apiModelUUIDPerson $ personUuid person
-    , strike = API.BlockTimeStrikePublic
-      { blockTimeStrikePublicObservedResult = fmap
+    , strike = API.BlockTimeStrike
+      { blockTimeStrikeObservedResult = fmap
         (\(Entity _ result) -> apiModelSlowFast
           $ DB.blockSpanTimeStrikeObservedIsFast result
         )
         mObserved
-      , blockTimeStrikePublicObservedBlockMediantime = fmap
+      , blockTimeStrikeObservedBlockMediantime = fmap
         (\(Entity _ result) ->
           DB.blockSpanTimeStrikeObservedJudgementBlockMediantime result
         )
         mObserved
-      , blockTimeStrikePublicObservedBlockHash = fmap
+      , blockTimeStrikeObservedBlockHash = fmap
         (\(Entity _ result) ->
           DB.blockSpanTimeStrikeObservedJudgementBlockHash result
         )
         mObserved
-      , blockTimeStrikePublicObservedBlockHeight = fmap
+      , blockTimeStrikeObservedBlockHeight = fmap
         (\(Entity _ result) ->
           DB.blockSpanTimeStrikeObservedJudgementBlockHeight result
         )
         mObserved
-      , blockTimeStrikePublicBlock = DB.blockSpanTimeStrikeBlock strike
-      , blockTimeStrikePublicStrikeMediantime =
+      , blockTimeStrikeBlock = DB.blockSpanTimeStrikeBlock strike
+      , blockTimeStrikeStrikeMediantime =
         DB.blockSpanTimeStrikeMediantime strike
-      , blockTimeStrikePublicCreationTime =
+      , blockTimeStrikeCreationTime =
         DB.blockSpanTimeStrikeCreationTime strike
       }
     , creationTime = DB.blockSpanTimeStrikeGuessCreationTime guess

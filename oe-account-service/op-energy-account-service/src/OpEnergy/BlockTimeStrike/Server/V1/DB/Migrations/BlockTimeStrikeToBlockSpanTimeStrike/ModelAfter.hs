@@ -121,11 +121,11 @@ instance PersistFieldSql (Positive Integer) where
   sqlType _ = SqlBlob
 
 
-instance API.BuildFilter BlockSpanTimeStrike API.BlockTimeStrikeGuessResultPublicFilter where
+instance API.BuildFilter BlockSpanTimeStrike API.BlockTimeStrikeGuessResultFilter where
   sortOrder (filter, _) = fromMaybe
     Descend
-    (API.blockTimeStrikeGuessResultPublicFilterSort filter)
-  buildFilter ( API.BlockTimeStrikeGuessResultPublicFilter
+    (API.blockTimeStrikeGuessResultFilterSort filter)
+  buildFilter ( API.BlockTimeStrikeGuessResultFilter
                 -- person
                 _
                 _
@@ -208,11 +208,11 @@ instance API.BuildFilter BlockSpanTimeStrikeObserved API.BlockTimeStrikeFilter w
                      ]) mobservedResultNEQ
     ]
 
-instance API.BuildFilter BlockSpanTimeStrikeObserved API.BlockTimeStrikeGuessResultPublicFilter where
+instance API.BuildFilter BlockSpanTimeStrikeObserved API.BlockTimeStrikeGuessResultFilter where
   sortOrder (filter, _) = fromMaybe
     Descend
-    (API.blockTimeStrikeGuessResultPublicFilterSort filter)
-  buildFilter ( API.BlockTimeStrikeGuessResultPublicFilter
+    (API.blockTimeStrikeGuessResultFilterSort filter)
+  buildFilter ( API.BlockTimeStrikeGuessResultFilter
                 -- person
                 _
                 _
@@ -287,11 +287,20 @@ instance API.BuildFilter BlockSpanTimeStrike API.BlockTimeStrikeFilter where
 
 apiBlockTimeStrikeModelBlockSpanTimeStrike
   :: BlockSpanTimeStrike
+  -> Maybe BlockSpanTimeStrikeObserved
   -> API.BlockTimeStrike
-apiBlockTimeStrikeModelBlockSpanTimeStrike v = API.BlockTimeStrike
+apiBlockTimeStrikeModelBlockSpanTimeStrike v mObserved = API.BlockTimeStrike
   { API.blockTimeStrikeBlock = blockSpanTimeStrikeBlock v
   , API.blockTimeStrikeStrikeMediantime = blockSpanTimeStrikeMediantime v
   , API.blockTimeStrikeCreationTime = blockSpanTimeStrikeCreationTime v
+  , API.blockTimeStrikeObservedResult =
+    fmap (SlowFast.apiModelSlowFast . blockSpanTimeStrikeObservedIsFast) mObserved
+  , API.blockTimeStrikeObservedBlockMediantime =
+    fmap blockSpanTimeStrikeObservedJudgementBlockMediantime mObserved
+  , API.blockTimeStrikeObservedBlockHash =
+    fmap blockSpanTimeStrikeObservedJudgementBlockHash mObserved
+  , API.blockTimeStrikeObservedBlockHeight =
+    fmap blockSpanTimeStrikeObservedJudgementBlockHeight mObserved
   }
 
 -- modelBlockSpanTimeApiBlockTimeStrike
@@ -304,9 +313,9 @@ apiBlockTimeStrikeModelBlockSpanTimeStrike v = API.BlockTimeStrike
 --   }
 
 
-instance API.BuildFilter BlockSpanTimeStrikeGuess API.BlockTimeStrikeGuessResultPublicFilter where
-  sortOrder (filter, _) = fromMaybe Descend (API.blockTimeStrikeGuessResultPublicFilterSort filter)
-  buildFilter ( API.BlockTimeStrikeGuessResultPublicFilter
+instance API.BuildFilter BlockSpanTimeStrikeGuess API.BlockTimeStrikeGuessResultFilter where
+  sortOrder (filter, _) = fromMaybe Descend (API.blockTimeStrikeGuessResultFilterSort filter)
+  buildFilter ( API.BlockTimeStrikeGuessResultFilter
                 _
                 _
                 -- guess

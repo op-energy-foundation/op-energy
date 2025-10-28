@@ -50,7 +50,6 @@ import           Data.OpEnergy.API.V1.Positive
                    , Positive
                    )
 import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrike            as API
-import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic      as API
 import qualified Data.OpEnergy.Account.API.V1.PagingResult               as API
 import qualified Data.OpEnergy.Account.API.V1.FilterRequest              as API
 import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass as API
@@ -143,11 +142,11 @@ data IsSortByGuessesCountNeeded
   = SortByGuessesCountNotNeeded
   | SortByGuessesCountNeeded
 
--- | returns list of BlockTimeStrikePublic records
+-- | returns list of BlockTimeStrike records
 getBlockTimeStrikesPage
   :: Maybe (Natural Int)
   -> Maybe (API.FilterRequest API.BlockTimeStrike API.BlockTimeStrikeFilter)
-  -> AppM (API.PagingResult API.BlockTimeStrikeWithGuessesCountPublic)
+  -> AppM (API.PagingResult API.BlockTimeStrikeWithGuessesCount)
 getBlockTimeStrikesPage mpage mfilterAPI = profile "getBlockTimeStrikesPage" $ do
   latestUnconfirmedBlockHeightV <- asks (BlockTime.latestUnconfirmedBlockHeight . blockTimeState)
   configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip <- asks (configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip . config)
@@ -203,7 +202,7 @@ getBlockTimeStrikesPage mpage mfilterAPI = profile "getBlockTimeStrikesPage" $ d
       -> ReaderT
          State
          Handler
-         (Maybe (API.PagingResult API.BlockTimeStrikeWithGuessesCountPublic))
+         (Maybe (API.PagingResult API.BlockTimeStrikeWithGuessesCount))
     getBlockTimeStrikePast strikeFilter = do
       recordsPerReply <- asks (configRecordsPerReply . config)
       let
@@ -240,7 +239,7 @@ getBlockTimeStrikesPage mpage mfilterAPI = profile "getBlockTimeStrikesPage" $ d
           .| C.concatMapM maybeFetchObservedStrike
           .| C.concatMapM maybeFetchGuessesCount
           .| C.concatMapM unwrapGuessesCount
-          .| C.map renderBlockTimeStrikePublic
+          .| C.map renderBlockTimeStrike
         SortByGuessesCountNeeded -> pagingResult
           mpage
           linesPerPage
@@ -251,7 +250,7 @@ getBlockTimeStrikesPage mpage mfilterAPI = profile "getBlockTimeStrikesPage" $ d
           .| C.map guessesCountAlreadyFetched
           .| C.concatMapM maybeFetchObservedStrike
           .| C.concatMapM unwrapGuessesCount
-          .| C.map renderBlockTimeStrikePublic
+          .| C.map renderBlockTimeStrike
     guessesCountWillBeFetchedLater
       :: Entity DB.BlockSpanTimeStrike
       -> ( Maybe (Entity DB.CalculatedBlockSpanTimeStrikeGuessesCount)
@@ -370,40 +369,40 @@ getBlockTimeStrikesPage mpage mfilterAPI = profile "getBlockTimeStrikesPage" $ d
               Nothing -> return Nothing
               Just observedStrikeFitsOutcomeKnownClass ->
                 return (Just (Just observedStrikeFitsOutcomeKnownClass)) -- had been observed
-    renderBlockTimeStrikePublic
+    renderBlockTimeStrike
       :: ( Entity DB.BlockSpanTimeStrike
          , Maybe (Entity DB.BlockSpanTimeStrikeObserved)
          , Natural Int
          )
-      -> API.BlockTimeStrikeWithGuessesCountPublic
-    renderBlockTimeStrikePublic (Entity _ strike, mObserved, guessesCount) =
-      API.BlockTimeStrikeWithGuessesCountPublic
-        { blockTimeStrikeWithGuessesCountPublicStrike = API.BlockTimeStrikePublic
-          { blockTimeStrikePublicObservedResult = fmap
+      -> API.BlockTimeStrikeWithGuessesCount
+    renderBlockTimeStrike (Entity _ strike, mObserved, guessesCount) =
+      API.BlockTimeStrikeWithGuessesCount
+        { blockTimeStrikeWithGuessesCountStrike = API.BlockTimeStrike
+          { blockTimeStrikeObservedResult = fmap
             (\(Entity _ v)-> apiModelSlowFast
               $ DB.blockSpanTimeStrikeObservedIsFast v
             )
             mObserved
-          , blockTimeStrikePublicObservedBlockMediantime = fmap
+          , blockTimeStrikeObservedBlockMediantime = fmap
             (\(Entity _ v)->
               DB.blockSpanTimeStrikeObservedJudgementBlockMediantime v
             )
             mObserved
-          , blockTimeStrikePublicObservedBlockHash = fmap
+          , blockTimeStrikeObservedBlockHash = fmap
             (\(Entity _ v)-> DB.blockSpanTimeStrikeObservedJudgementBlockHash v)
             mObserved
-          , blockTimeStrikePublicObservedBlockHeight = fmap
+          , blockTimeStrikeObservedBlockHeight = fmap
             (\(Entity _ v)->
               DB.blockSpanTimeStrikeObservedJudgementBlockHeight v
             )
             mObserved
-          , blockTimeStrikePublicBlock = DB.blockSpanTimeStrikeBlock strike
-          , blockTimeStrikePublicStrikeMediantime =
+          , blockTimeStrikeBlock = DB.blockSpanTimeStrikeBlock strike
+          , blockTimeStrikeStrikeMediantime =
             DB.blockSpanTimeStrikeMediantime strike
-          , blockTimeStrikePublicCreationTime =
+          , blockTimeStrikeCreationTime =
             DB.blockSpanTimeStrikeCreationTime strike
           }
-        , blockTimeStrikeWithGuessesCountPublicGuessesCount =
+        , blockTimeStrikeWithGuessesCountGuessesCount =
           fromIntegral guessesCount
         }
     unwrapGuessesCount
@@ -428,11 +427,11 @@ getBlockTimeStrikesPage mpage mfilterAPI = profile "getBlockTimeStrikesPage" $ d
                  ]
 
 
--- | returns BlockTimeStrikePublic records
+-- | returns BlockTimeStrike records
 getBlockTimeStrike
   :: BlockHeight
   -> Natural Int
-  -> AppM API.BlockTimeStrikeWithGuessesCountPublic
+  -> AppM API.BlockTimeStrikeWithGuessesCount
 getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $ do
   mret <- actualGetBlockTimeStrike
   case mret of
@@ -457,7 +456,7 @@ getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $
             (Range Nothing Nothing)
           .| C.mapM getGuessesCountByBlockTimeStrike
           .| C.mapM maybeFetchObserved
-          .| C.map renderBlockTimeStrikeWithGuessesCountPublic
+          .| C.map renderBlockTimeStrikeWithGuessesCount
           .| C.head
     getGuessesCountByBlockTimeStrike
       :: Entity DB.BlockSpanTimeStrike
@@ -486,43 +485,43 @@ getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $
         [ DB.BlockSpanTimeStrikeObservedStrike ==. strikeId ]
         []
       return (strikeE, guessesCount, mObserved)
-    renderBlockTimeStrikeWithGuessesCountPublic
+    renderBlockTimeStrikeWithGuessesCount
       :: ( Entity DB.BlockSpanTimeStrike
          , Natural Int
          , Maybe (Entity DB.BlockSpanTimeStrikeObserved)
          )
-      -> API.BlockTimeStrikeWithGuessesCountPublic
-    renderBlockTimeStrikeWithGuessesCountPublic
+      -> API.BlockTimeStrikeWithGuessesCount
+    renderBlockTimeStrikeWithGuessesCount
         (Entity _ strike, guessesCount, mObserved) =
-      API.BlockTimeStrikeWithGuessesCountPublic
-        { blockTimeStrikeWithGuessesCountPublicStrike = API.BlockTimeStrikePublic
-          { blockTimeStrikePublicObservedResult = fmap
+      API.BlockTimeStrikeWithGuessesCount
+        { blockTimeStrikeWithGuessesCountStrike = API.BlockTimeStrike
+          { blockTimeStrikeObservedResult = fmap
             (\(Entity _ v)-> apiModelSlowFast
               $ DB.blockSpanTimeStrikeObservedIsFast v
             )
             mObserved
-          , blockTimeStrikePublicObservedBlockMediantime = fmap
+          , blockTimeStrikeObservedBlockMediantime = fmap
             (\(Entity _ v)->
               DB.blockSpanTimeStrikeObservedJudgementBlockMediantime v
             )
             mObserved
-          , blockTimeStrikePublicObservedBlockHash = fmap
+          , blockTimeStrikeObservedBlockHash = fmap
             (\(Entity _ v)->
               DB.blockSpanTimeStrikeObservedJudgementBlockHash v
             )
             mObserved
-          , blockTimeStrikePublicObservedBlockHeight = fmap
+          , blockTimeStrikeObservedBlockHeight = fmap
             (\(Entity _ v)->
               DB.blockSpanTimeStrikeObservedJudgementBlockHeight v
             )
             mObserved
-          , blockTimeStrikePublicBlock = DB.blockSpanTimeStrikeBlock strike
-          , blockTimeStrikePublicStrikeMediantime =
+          , blockTimeStrikeBlock = DB.blockSpanTimeStrikeBlock strike
+          , blockTimeStrikeStrikeMediantime =
             DB.blockSpanTimeStrikeMediantime strike
-          , blockTimeStrikePublicCreationTime =
+          , blockTimeStrikeCreationTime =
             DB.blockSpanTimeStrikeCreationTime strike
           }
-        , blockTimeStrikeWithGuessesCountPublicGuessesCount =
+        , blockTimeStrikeWithGuessesCountGuessesCount =
           fromIntegral guessesCount
         }
 
