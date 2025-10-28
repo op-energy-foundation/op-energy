@@ -40,18 +40,6 @@ import           Data.OpEnergy.API.V1.Natural(Natural)
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
 import           Data.OpEnergy.Account.API.V1.SlowFast
 
-data BlockTimeStrikeGuess = BlockTimeStrikeGuess
-  -- data
-  { isFast :: SlowFast
-  -- metadata
-  , creationTime :: POSIXTime
-  -- reflinks
-  , strike :: BlockTimeStrikeId
-  , person :: PersonId
-  -- constraints
-  }
-  deriving (Eq, Show, Generic)
-
 -- this table's goal is to contain precalculated guesses count for a given strike. The reason
 -- it exists is to eliminate a need of walking through the db in order to return a result
 -- sorted by guesses count
@@ -66,7 +54,7 @@ data CalculatedBlockTimeStrikeGuessesCount = CalculatedBlockTimeStrikeGuessesCou
 -- Public suffix) and DB (without suffix)
 data BlockTimeStrikeGuessPublic = BlockTimeStrikeGuessPublic
   { person :: UUID Person
-  , strike ::  BlockTimeStrike
+  , strike ::  BlockTimeStrikePublic
   , creationTime :: POSIXTime
   , guess :: SlowFast
   }
@@ -88,11 +76,14 @@ instance Default BlockTimeStrikeGuessPublic where
 defaultBlockTimeStrikeGuessPublic :: BlockTimeStrikeGuessPublic
 defaultBlockTimeStrikeGuessPublic = BlockTimeStrikeGuessPublic
   { person = defaultUUID
-  , strike = defaultBlockTimeStrike
+  , strike = def
   , creationTime = defaultPOSIXTime
   , guess = def
   }
 
+-- this table's goal is to contain precalculated guesses count for a given
+-- strike. The reason it exists is to eliminate a need of walking through
+-- the db in order to return a result sorted by guesses count
 data BlockTimeStrikeGuessResultPublic = BlockTimeStrikeGuessResultPublic
   { person :: UUID Person
   , strike :: BlockTimeStrikePublic
