@@ -38,7 +38,6 @@ import           Prometheus(MonadMonitor)
 
 import           Data.OpEnergy.Account.API.V1
 import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrike as API
-import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic as API
 import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess as API
 import qualified Data.OpEnergy.Account.API.V1.SlowFast as API
 import qualified Data.OpEnergy.Account.API.V1.FilterRequest as API
@@ -69,42 +68,42 @@ blockTimeServer = websocketHandler
          -> BlockHeight
          -> Natural Int
          -> API.SlowFast
-         -> AppM API.BlockTimeStrikeGuessPublic
+         -> AppM API.BlockTimeStrikeGuess
       )
-  :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.getBlockTimeStrikesPage
+  :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.getBlockTimeStrikesPageHandler
         ) :: Maybe (Natural Int)
-          -> Maybe (API.FilterRequest API.BlockTimeStrikePublic API.BlockTimeStrikeFilter)
-          -> AppM (API.PagingResult API.BlockTimeStrikeWithGuessesCountPublic)
+          -> Maybe (API.FilterRequest API.BlockTimeStrike API.BlockTimeStrikeFilter)
+          -> AppM (API.PagingResult API.BlockTimeStrikeWithGuessesCount)
        )
   :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikesGuessesPage
         ) :: Maybe (Natural Int)
-          -> Maybe (API.FilterRequest API.BlockTimeStrikeGuessPublic API.BlockTimeStrikeGuessResultPublicFilter)
-          -> AppM (API.PagingResult API.BlockTimeStrikeGuessResultPublic)
+          -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultFilter)
+          -> AppM (API.PagingResult API.BlockTimeStrikeGuessResult)
        )
   :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessesPage
         ) :: BlockHeight
           -> Natural Int
           -> Maybe (Natural Int)
-          -> Maybe (API.FilterRequest API.BlockTimeStrikeGuessPublic API.BlockTimeStrikeGuessResultPublicFilter)
-          -> AppM (API.PagingResult API.BlockTimeStrikeGuessResultPublic)
+          -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultFilter)
+          -> AppM (API.PagingResult API.BlockTimeStrikeGuessResult)
        )
 
   :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.getBlockTimeStrike
         ) :: BlockHeight
           -> Natural Int
-          -> AppM API.BlockTimeStrikeWithGuessesCountPublic
+          -> AppM API.BlockTimeStrikeWithGuessesCount
        )
   :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuess
         ) :: API.AccountToken
           -> BlockHeight
           -> Natural Int
-          -> AppM API.BlockTimeStrikeGuessResultPublic
+          -> AppM API.BlockTimeStrikeGuessResult
        )
   :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessPerson
         ) :: API.UUID API.Person
           -> BlockHeight
           -> Natural Int
-          -> AppM API.BlockTimeStrikeGuessResultPublic
+          -> AppM API.BlockTimeStrikeGuessResult
        )
   :<|>  oeGitHashGet
   where
