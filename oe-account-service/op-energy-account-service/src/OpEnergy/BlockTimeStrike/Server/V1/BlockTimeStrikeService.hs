@@ -9,10 +9,11 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
   ( createBlockTimeStrikeFuture
   , newTipHandlerLoop
   , getBlockTimeStrikesPage
+  , getBlockTimeStrikesPageHandler
   , getBlockTimeStrike
   ) where
 
-import           Servant (err400, err500, Handler)
+import           Servant (err400, err500)
 import           Control.Monad.Trans.Reader ( ask, asks, ReaderT)
 import           Control.Monad.Logger( logError, logInfo, NoLoggingT)
 import           Control.Monad(forever)
@@ -48,7 +49,7 @@ import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass as API
 import           Data.OpEnergy.API.V1.Error(throwJSON)
 
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
-import           OpEnergy.Error( eitherThrowJSON)
+import           OpEnergy.Error( eitherThrowJSON, runExceptPrefixT)
 import           OpEnergy.PagingResult
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledStrikeCreation as BlockTimeScheduledStrikeCreation
@@ -138,52 +139,65 @@ data IsSortByGuessesCountNeeded
   | SortByGuessesCountNeeded
 
 -- | returns list of BlockTimeStrike records
-getBlockTimeStrikesPage
+getBlockTimeStrikesPageHandler
   :: Maybe (Natural Int)
   -> Maybe (API.FilterRequest API.BlockTimeStrike API.BlockTimeStrikeFilter)
   -> AppM (API.PagingResult API.BlockTimeStrikeWithGuessesCount)
-getBlockTimeStrikesPage mpage mfilterAPI = profile "getBlockTimeStrikesPage" $ do
-  latestUnconfirmedBlockHeightV <- asks (BlockTime.latestUnconfirmedBlockHeight . blockTimeState)
-  configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip <- asks (configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip . config)
-  latestConfirmedBlockV <- asks (BlockTime.latestConfirmedBlock . blockTimeState)
+getBlockTimeStrikesPageHandler mpage mfilterAPI =
+    let name = "V1.getBlockTimeStrikesPageHandler"
+    in profile name $ do
   eitherThrowJSON
     (\reason-> do
-      let msg = "getBlockTimeStrikesPage: " <> reason
-      runLogging $ $(logError) msg
-      return (err500, msg)
+      callstack <- asks callStack
+      runLogging $ $(logError) $ callstack <> ": " <> callstack
+      return (err500, reason)
     )
-    $ runExceptT $ do
-      (latestUnconfirmedBlockHeight, latestConfirmedBlock) <-
-        ExceptT $ liftIO $ STM.atomically $ runExceptT $ (,)
-          <$> (exceptTMaybeT "latest unconfirmed block hasn't been received yet"
-              $ TVar.readTVar latestUnconfirmedBlockHeightV
-              )
-          <*> (exceptTMaybeT "latest confirmed block hasn't been received yet"
-              $ TVar.readTVar latestConfirmedBlockV
-              )
-      let
-          staticPartFilter = maybe
-                               []
-                               ( API.buildFilter
-                               . API.unFilterRequest
-                               . API.mapFilter
-                               )
-                               mfilter
-          strikeFilter =
-            BlockTimeStrikeFilter.buildFilterByClass
-              ( maybe
-                Nothing
-                ( API.blockTimeStrikeFilterClass
-                . fst
-                . API.unFilterRequest
-                ) mfilter
-              )
-              latestUnconfirmedBlockHeight
-              latestConfirmedBlock
-              configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
-            ++ staticPartFilter
-      exceptTMaybeT "getBlockTimeStrikePast failed"
-        $ getBlockTimeStrikePast strikeFilter
+    $ runExceptPrefixT name $ ExceptT $ getBlockTimeStrikesPage mpage mfilterAPI
+
+getBlockTimeStrikesPage
+  :: ( MonadIO m
+     , MonadMonitor m
+     )
+  => Maybe (Natural Int)
+  -> Maybe (API.FilterRequest API.BlockTimeStrike API.BlockTimeStrikeFilter)
+  -> AppT m (Either Text (API.PagingResult API.BlockTimeStrikeWithGuessesCount))
+getBlockTimeStrikesPage mpage mfilterAPI =
+    let name = "getBlockTimeStrikesPage"
+    in profile name $ runExceptPrefixT name $ do
+  latestUnconfirmedBlockHeightV <- lift $ asks (BlockTime.latestUnconfirmedBlockHeight . blockTimeState)
+  configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip <- lift $ asks (configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip . config)
+  latestConfirmedBlockV <- lift $ asks (BlockTime.latestConfirmedBlock . blockTimeState)
+  (latestUnconfirmedBlockHeight, latestConfirmedBlock) <-
+    ExceptT $ liftIO $ STM.atomically $ runExceptT $ (,)
+      <$> (exceptTMaybeT "latest unconfirmed block hasn't been received yet"
+          $ TVar.readTVar latestUnconfirmedBlockHeightV
+          )
+      <*> (exceptTMaybeT "latest confirmed block hasn't been received yet"
+          $ TVar.readTVar latestConfirmedBlockV
+          )
+  let
+      staticPartFilter = maybe
+                           []
+                           ( API.buildFilter
+                           . API.unFilterRequest
+                           . API.mapFilter
+                           )
+                           mfilter
+      strikeFilter =
+        BlockTimeStrikeFilter.buildFilterByClass
+          ( maybe
+            Nothing
+            ( API.blockTimeStrikeFilterClass
+            . fst
+            . API.unFilterRequest
+            ) mfilter
+          )
+          latestUnconfirmedBlockHeight
+          latestConfirmedBlock
+          configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
+        ++ staticPartFilter
+  exceptTMaybeT "getBlockTimeStrikePast failed"
+    $ getBlockTimeStrikePast strikeFilter
   where
     mfilter = fmap coerceFilterRequestBlockTimeStrike mfilterAPI
     sort = maybe
@@ -193,10 +207,13 @@ getBlockTimeStrikesPage mpage mfilterAPI = profile "getBlockTimeStrikesPage" $ d
              )
              mfilter
     getBlockTimeStrikePast
-      :: [Filter BlockTimeStrike]
+      :: ( MonadIO m
+         , MonadMonitor m
+         )
+      => [Filter BlockTimeStrike]
       -> ReaderT
          State
-         Handler
+         m
          (Maybe (API.PagingResult API.BlockTimeStrikeWithGuessesCount))
     getBlockTimeStrikePast strikeFilter = do
       recordsPerReply <- asks (configRecordsPerReply . config)
