@@ -16,7 +16,6 @@ import           Control.Monad.Logger hiding (logDebug)
 import           Control.Monad.Trans
 import           Database.Persist.Pagination
 import           Database.Persist.Postgresql
-import           Control.Exception.Safe as E
 import           Control.Monad.Trans.Resource
 import           Prometheus(MonadMonitor(..))
 
@@ -32,7 +31,6 @@ pagingResult
      , PersistEntityBackend r ~ SqlBackend
      , Ord typ
      , MonadIO m
-     , MonadCatch m
      , MonadMonitor m
      )
   =>  Maybe (Natural Int)
