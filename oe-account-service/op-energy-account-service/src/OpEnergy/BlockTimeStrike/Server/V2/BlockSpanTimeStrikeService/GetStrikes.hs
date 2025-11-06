@@ -13,7 +13,6 @@ import           Control.Monad.Logger( logError)
 import           Control.Monad(forM)
 import           Control.Monad.Trans
 import           Control.Monad.Trans.Except( ExceptT (..))
-import           Data.Maybe( fromMaybe)
 
 import qualified Data.OpEnergy.API.V1.Natural as APIV1
 import qualified Data.OpEnergy.API.V1.Positive as APIV1
