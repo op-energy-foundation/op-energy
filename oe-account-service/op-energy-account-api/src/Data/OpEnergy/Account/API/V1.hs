@@ -22,8 +22,7 @@ import           Data.OpEnergy.API.V1.Natural
 import           Data.OpEnergy.Account.API.V1.Account
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
                    ( BlockTimeStrikeGuess
-                   , BlockTimeStrikeGuessResult
-                   , BlockTimeStrikeGuessResultFilter
+                   , BlockTimeStrikeGuessFilter
                    )
 import           Data.OpEnergy.Account.API.V1.SlowFast
                    ( SlowFast
@@ -159,12 +158,12 @@ type BlockTimeV1API
        "filter"
        ( FilterRequest
            BlockTimeStrikeGuess
-           BlockTimeStrikeGuessResultFilter
+           BlockTimeStrikeGuessFilter
        )
     :> Description "returns guesses for the given blocktime strike. By \
                    \default, results are order by id in decending order \
                    \(from new to old)"
-    :> Get '[JSON] (PagingResult BlockTimeStrikeGuessResult)
+    :> Get '[JSON] (PagingResult BlockTimeStrikeGuess)
 
   :<|> "strike"
     :> "guesses"
@@ -193,12 +192,12 @@ type BlockTimeV1API
        "filter"
        ( FilterRequest
          BlockTimeStrikeGuess
-         BlockTimeStrikeGuessResultFilter
+         BlockTimeStrikeGuessFilter
        )
     :> Description "returns guesses for the given blocktime strike. By \
                    \default, results are order by id in decending order (from \
                    \new to old)"
-    :> Get '[JSON] (PagingResult BlockTimeStrikeGuessResult)
+    :> Get '[JSON] (PagingResult BlockTimeStrikeGuess)
 
   :<|> "strike"
     :> Capture "BlockHeight" BlockHeight
@@ -218,7 +217,7 @@ type BlockTimeV1API
     :> Capture "BlockHeight" BlockHeight
     :> Capture "StrikeMediantime" (Natural Int)
     :> Description "returns user's guess for the given blocktime strike."
-    :> Get '[JSON] BlockTimeStrikeGuessResult
+    :> Get '[JSON] BlockTimeStrikeGuess
 
   :<|> "strike"
     :> "guess"
@@ -227,7 +226,7 @@ type BlockTimeV1API
     :> Capture "BlockHeight" BlockHeight
     :> Capture "StrikeMediantime" (Natural Int)
     :> Description "returns user's guess for the given blocktime strike."
-    :> Get '[JSON] BlockTimeStrikeGuessResult
+    :> Get '[JSON] BlockTimeStrikeGuess
 
   :<|> "git-hash"
     :> Description "returns short hash of commit of the op-energy git repo that had been used to build backend"
