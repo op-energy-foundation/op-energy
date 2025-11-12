@@ -71,9 +71,9 @@ BlockTimeStrikeObserved
 
 |]
 
-instance BuildFilter BlockTimeStrike BlockTimeStrikeGuessResultFilter where
-  sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultFilterSort filter)
-  buildFilter ( BlockTimeStrikeGuessResultFilter
+instance BuildFilter BlockTimeStrike BlockTimeStrikeGuessFilter where
+  sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessFilterSort filter)
+  buildFilter ( BlockTimeStrikeGuessFilter
                 -- person
                 _
                 _
@@ -150,9 +150,9 @@ instance BuildFilter BlockTimeStrikeObserved API.BlockTimeStrikeFilter where
                      ]) mobservedResultNEQ
     ]
 
-instance BuildFilter BlockTimeStrikeObserved BlockTimeStrikeGuessResultFilter where
-  sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessResultFilterSort filter)
-  buildFilter ( BlockTimeStrikeGuessResultFilter
+instance BuildFilter BlockTimeStrikeObserved BlockTimeStrikeGuessFilter where
+  sortOrder (filter, _) = maybe Descend id (blockTimeStrikeGuessFilterSort filter)
+  buildFilter ( BlockTimeStrikeGuessFilter
                 -- person
                 _
                 _

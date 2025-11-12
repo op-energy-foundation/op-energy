@@ -77,15 +77,21 @@ blockTimeServer = websocketHandler
        )
   :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikesGuessesPage
         ) :: Maybe (Natural Int)
-          -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultFilter)
-          -> AppM (API.PagingResult API.BlockTimeStrikeGuessResult)
+          -> Maybe ( API.FilterRequest
+                     API.BlockTimeStrikeGuess
+                     API.BlockTimeStrikeGuessFilter
+                   )
+          -> AppM (API.PagingResult API.BlockTimeStrikeGuess)
        )
   :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessesPage
         ) :: BlockHeight
           -> Natural Int
           -> Maybe (Natural Int)
-          -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessResultFilter)
-          -> AppM (API.PagingResult API.BlockTimeStrikeGuessResult)
+          -> Maybe ( API.FilterRequest
+                     API.BlockTimeStrikeGuess
+                     API.BlockTimeStrikeGuessFilter
+                   )
+          -> AppM (API.PagingResult API.BlockTimeStrikeGuess)
        )
 
   :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.getBlockTimeStrike
@@ -97,13 +103,13 @@ blockTimeServer = websocketHandler
         ) :: API.AccountToken
           -> BlockHeight
           -> Natural Int
-          -> AppM API.BlockTimeStrikeGuessResult
+          -> AppM API.BlockTimeStrikeGuess
        )
   :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessPerson
         ) :: API.UUID API.Person
           -> BlockHeight
           -> Natural Int
-          -> AppM API.BlockTimeStrikeGuessResult
+          -> AppM API.BlockTimeStrikeGuess
        )
   :<|>  oeGitHashGet
   where
