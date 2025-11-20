@@ -13,8 +13,11 @@ import qualified Data.OpEnergy.BlockTime.API.V2.GuessesAPI as GuessesAPI
 
 type BlockTimeV2API
   = Tags "Strikes API"
+    :> "strikes"
     :> StrikesAPI.StrikesAPI
 
   :<|> Tags "Guesses API"
+    :> "strikes"
+    :> "guesses"
     :> GuessesAPI.GuessesAPI
 

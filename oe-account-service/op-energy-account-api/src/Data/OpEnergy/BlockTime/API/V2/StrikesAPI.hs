@@ -17,8 +17,7 @@ import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
 import           Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrike
 
 type StrikesAPI
-  =    "strikes"
-    :> QueryParam'
+  =    QueryParam'
        '[ Optional
         , Strict
         , Description "defines block span size"
