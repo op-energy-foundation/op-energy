@@ -6,7 +6,8 @@
 {-# LANGUAGE EmptyDataDecls          #-}
 {-# LANGUAGE GADTs                     #-}
 module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
-  ( createBlockTimeStrikeFuture
+  ( createBlockTimeStrikeFutureHandler
+  , createBlockTimeStrikeFuture
   , newTipHandlerLoop
   , getBlockTimeStrikesPage
   , getBlockTimeStrikesPageHandler
@@ -16,7 +17,7 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
 import           Servant (err400, err500)
 import           Control.Monad.Trans.Reader ( ask, asks, ReaderT)
 import           Control.Monad.Logger( logError, logInfo, NoLoggingT)
-import           Control.Monad(forever)
+import           Control.Monad(forever, when)
 import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
 import qualified Control.Concurrent.STM as STM
@@ -27,7 +28,8 @@ import           Data.Conduit( (.|) )
 import qualified Data.Conduit as C
 import qualified Data.Conduit.List as C
 import           Control.Monad.Trans
-import           Control.Monad.Trans.Except( runExceptT, ExceptT (..))
+import           Control.Monad.Trans.Except
+                   ( runExceptT, ExceptT (..), throwE)
 import           Control.Monad.Trans.Resource( ResourceT)
 import           Data.Maybe( fromMaybe)
 
@@ -59,47 +61,53 @@ import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeFilter as Blo
 import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
 import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
 import qualified OpEnergy.BlockTimeStrike.Server.V1.SlowFast as SlowFast
-import           OpEnergy.Account.Server.V1.Config (Config(..))
+import           OpEnergy.Account.Server.V1.Config
+                 as Config(Config(..))
 import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
 import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging, profile, withDBTransaction )
 import           OpEnergy.Account.Server.V1.Person
 
 -- | O(ln accounts).
 -- Tries to create future block time strike. Requires authenticated user and blockheight should be in the future
-createBlockTimeStrikeFuture :: API.AccountToken-> BlockHeight-> Natural Int-> AppM ()
-createBlockTimeStrikeFuture token blockHeight strikeMediantime = profile "createBlockTimeStrike" $ do
-  State{ config = Config{ configBlockTimeStrikeMinimumBlockAheadCurrentTip = configBlockTimeStrikeMinimumBlockAheadCurrentTip}
-       , blockTimeState = BlockTime.State{ latestUnconfirmedBlockHeight = latestUnconfirmedBlockHeightV }
-       } <- ask
-  mlatestUnconfirmedBlockHeight <- liftIO $ TVar.readTVarIO latestUnconfirmedBlockHeightV
-  case mlatestUnconfirmedBlockHeight of
-    Nothing -> do
-      let err = "ERROR: createBlockTimeStrike: there is no current observed tip yet"
-      runLogging $ $(logError) err
-      throwJSON err400 err
-    Just tip
-      | tip > fromIntegral strikeMediantime -> do
-        let err = "ERROR: strikeMediantime is in the past, which is not expected"
-        runLogging $ $(logError) err
-        throwJSON err400 err
-    Just tip
-      | tip + naturalFromPositive configBlockTimeStrikeMinimumBlockAheadCurrentTip > blockHeight -> do
-        let msg = "ERROR: createBlockTimeStrike: block height for new block time strike should be in the future + minimum configBlockTimeStrikeMinimumBlockAheadCurrentTip"
-        runLogging $ $(logError) msg
-        throwJSON err400 msg
-    _ -> do
-      mperson <- mgetPersonByAccountToken token
-      case mperson of
-        Nothing -> do
-          let err = "ERROR: createBlockTimeStrike: person was not able to authenticate itself"
-          runLogging $ $(logError) err
-          throwJSON err400 err
-        Just person -> do
-          mret <- createBlockTimeStrikeEnsuredConditions person
-          case mret of
-            Just ret -> return ret
-            Nothing -> do
-              throwJSON err500 (("something went wrong")::Text)
+createBlockTimeStrikeFutureHandler :: API.AccountToken-> BlockHeight-> Natural Int-> AppM ()
+createBlockTimeStrikeFutureHandler token blockHeight strikeMediantime =
+    let name = "createBlockTimeStrikeFuture"
+    in profile name $ do
+  eitherThrowJSON
+    (\reason-> do
+      callstack <- asks callStack
+      runLogging $ $(logError) $ callstack <> ": " <> callstack
+      return (err500, reason)
+    )
+    $ runExceptPrefixT name $ ExceptT
+      $ createBlockTimeStrikeFuture token blockHeight strikeMediantime
+
+createBlockTimeStrikeFuture
+  :: API.AccountToken
+  -> BlockHeight
+  -> Natural Int
+  -> AppM (Either Text ())
+createBlockTimeStrikeFuture token blockHeight strikeMediantime =
+    let name = "createBlockTimeStrikeFuture"
+    in profile name $ runExceptPrefixT name $ do
+  configBlockTimeStrikeMinimumBlockAheadCurrentTip <- lift $ asks
+    $ Config.configBlockTimeStrikeMinimumBlockAheadCurrentTip . config
+  latestUnconfirmedBlockHeightV <- lift $ asks
+    $ BlockTime.latestUnconfirmedBlockHeight . blockTimeState
+  tip <- exceptTMaybeT "there is no current observed tip yet"
+    $ liftIO $ TVar.readTVarIO latestUnconfirmedBlockHeightV
+  when (tip > fromIntegral strikeMediantime) $
+    throwE "is in the past, which is not expected"
+  when (tip > fromIntegral strikeMediantime) $
+    throwE "is in the past, which is not expected"
+  when ( tip + naturalFromPositive configBlockTimeStrikeMinimumBlockAheadCurrentTip
+         > blockHeight
+       ) $ throwE "block height for new block time strike should be in the \
+           \future + minimum configBlockTimeStrikeMinimumBlockAheadCurrentTip"
+  person <- exceptTMaybeT "person was not able to authenticate itself"
+    $ mgetPersonByAccountToken token
+  exceptTMaybeT "something went wrong"
+    $ createBlockTimeStrikeEnsuredConditions person
   where
     createBlockTimeStrikeEnsuredConditions
       :: (MonadIO m, MonadMonitor m)

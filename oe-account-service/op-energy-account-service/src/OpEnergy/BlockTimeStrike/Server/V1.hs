@@ -57,7 +57,7 @@ import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime(State(..)
 
 blockTimeServer :: ServerT BlockTimeV1API (AppT Handler)
 blockTimeServer = websocketHandler
-  :<|> ((createBlockTimeStrikeFuture
+  :<|> ((createBlockTimeStrikeFutureHandler
         ) :: API.AccountToken
           -> BlockHeight
           -> Natural Int
