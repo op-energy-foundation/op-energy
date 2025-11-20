@@ -14,6 +14,8 @@ import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
                    ( BlockTimeStrike
                    , BlockTimeStrikeFilter
                    )
+import qualified Data.OpEnergy.API.V1.Block as BlockV1
+import qualified Data.OpEnergy.Account.API.V1.Account as AccountV1
 import           Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrike
 
 type StrikesAPI
@@ -54,4 +56,22 @@ type StrikesAPI
                    \by strike id in descending order. \
                    \(ie, from newer to older)"
     :> Get '[JSON] (PagingResult BlockSpanTimeStrike)
+
+  :<|> "create"
+    :> Header'
+       '[ Required
+        , Strict
+        , Description "Account token gotten from /login or /register"
+        ]
+        "Authorization"
+        AccountV1.AccountToken -- require authentication
+    :> Capture "StrikeBlockHeight" BlockV1.BlockHeight
+    :> Capture "StrikeMediantime" (Natural Int)
+    :> Description "Creates new time strike by given BlockHeight and strike \
+                   \mediantime. Requires authentication. Where: \
+                   \BlockHeight - height of the block in the future. It is \
+                   \expected, that it should be at least at 12 block in the \
+                   \future than current confirmed tip. StrikeMediantime is a \
+                   \POSIX time in the future."
+    :> Post '[JSON] ()
 
