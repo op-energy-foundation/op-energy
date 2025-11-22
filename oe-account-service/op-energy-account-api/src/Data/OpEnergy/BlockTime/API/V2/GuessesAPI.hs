@@ -18,7 +18,8 @@ import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
 import           Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrikeGuess
 
 type GuessesAPI
-  =  QueryParam'
+  = "list"
+    :> QueryParam'
        '[ Optional
         , Strict
         , Description "defines strikes' block span size"
