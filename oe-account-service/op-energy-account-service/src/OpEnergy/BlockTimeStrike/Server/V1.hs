@@ -63,7 +63,7 @@ blockTimeServer = websocketHandler
           -> Natural Int
           -> AppM ()
        )
-  :<|>((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.createBlockTimeStrikeFutureGuess
+  :<|>((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.createBlockTimeStrikeFutureGuessHandler
        ) :: API.AccountToken
          -> BlockHeight
          -> Natural Int

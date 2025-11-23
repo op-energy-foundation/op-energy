@@ -7,6 +7,7 @@
 {-# LANGUAGE GADTs                     #-}
 module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
   ( createBlockTimeStrikeFutureGuess
+  , createBlockTimeStrikeFutureGuessHandler
   , getBlockTimeStrikeGuessResultsPage
   , getBlockTimeStrikesGuessesPageHandler
   , getBlockTimeStrikesGuessesPage
@@ -22,11 +23,11 @@ import           Data.Time.Clock( getCurrentTime)
 import           Data.Time.Clock.POSIX(POSIXTime, utcTimeToPOSIXSeconds)
 import qualified Control.Concurrent.STM as STM
 import qualified Control.Concurrent.STM.TVar as TVar
-import           Control.Monad(void)
+import           Control.Monad(void, when)
 import qualified Data.List as List
 import           Data.Text(Text)
 import           Control.Monad.Trans.Resource( ResourceT)
-import           Control.Monad.Trans.Except( runExceptT, ExceptT(..))
+import           Control.Monad.Trans.Except( runExceptT, ExceptT(..), throwE)
 import           Data.Maybe(fromMaybe)
 
 import           Data.Conduit ((.|), ConduitT)
@@ -84,55 +85,61 @@ mgetBlockTimeStrikeFuture blockHeight strikeMediantime = profile "mgetBlockTimeS
 
 -- | O(ln accounts).
 -- Tries to create future block time strike. Requires authenticated user and blockheight should be in the future
-createBlockTimeStrikeFutureGuess
+createBlockTimeStrikeFutureGuessHandler
   :: API.AccountToken
   -> BlockHeight
   -> Natural Int
   -> API.SlowFast
   -> AppM API.BlockTimeStrikeGuess
-createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess = profile "createBlockTimeStrikeFutureGuess" $ do
-  configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip <- asks (configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip . config)
-  latestConfirmedBlockV <- asks (BlockTime.latestConfirmedBlock . blockTimeState)
-  mlatestConfirmedBlock <- liftIO $ TVar.readTVarIO latestConfirmedBlockV
-  case mlatestConfirmedBlock of
-    Nothing -> do
-      let err = "ERROR: createBlockTimeStrikeFutureGuess: there is no current tip yet"
-      runLogging $ $(logError) err
-      throwJSON err500 err
-    Just tip
-        | blockHeaderMediantime tip > fromIntegral strikeMediantime -> do
-        let err = "ERROR: createBlockTimeStrikeFutureGuess: strikeMediantime is in the past, which is not expected"
-        runLogging $ $(logError) err
-        throwJSON err400 err
-    Just tip
-      | blockHeaderHeight tip + naturalFromPositive configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip > blockHeight -> do
-        let err = "ERROR: createBlockTimeStrikeFutureGuess: block height for new block time strike should be in the future + minimum configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip"
-        runLogging $ $(logError) err
-        throwJSON err400 err
-    _ -> do
-      mperson <- mgetPersonByAccountToken token
-      case mperson of
-        Nothing-> do
-          let err = "ERROR: createBlockTimeStrikeFutureGuess: person was not able to authenticate itself"
-          runLogging $ $(logError) err
-          throwJSON err400 err
-        Just (Entity personKey person) -> do
-          mstrike <- mgetBlockTimeStrikeFuture blockHeight strikeMediantime
-          case mstrike of
-            Nothing-> do
-              let err = "ERROR: createBlockTimeStrikeFutureGuess: future strike was not able to authenticate itself"
-              runLogging $ $(logError) err
-              throwJSON err400 err
-            Just (Entity strikeKey strike) -> do
-              mret <- createBlockTimeStrikeFutureGuess personKey strikeKey guess
-              case mret of
-                Nothing -> throwJSON err500 ("something went wrong"::Text)
-                Just v -> return $ API.BlockTimeStrikeGuess
-                  { API.person = apiModelUUIDPerson $ personUuid person
-                  , API.strike = apiModelBlockTimeStrike strike Nothing
-                  , API.creationTime = blockTimeStrikeGuessCreationTime v
-                  , API.guess = guess
-                  }
+createBlockTimeStrikeFutureGuessHandler
+    token blockHeight strikeMediantime guess =
+    let name = "BlockTimeStrikeGuessService.createBlockTimeStrikeFutureGuessHandler"
+    in profile name $
+  eitherThrowJSON
+    (\reason-> do
+      let msg = "getBlockTimeStrikesGuessesPage: " <> reason
+      runLogging $ $(logError) msg
+      return (err500, msg)
+    )
+    $ createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess
+
+createBlockTimeStrikeFutureGuess
+  :: API.AccountToken
+  -> BlockHeight
+  -> Natural Int
+  -> API.SlowFast
+  -> AppM (Either Text API.BlockTimeStrikeGuess)
+createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess =
+    let name = "BlockTimeStrikeGuessService.createBlockTimeStrikeFutureGuess"
+    in profile name $ runExceptPrefixT name $ do
+  configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip <- lift
+    $ asks (configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip . config)
+  latestConfirmedBlockV <- lift
+    $ asks (BlockTime.latestConfirmedBlock . blockTimeState)
+  tip <- exceptTMaybeT "there is no current tip yet"
+    $ liftIO $ TVar.readTVarIO latestConfirmedBlockV
+  when (blockHeaderMediantime tip > fromIntegral strikeMediantime)
+    $ throwE "strikeMediantime is in the past, which is not expected"
+  when ( blockHeaderHeight tip
+       + naturalFromPositive configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
+       > blockHeight)
+    $ throwE "block height for new block time strike should be in the future \
+             \+ minimum configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip"
+  Entity personKey person <- exceptTMaybeT
+    "person was not able to authenticate itself"
+    $ mgetPersonByAccountToken token
+  Entity strikeKey strike <- exceptTMaybeT
+    "future strike was not able to authenticate itself"
+    $ mgetBlockTimeStrikeFuture blockHeight strikeMediantime
+  v <- exceptTMaybeT
+    "something went wrong"
+    $ createBlockTimeStrikeFutureGuess personKey strikeKey guess
+  return $ API.BlockTimeStrikeGuess
+    { API.person = apiModelUUIDPerson $ personUuid person
+    , API.strike = apiModelBlockTimeStrike strike Nothing
+    , API.creationTime = blockTimeStrikeGuessCreationTime v
+    , API.guess = guess
+    }
   where
     createBlockTimeStrikeFutureGuess
       :: (MonadMonitor m, MonadIO m)
