@@ -16,19 +16,11 @@ module OpEnergy.BlockTimeStrike.Server.V2
 
 import           Servant
 
-
-
-import           Data.OpEnergy.API.V1.Positive
-import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess as API
-import qualified Data.OpEnergy.Account.API.V1.FilterRequest as API
-import qualified Data.OpEnergy.Account.API.V1.PagingResult as API
-import           Data.OpEnergy.API.V1.Natural(Natural)
-import           OpEnergy.Account.Server.V1.Class (AppM, AppT)
+import           OpEnergy.Account.Server.V1.Class ( AppT)
 
 import           Data.OpEnergy.BlockTime.API.V2
 import           Data.OpEnergy.BlockTime.API.V2.StrikesAPI
-import qualified Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrikeGuess
-                 as API
+import           Data.OpEnergy.BlockTime.API.V2.GuessesAPI
 import qualified OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeService
                  as BlockSpanTimeStrikeService
 import qualified OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeGuessService
@@ -38,13 +30,7 @@ blockTimeServer :: ServerT BlockTimeV2API (AppT Handler)
 blockTimeServer
   =  (BlockSpanTimeStrikeService.handlers :: ServerT StrikesAPI (AppT Handler))
 
-  :<|> (BlockSpanTimeStrikeGuessService.getStrikesGuessesHandler
-          :: Maybe (Positive Int)
-          -> Maybe (Natural Int)
-          -> Maybe ( API.FilterRequest
-                     API.BlockTimeStrikeGuess
-                     API.BlockTimeStrikeGuessFilter
-                   )
-          -> AppM (API.PagingResult API.BlockSpanTimeStrikeGuess)
+  :<|> ( BlockSpanTimeStrikeGuessService.handlers
+         :: ServerT GuessesAPI (AppT Handler)
        )
 
