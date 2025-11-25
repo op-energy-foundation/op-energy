@@ -84,6 +84,7 @@ library
                    , OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeGuessService
                    , OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeGuessService.GetStrikesGuesses
                    , OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeGuessService.Create
+                   , OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeGuessService.StrikeGuesses
 
                    , Data.Text.Show
                    , Data.Conduit.Extra.Zip

@@ -26,6 +26,8 @@ import qualified OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeGuessServ
                  as GetStrikesGuesses
 import qualified OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeGuessService.Create
                  as Create
+import qualified OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeGuessService.StrikeGuesses
+                 as StrikeGuesses
 import           OpEnergy.Account.Server.V1.Class (AppM, AppT)
 
 handlers :: ServerT GuessesAPI (AppT Handler)
@@ -46,4 +48,17 @@ handlers
          -> Natural Int
          -> APIV1.SlowFast
          -> AppM API.BlockSpanTimeStrikeGuess
+       )
+
+  :<|> ( StrikeGuesses.getStrikeGuessesHandler
+         :: APIV1.BlockHeight
+         -> Natural Int
+         -> Maybe (Natural Int)
+         -> Maybe
+            ( API.FilterRequest
+              APIV1.BlockTimeStrikeGuess
+              APIV1.BlockTimeStrikeGuessFilter
+            )
+         -> Maybe (Positive Int)
+         -> AppM (API.PagingResult API.BlockSpanTimeStrikeGuess)
        )
