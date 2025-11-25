@@ -12,6 +12,7 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
   , getBlockTimeStrikesGuessesPageHandler
   , getBlockTimeStrikesGuessesPage
   , getBlockTimeStrikeGuessesPage
+  , getBlockTimeStrikeGuessesPageHandler
   , getBlockTimeStrikeGuess
   , getBlockTimeStrikeGuessPerson
   ) where
@@ -431,14 +432,36 @@ getBlockTimeStrikesGuessesPage mpage mfilterAPI =
 
 
 -- | returns list BlockTimeStrikeGuesses records
-getBlockTimeStrikeGuessesPage
+getBlockTimeStrikeGuessesPageHandler
   :: BlockHeight
   -> Natural Int
   -> Maybe (Natural Int)
   -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessFilter)
   -> AppM (API.PagingResult API.BlockTimeStrikeGuess)
-getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilterAPI = profile "getBlockTimeStrikeGuessesPage" $ do
-  recordsPerReply <- asks (configRecordsPerReply . config)
+getBlockTimeStrikeGuessesPageHandler
+  strikeBlockHeight strikeMediantime mpage mfilterAPI =
+    let name = "V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessesPageHandler"
+    in profile name $
+  eitherThrowJSON
+    (\reason-> do
+      let msg = name <> ": " <> reason
+      runLogging $ $(logError) msg
+      return (err500, msg)
+    )
+    $ getBlockTimeStrikeGuessesPage strikeBlockHeight strikeMediantime mpage
+      mfilterAPI
+
+-- | returns list BlockTimeStrikeGuesses records
+getBlockTimeStrikeGuessesPage
+  :: BlockHeight
+  -> Natural Int
+  -> Maybe (Natural Int)
+  -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessFilter)
+  -> AppM (Either Text (API.PagingResult API.BlockTimeStrikeGuess))
+getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilterAPI =
+    let name = "getBlockTimeStrikeGuessesPage"
+    in profile name $ runExceptPrefixT name $ do
+  recordsPerReply <- lift $ asks (configRecordsPerReply . config)
   let
       linesPerPage = maybe
                        recordsPerReply
@@ -448,25 +471,22 @@ getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilterAPI = pr
                        . API.unFilterRequest
                        )
                        mfilter
-  mret <- withDBTransaction "" $ do
-    C.runConduit
-      $ filters linesPerPage
-      .| (C.drop (fromNatural page * fromPositive linesPerPage) >> C.awaitForever C.yield) -- navigate to page
-      .| C.map renderBlockTimeStrikeGuessResult
-      .| C.take (fromPositive linesPerPage + 1) -- we take +1 to understand if there is a next page available
-  case mret of
-      Nothing -> do
-        throwJSON err500 ("something went wrong, check logs for details"::Text)
-      Just guessesTail-> do
-        let newPage =
-              if List.length guessesTail > fromPositive linesPerPage
-              then Just (fromIntegral (fromNatural page + 1))
-              else Nothing
-            results = List.take (fromPositive linesPerPage) guessesTail
-        return $ API.PagingResult
-          { API.pagingResultNextPage = newPage
-          , API.pagingResultResults = results
-          }
+  guessesTail <- exceptTMaybeT "something went wrong, check logs for details"
+    $ withDBTransaction "" $ do
+      C.runConduit
+        $ filters linesPerPage
+        .| (C.drop (fromNatural page * fromPositive linesPerPage) >> C.awaitForever C.yield) -- navigate to page
+        .| C.map renderBlockTimeStrikeGuessResult
+        .| C.take (fromPositive linesPerPage + 1) -- we take +1 to understand if there is a next page available
+  let newPage =
+        if List.length guessesTail > fromPositive linesPerPage
+        then Just (fromIntegral (fromNatural page + 1))
+        else Nothing
+      results = List.take (fromPositive linesPerPage) guessesTail
+  return $ API.PagingResult
+    { API.pagingResultNextPage = newPage
+    , API.pagingResultResults = results
+    }
   where
     page = fromMaybe 0 mpage
     mfilter = fmap coerceFilterRequestBlockTimeStrikeGuess mfilterAPI

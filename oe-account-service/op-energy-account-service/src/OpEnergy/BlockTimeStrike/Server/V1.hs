@@ -83,7 +83,7 @@ blockTimeServer = websocketHandler
                    )
           -> AppM (API.PagingResult API.BlockTimeStrikeGuess)
        )
-  :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessesPage
+  :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessesPageHandler
         ) :: BlockHeight
           -> Natural Int
           -> Maybe (Natural Int)
