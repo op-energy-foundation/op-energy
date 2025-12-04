@@ -26,7 +26,6 @@ import           Data.OpEnergy.Account.API.V1.FilterRequest()
 import           Data.OpEnergy.Account.API.V1.Common
 import           Data.OpEnergy.Account.API.V1.SlowFast
 import           Data.OpEnergy.Account.API.V1.Account
-import           Data.OpEnergy.Account.API.V1.UUID
 
 import           Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrike
 
@@ -35,8 +34,7 @@ import           Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrike
 -- represent BlockSpanTimeStrikeGuess with possible observed result, judgement
 -- block's data, span size and possible blockspan headers with nbdr and hashrate
 data BlockSpanTimeStrikeGuess = BlockSpanTimeStrikeGuess
-  { person :: UUID Person
-  , strike ::  BlockSpanTimeStrike
+  { strike ::  BlockSpanTimeStrike
   , creationTime :: POSIXTime
   , guess :: SlowFast
   }
@@ -57,8 +55,7 @@ instance Default BlockSpanTimeStrikeGuess where
   def = defaultBlockSpanTimeStrikeGuess
 defaultBlockSpanTimeStrikeGuess :: BlockSpanTimeStrikeGuess
 defaultBlockSpanTimeStrikeGuess =  BlockSpanTimeStrikeGuess
-  { person = defaultUUID
-  , strike = def
+  { strike = def
   , creationTime = defaultPOSIXTime
   , guess = def
   }

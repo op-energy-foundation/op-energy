@@ -33,7 +33,7 @@ type AccountAPI
 type BlockTimeAPI
   = "api" :>
     ( "v1" :> "blocktime" :> BlockTimeV1API {- V1 API -}
-    :<|> "v2" :> "blocktimestrike" :> BlockTimeV2API {- V2 API -}
+    :<|> "v2" :> "strikes" :> "blockrate" :> BlockTimeV2API {- V2 API -}
     )
 
 -- | Composition of Account and Blocktime APIs
