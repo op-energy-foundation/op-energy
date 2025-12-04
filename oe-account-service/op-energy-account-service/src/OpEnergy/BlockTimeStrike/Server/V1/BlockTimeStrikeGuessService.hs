@@ -14,6 +14,7 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
   , getBlockTimeStrikeGuessesPage
   , getBlockTimeStrikeGuessesPageHandler
   , getBlockTimeStrikeGuess
+  , getBlockTimeStrikeGuessHandler
   , getBlockTimeStrikeGuessPerson
   ) where
 
@@ -508,31 +509,36 @@ getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilterAPI =
       .| C.mapM maybeFetchObservedStrikeByStrikeGuessAndPersonAndFlatten
 
 -- | returns BlockTimeStrikeGuess by strike and person, taken from account token
-getBlockTimeStrikeGuess
+getBlockTimeStrikeGuessHandler
   :: API.AccountToken
   -> BlockHeight
   -> Natural Int
   -> AppM API.BlockTimeStrikeGuess
-getBlockTimeStrikeGuess token blockHeight strikeMediantime = profile "getBlockTimeStrikeGuess" $ do
-  mperson <- mgetPersonByAccountToken token
-  case mperson of
-    Nothing-> do
-      let err = "ERROR: getBlockTimeStrikeGuess: person was not able to authenticate itself"
-      runLogging $ $(logError) err
-      throwJSON err400 err
-    Just personE -> do
-      mstrike <- actualGetStrikeGuess personE blockHeight (fromIntegral strikeMediantime)
-      case mstrike of
-        Nothing-> do
-          let err = "ERROR: getBlockTimeStrikeGuess: something went wrong, see logs for details"
-          runLogging $ $(logError) err
-          throwJSON err500 err
-        Just Nothing -> do
-          let err = "ERROR: getBlockTimeStrikeGuess: no strike or guess found"
-          runLogging $ $(logError) err
-          throwJSON err400 err
-        Just (Just ret)-> return ret
+getBlockTimeStrikeGuessHandler token blockHeight strikeMediantime =
+    let name = "V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessHandler"
+    in profile name $ eitherThrowJSON
+      (\reason-> do
+        callstack <- asks callStack
+        runLogging $ $(logError) $ callstack <> ":" <> reason
+        return (err500, reason)
+      )
+      $ runExceptPrefixT name $ do
+  ExceptT $ getBlockTimeStrikeGuess token blockHeight strikeMediantime
 
+getBlockTimeStrikeGuess
+  :: API.AccountToken
+  -> BlockHeight
+  -> Natural Int
+  -> AppM (Either Text API.BlockTimeStrikeGuess)
+getBlockTimeStrikeGuess token blockHeight strikeMediantime =
+    let name = "getBlockTimeStrikeGuess"
+    in profile "getBlockTimeStrikeGuess" $ runExceptPrefixT name $ do
+  personE <- exceptTMaybeT "person was not able to authenticate itself"
+    $ mgetPersonByAccountToken token
+  mGuess <- exceptTMaybeT "something went wrong, see logs for details"
+    $ actualGetStrikeGuess personE blockHeight (fromIntegral strikeMediantime)
+  exceptTMaybeT "no strike or guess found"
+    $ return mGuess
   where
     actualGetStrikeGuess (Entity personKey person) blockHeight strikeMediantime = do
       recordsPerReply <- asks (configRecordsPerReply . config)

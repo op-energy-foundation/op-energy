@@ -94,12 +94,12 @@ blockTimeServer = websocketHandler
           -> AppM (API.PagingResult API.BlockTimeStrikeGuess)
        )
 
-  :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.getBlockTimeStrike
+  :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.getBlockTimeStrikeHandler
         ) :: BlockHeight
           -> Natural Int
           -> AppM API.BlockTimeStrikeWithGuessesCount
        )
-  :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuess
+  :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessHandler
         ) :: API.AccountToken
           -> BlockHeight
           -> Natural Int

@@ -12,12 +12,13 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
   , getBlockTimeStrikesPage
   , getBlockTimeStrikesPageHandler
   , getBlockTimeStrike
+  , getBlockTimeStrikeHandler
   ) where
 
-import           Servant (err400, err500)
+import           Servant ( err500)
 import           Control.Monad.Trans.Reader ( ask, asks, ReaderT)
 import           Control.Monad.Logger( logError, logInfo, NoLoggingT)
-import           Control.Monad(forever, when)
+import           Control.Monad(forever, when, void)
 import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
 import qualified Control.Concurrent.STM as STM
@@ -48,7 +49,6 @@ import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrike            as API
 import qualified Data.OpEnergy.Account.API.V1.PagingResult               as API
 import qualified Data.OpEnergy.Account.API.V1.FilterRequest              as API
 import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass as API
-import           Data.OpEnergy.API.V1.Error(throwJSON)
 
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 import           OpEnergy.Error( eitherThrowJSON, runExceptPrefixT)
@@ -69,7 +69,11 @@ import           OpEnergy.Account.Server.V1.Person
 
 -- | O(ln accounts).
 -- Tries to create future block time strike. Requires authenticated user and blockheight should be in the future
-createBlockTimeStrikeFutureHandler :: API.AccountToken-> BlockHeight-> Natural Int-> AppM ()
+createBlockTimeStrikeFutureHandler
+  :: API.AccountToken
+  -> BlockHeight
+  -> Natural Int
+  -> AppM ()
 createBlockTimeStrikeFutureHandler token blockHeight strikeMediantime =
     let name = "createBlockTimeStrikeFuture"
     in profile name $ do
@@ -79,14 +83,15 @@ createBlockTimeStrikeFutureHandler token blockHeight strikeMediantime =
       runLogging $ $(logError) $ callstack <> ": " <> callstack
       return (err500, reason)
     )
-    $ runExceptPrefixT name $ ExceptT
-      $ createBlockTimeStrikeFuture token blockHeight strikeMediantime
+    $ runExceptPrefixT name $ do
+    void $ ExceptT $ createBlockTimeStrikeFuture token blockHeight
+      strikeMediantime
 
 createBlockTimeStrikeFuture
   :: API.AccountToken
   -> BlockHeight
   -> Natural Int
-  -> AppM (Either Text ())
+  -> AppM (Either Text BlockTimeStrike)
 createBlockTimeStrikeFuture token blockHeight strikeMediantime =
     let name = "createBlockTimeStrikeFuture"
     in profile name $ runExceptPrefixT name $ do
@@ -112,15 +117,19 @@ createBlockTimeStrikeFuture token blockHeight strikeMediantime =
     createBlockTimeStrikeEnsuredConditions
       :: (MonadIO m, MonadMonitor m)
       => Entity Person
-      -> AppT m (Maybe ())
+      -> AppT m (Maybe BlockTimeStrike)
     createBlockTimeStrikeEnsuredConditions _ = do
       nowUTC <- liftIO getCurrentTime
-      let now = utcTimeToPOSIXSeconds nowUTC
-      withDBTransaction "" $ insert_ $! BlockTimeStrike
-        { blockTimeStrikeBlock = blockHeight
-        , blockTimeStrikeStrikeMediantime = fromIntegral strikeMediantime
-        , blockTimeStrikeCreationTime = now
-        }
+      let
+          now = utcTimeToPOSIXSeconds nowUTC
+          record = BlockTimeStrike
+            { blockTimeStrikeBlock = blockHeight
+            , blockTimeStrikeStrikeMediantime = fromIntegral strikeMediantime
+            , blockTimeStrikeCreationTime = now
+            }
+      withDBTransaction "" $ do
+        insert_ record
+        return record
 
 -- | this function is an entry point for a process, that creates blocktime past strikes when such block is being
 -- confirmed. After BlockTimeStrikePast creation, it will add record to the BlockTimeStrikeFutureObservedBlock table
@@ -436,23 +445,31 @@ getBlockTimeStrikesPage mpage mfilterAPI =
                  ]
 
 
+getBlockTimeStrikeHandler
+  :: BlockHeight
+  -> Natural Int
+  -> AppM API.BlockTimeStrikeWithGuessesCount
+getBlockTimeStrikeHandler blockHeight strikeMediantime =
+    let name = "V1.BlockTimeStrikeService.getBlockTimeStrikeHandler"
+    in profile name $ eitherThrowJSON
+  (\reason-> do
+    callstack <- asks callStack
+    runLogging $ $(logError) $ callstack <> ": " <> callstack
+    return (err500, reason)
+  )
+  $ getBlockTimeStrike blockHeight strikeMediantime
+
 -- | returns BlockTimeStrike records
 getBlockTimeStrike
   :: BlockHeight
   -> Natural Int
-  -> AppM API.BlockTimeStrikeWithGuessesCount
-getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $ do
-  mret <- actualGetBlockTimeStrike
-  case mret of
-    Nothing -> do
-      throwJSON err500 ("something went wrong"::Text)
-    Just Nothing -> do
-      throwJSON err400 ("strike not found"::Text)
-    Just (Just ret) -> return ret
-  where
-    actualGetBlockTimeStrike = do
-      recordsPerReply <- asks (configRecordsPerReply . config)
-      withDBTransaction "" $ do
+  -> AppM (Either Text API.BlockTimeStrikeWithGuessesCount)
+getBlockTimeStrike blockHeight strikeMediantime =
+    let name = "getBlockTimeStrike"
+    in profile name $ runExceptPrefixT name $ do
+  recordsPerReply <- lift $ asks (configRecordsPerReply . config)
+  mStrike <- exceptTMaybeT "something went wrong"
+    $ withDBTransaction "" $ do
         C.runConduit
           $ streamEntities
             [ BlockTimeStrikeBlock ==. blockHeight, BlockTimeStrikeStrikeMediantime ==. fromIntegral strikeMediantime ]
@@ -464,6 +481,8 @@ getBlockTimeStrike blockHeight strikeMediantime = profile "getBlockTimeStrike" $
           .| C.mapM maybeFetchObserved
           .| C.map renderBlockTimeStrikeWithGuessesCount
           .| C.head
+  exceptTMaybeT "strike not found" $ return mStrike
+  where
     getGuessesCountByBlockTimeStrike
       :: Entity BlockTimeStrike
       -> ReaderT SqlBackend (NoLoggingT (ResourceT IO))
