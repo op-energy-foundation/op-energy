@@ -20,17 +20,17 @@ import           OpEnergy.Account.Server.V1.Class ( AppT)
 
 import           Data.OpEnergy.BlockTime.API.V2
 import           Data.OpEnergy.BlockTime.API.V2.StrikesAPI
-import           Data.OpEnergy.BlockTime.API.V2.GuessesAPI
-import qualified OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeService
-                 as BlockSpanTimeStrikeService
-import qualified OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeGuessService
-                 as BlockSpanTimeStrikeGuessService
+import           Data.OpEnergy.BlockTime.API.V2.StrikeAPI
+import qualified OpEnergy.BlockTimeStrike.Server.V2.StrikesAPI
+                 as StrikesAPI
+import qualified OpEnergy.BlockTimeStrike.Server.V2.StrikeAPI
+                 as StrikeAPI
 
 blockTimeServer :: ServerT BlockTimeV2API (AppT Handler)
 blockTimeServer
-  =  (BlockSpanTimeStrikeService.handlers :: ServerT StrikesAPI (AppT Handler))
+  =  (StrikesAPI.handlers :: ServerT StrikesAPI (AppT Handler))
 
-  :<|> ( BlockSpanTimeStrikeGuessService.handlers
-         :: ServerT GuessesAPI (AppT Handler)
+  :<|> ( StrikeAPI.handlers
+         :: ServerT StrikeAPI (AppT Handler)
        )
 

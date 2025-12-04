@@ -3,7 +3,7 @@
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE GADTs                      #-}
-module OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeService.GetStrikes
+module OpEnergy.BlockTimeStrike.Server.V2.StrikesAPI.GetStrikes
   ( getStrikes
   ) where
 

@@ -76,15 +76,16 @@ library
                    , OpEnergy.BlockTimeStrike.Server.V1.SlowFast
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeFilter
                    , OpEnergy.BlockTimeStrike.Server.V2
+                   , OpEnergy.BlockTimeStrike.Server.V2.StrikesAPI
+                   , OpEnergy.BlockTimeStrike.Server.V2.StrikesAPI.GetStrikes
+                   , OpEnergy.BlockTimeStrike.Server.V2.StrikeAPI
+                   , OpEnergy.BlockTimeStrike.Server.V2.StrikeAPI.GetStrike
+                   , OpEnergy.BlockTimeStrike.Server.V2.StrikeAPI.Create
+                   , OpEnergy.BlockTimeStrike.Server.V2.GuessAPI
+                   , OpEnergy.BlockTimeStrike.Server.V2.GuessAPI.Get
+                   , OpEnergy.BlockTimeStrike.Server.V2.GuessAPI.Create
                    , OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrike
-                   , OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeService
-                   , OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeService.GetStrikes
-                   , OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeService.Create
                    , OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeGuess
-                   , OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeGuessService
-                   , OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeGuessService.GetStrikesGuesses
-                   , OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeGuessService.Create
-                   , OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeGuessService.StrikeGuesses
 
                    , Data.Text.Show
                    , Data.Conduit.Extra.Zip

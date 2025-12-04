@@ -37,8 +37,7 @@ apiBlockSpanTimeStrikeGuessModelBlockTimeStrikeGuess spanSize v =
   spanStrike <- ExceptT $ BlockSpanTimeStrike.apiBlockSpanTimeStrikeModelBlockTimeStrike
     spanSize $! APIV1.strike v
   return $! API.BlockSpanTimeStrikeGuess
-    { API.person = APIV1.person v
-    , API.strike = spanStrike
+    { API.strike = spanStrike
     , API.creationTime = APIV1.creationTime v
     , API.guess = APIV1.guess v
     }
