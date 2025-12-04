@@ -9,15 +9,15 @@ import           Servant.API
 import           Data.OpEnergy.API.Tags
 
 import qualified Data.OpEnergy.BlockTime.API.V2.StrikesAPI as StrikesAPI
-import qualified Data.OpEnergy.BlockTime.API.V2.GuessesAPI as GuessesAPI
+import qualified Data.OpEnergy.BlockTime.API.V2.StrikeAPI as StrikeAPI
 
 type BlockTimeV2API
   = Tags "Strikes API"
     :> "strikes"
     :> StrikesAPI.StrikesAPI
 
-  :<|> Tags "Guesses API"
-    :> "strikes"
-    :> "guesses"
-    :> GuessesAPI.GuessesAPI
+  :<|> Tags "Strike API"
+    :> "strike"
+    :> StrikeAPI.StrikeAPI
+
 
