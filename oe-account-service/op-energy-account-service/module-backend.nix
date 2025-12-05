@@ -95,9 +95,9 @@ in
                   limit_req zone=api burst=10 nodelay;
                   proxy_pass http://127.0.0.1:${toString cfg.api_port}/api/v1/blocktime;
           }
-          location /api/v2/blocktime {
+          location /api/v2/strikes/blockrate {
                   limit_req zone=api burst=10 nodelay;
-                  proxy_pass http://127.0.0.1:${toString cfg.api_port}/api/v2/blocktime;
+                  proxy_pass http://127.0.0.1:${toString cfg.api_port}/api/v2/strikes/blockrate;
           }
         '';
       };
