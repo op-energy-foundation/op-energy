@@ -21,7 +21,7 @@ import qualified OpEnergy.BlockTimeStrike.Server.V2.StrikesAPI.GetStrikes
 
 handlers :: ServerT StrikesAPI (AppT Handler)
 handlers
-  = ( GetStrikes.getStrikes
+  = ( GetStrikes.getStrikesHandler
           :: Maybe (Positive Int)
           -> Maybe (Natural Int)
           -> Maybe (API.FilterRequest API.BlockTimeStrike API.BlockTimeStrikeFilter)

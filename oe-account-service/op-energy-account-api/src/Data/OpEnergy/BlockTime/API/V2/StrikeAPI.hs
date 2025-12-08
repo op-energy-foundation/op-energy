@@ -59,3 +59,8 @@ type StrikeAPI
     :> "guess"
     :> GuessAPI.GuessAPI
 
+  :<|> Tags "Strike guesses API"
+    :> Capture "StrikeBlockHeight" BlockV1.BlockHeight
+    :> Capture "StrikeMediantime" (Natural Int)
+    :> "guesses"
+    :> StrikeGuessesAPI.StrikeGuessesAPI
