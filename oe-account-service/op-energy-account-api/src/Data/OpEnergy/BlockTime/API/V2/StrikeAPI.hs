@@ -14,6 +14,8 @@ import qualified Data.OpEnergy.API.V1.Block as BlockV1
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountV1
 import           Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrike
 import qualified Data.OpEnergy.BlockTime.API.V2.GuessAPI as GuessAPI
+import qualified Data.OpEnergy.BlockTime.API.V2.StrikeGuessesAPI
+                 as StrikeGuessesAPI
 
 type StrikeAPI
   =    Capture "StrikeBlockHeight" BlockV1.BlockHeight
@@ -64,3 +66,4 @@ type StrikeAPI
     :> Capture "StrikeMediantime" (Natural Int)
     :> "guesses"
     :> StrikeGuessesAPI.StrikeGuessesAPI
+
