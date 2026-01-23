@@ -47,6 +47,8 @@ import           OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.SplitBlockTime
                    )
 import qualified OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeGuessesCount.Migration
                    as CalculateBlockTimeStrikeCalculateGuessesCount
+import qualified OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeGuessesCountSlowFast.Migration
+                   as CalculateBlockTimeStrikeGuessesCountSlowFast
 
 
 
@@ -199,6 +201,8 @@ blockTimeStrikeDBMigrations =
   , splitBlockTimeStrikeObservedFromBlockTimeStrike
     -- block_time_strike_guess.guess field need to be migrated from text into int
   , transformBlockTimeStrikeGuessGuessFromTextToBool
+    -- introduce slowCount and fastCount fields
+  , CalculateBlockTimeStrikeGuessesCountSlowFast.migration
   ]
 
 -- | custom migration procedure

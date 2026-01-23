@@ -165,12 +165,31 @@ createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess =
           Just (Entity guessesCountId _) -> -- there is a record of precalculated counts, update it
             update guessesCountId
               [ CalculatedBlockTimeStrikeGuessesCountGuessesCount +=. verifyNatural 1
+              , if guess == API.Fast
+                then
+                  CalculatedBlockTimeStrikeGuessesCountFastCount
+                    +=. verifyNatural 1
+                else
+                  CalculatedBlockTimeStrikeGuessesCountSlowCount
+                    +=. verifyNatural 1
               ]
           Nothing -> do -- no record exist yet, recalculate to be idempotent TODO: maybe it is a bad place to recalculate and we need some kind of scheduled task for this
-            guessesCount <- count [ BlockTimeStrikeGuessStrike ==. strikeKey ]
+            fastCount <- count
+              [ BlockTimeStrikeGuessStrike ==. strikeKey
+              , BlockTimeStrikeGuessIsFast ==. SlowFast.Fast
+              ]
+            slowCount <- count
+              [ BlockTimeStrikeGuessStrike ==. strikeKey
+              , BlockTimeStrikeGuessIsFast ==. SlowFast.Slow
+              ]
             void $! insert $! CalculatedBlockTimeStrikeGuessesCount
-              { calculatedBlockTimeStrikeGuessesCountGuessesCount = verifyNatural guessesCount
+              { calculatedBlockTimeStrikeGuessesCountGuessesCount =
+                verifyNatural (fastCount + slowCount)
               , calculatedBlockTimeStrikeGuessesCountStrike = strikeKey
+              , calculatedBlockTimeStrikeGuessesCountSlowCount =
+                verifyNatural slowCount
+              , calculatedBlockTimeStrikeGuessesCountFastCount =
+                verifyNatural fastCount
               }
         return value
 

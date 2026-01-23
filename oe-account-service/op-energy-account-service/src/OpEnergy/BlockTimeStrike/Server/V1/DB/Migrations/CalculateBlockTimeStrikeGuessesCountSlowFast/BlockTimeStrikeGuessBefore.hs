@@ -20,31 +20,24 @@
 {-# LANGUAGE StandaloneDeriving         #-}
 {-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE FlexibleContexts           #-}
-module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
+module OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeGuessesCountSlowFast.BlockTimeStrikeGuessBefore
   where
 
 import           Data.Time.Clock.POSIX(POSIXTime)
 import           GHC.Generics
-import qualified Data.List as List
-import           Data.Maybe( fromMaybe)
-import           Data.Proxy
 
 import           Database.Persist
 import           Database.Persist.Sql
-import           Database.Persist.Pagination
 import           Database.Persist.TH
 
 
 import           Data.OpEnergy.API.V1.Natural
-import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess as API
-import qualified Data.OpEnergy.Account.API.V1.FilterRequest as API
 
-import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
+import           OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeGuessesCountSlowFast.BlockTimeStrike
 import           OpEnergy.BlockTimeStrike.Server.V1.SlowFast (SlowFast)
-import qualified OpEnergy.BlockTimeStrike.Server.V1.SlowFast as SlowFast
 import           OpEnergy.Account.Server.V1.Person
 
-share [mkPersist sqlSettings, mkMigrate "migrateBlockTimeStrikeGuess"] [persistLowerCase|
+share [mkPersist sqlSettings, mkMigrate "createCalculatedBlockTimeStrikeGuessesCountSlowFastBefore"] [persistLowerCase|
 BlockTimeStrikeGuess
   -- data
   isFast SlowFast
@@ -63,54 +56,11 @@ BlockTimeStrikeGuess
 CalculatedBlockTimeStrikeGuessesCount
   strike BlockTimeStrikeId
   guessesCount (Natural Int)
-  fastCount (Natural Int)
-  slowCount (Natural Int)
+  fastCount (Natural Int) Maybe -- initially, we introduce optional field, that can be NULL
+  slowCount (Natural Int) Maybe -- initially, we introduce optional field, that can be NULL
   UniqueCalculatedBlockTimeStrikeGuessesCountStrike strike -- allow only one record per strike
   deriving Eq Show Generic
 |]
 
-instance API.BuildFilter BlockTimeStrikeGuess API.BlockTimeStrikeGuessFilter where
-  sortOrder (filter, _) = fromMaybe Descend (API.blockTimeStrikeGuessFilterSort filter)
-  buildFilter ( API.BlockTimeStrikeGuessFilter
-                _
-                _
-                -- guess
-                mGuessEQ
-                mGuessNEQ
-                -- observedResult
-                _
-                _
-                -- strike block height
-                _
-                _
-                _
-                _
-                -- strike strikeMediantime
-                _
-                _
-                _
-                _
-                -- sort
-                _
-                _
-                _ -- lines per page
-              , _
-              ) = List.concat
-    [ maybe
-      []
-      (\v-> [ BlockTimeStrikeGuessIsFast ==. SlowFast.modelApi v])
-      mGuessEQ
-    , maybe
-      []
-      (\v-> [BlockTimeStrikeGuessIsFast !=. SlowFast.modelApi v])
-      mGuessNEQ
-    ]
 
-coerceFilterRequestBlockTimeStrikeGuess
-  :: API.BuildFilter BlockTimeStrikeGuess a
-  => API.FilterRequest API.BlockTimeStrikeGuess a
-  -> API.FilterRequest BlockTimeStrikeGuess a
-coerceFilterRequestBlockTimeStrikeGuess = API.FilterRequest
-  . (\(f, _)-> (f, Proxy))
-  . API.unFilterRequest
 
