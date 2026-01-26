@@ -70,7 +70,7 @@ blockTimeServer = websocketHandler
          -> API.SlowFast
          -> AppM API.BlockTimeStrikeGuess
       )
-  :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.getBlockTimeStrikesPageHandler
+  :<|> ((OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.getBlockTimeStrikesPage
         ) :: Maybe (Natural Int)
           -> Maybe (API.FilterRequest API.BlockTimeStrike API.BlockTimeStrikeFilter)
           -> AppM (API.PagingResult API.BlockTimeStrikeWithGuessesCount)
