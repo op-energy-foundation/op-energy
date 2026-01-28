@@ -58,9 +58,9 @@ Person
   deriving Eq Show Generic
 |]
 
-instance API.BuildFilter Person API.BlockTimeStrikeGuessResultFilter where
-  sortOrder (filter, _) = maybe Descend id (API.blockTimeStrikeGuessResultFilterSort filter)
-  buildFilter ( API.BlockTimeStrikeGuessResultFilter
+instance API.BuildFilter Person API.BlockTimeStrikeGuessFilter where
+  sortOrder (filter, _) = maybe Descend id (API.blockTimeStrikeGuessFilterSort filter)
+  buildFilter ( API.BlockTimeStrikeGuessFilter
                 mPersonEQ
                 mPersonNEQ
                 -- guess
