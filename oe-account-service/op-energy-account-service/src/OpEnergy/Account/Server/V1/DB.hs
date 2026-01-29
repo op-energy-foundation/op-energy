@@ -25,17 +25,12 @@ import qualified Data.Text.Encoding as TE
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.IO.Unlift(MonadUnliftIO)
 import           Control.Monad.Logger    (MonadLoggerIO, NoLoggingT )
-import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Reader (ReaderT)
-import           Control.Monad (void, forM_)
+import           Control.Monad ( forM_)
 import           Control.Monad.Trans.Resource(ResourceT)
 import qualified Data.List as List
 
 import           Database.Persist.Postgresql
-import qualified Data.Conduit as C
-import           Data.Conduit ((.|), runConduit )
-import qualified Data.Conduit.List as C
-import           Database.Persist.Pagination
 
 import           Data.OpEnergy.API.V1.Positive(fromPositive)
 import           Data.OpEnergy.API.V1.Natural(verifyNatural, fromNatural)
@@ -50,7 +45,8 @@ import           OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.SplitBlockTime
                    , splitBlockTimeStrikeObservedFromBlockTimeStrike
                    , createBlockTimeStrikeObservedTable
                    )
-
+import qualified OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeGuessesCount.Migration
+                   as CalculateBlockTimeStrikeCalculateGuessesCount
 
 
 -- | connect to DB. Returns connection pool
@@ -196,41 +192,13 @@ blockTimeStrikeDBMigrations =
     -- the rest is expected to be a migrations, that should handle incompatible migrations over some DB schema versions that are already running
 
     -- initial calculations of the block strike guesses count
-  , calculateBlockTimeStrikeCalculateGuessesCount
+  , CalculateBlockTimeStrikeCalculateGuessesCount.migration
     -- create BlockTimeStrikeObserved from BlockTimeStrike
   , createBlockTimeStrikeObservedTable
   , splitBlockTimeStrikeObservedFromBlockTimeStrike
     -- block_time_strike_guess.guess field need to be migrated from text into int
   , transformBlockTimeStrikeGuessGuessFromTextToBool
   ]
-  where
-    -- | this migration perform calculation of guesses count for existing strike in order to
-    -- fill appropriate CalculatedBlockTimeStrikeGuessesCount table
-    calculateBlockTimeStrikeCalculateGuessesCount config = do
-      runConduit
-        $ streamEntities -- search for strikes
-          []
-          BlockTimeStrikeId
-          (PageSize ((fromPositive recordsPerReply) + 1))
-          Descend
-          (Range Nothing Nothing)
-        .| ( C.awaitForever $ \(Entity strikeId _)-> do
-             guessesCount <- lift $ verifyNatural <$> count [ BlockTimeStrikeGuessStrike ==. strikeId ] -- count guesses
-             mguessesRecord <- lift $ selectFirst [ CalculatedBlockTimeStrikeGuessesCountStrike ==. strikeId ][]
-             case mguessesRecord of
-               Nothing -> do -- insert new row for appropriate strike
-                 void $ lift $ insert $ CalculatedBlockTimeStrikeGuessesCount
-                   { calculatedBlockTimeStrikeGuessesCountGuessesCount = guessesCount
-                   , calculatedBlockTimeStrikeGuessesCountStrike = strikeId
-                   }
-               Just (Entity guessesRecordId _)-> do -- update existing strike
-                 lift $ update guessesRecordId
-                   [ CalculatedBlockTimeStrikeGuessesCountGuessesCount =. guessesCount
-                   ]
-           )
-        .| C.sinkNull
-      where
-        recordsPerReply = configRecordsPerReply config
 
 -- | custom migration procedure
 -- for now, it is expected, that each migration have no clue about db version and thus none
