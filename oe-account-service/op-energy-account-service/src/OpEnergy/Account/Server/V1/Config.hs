@@ -67,6 +67,8 @@ data Config = Config
     -- ^ defines how much records should be returned in one page
   , configAverageBlockDiscoverSecs :: Positive Int
     -- ^ defines how much seconds takes to discover in average
+  , configBlockSpanDefaultSize :: Positive Int
+    -- ^ default block span size to use when user do not provide one
   }
   deriving Show
 instance FromJSON Config where
@@ -91,6 +93,7 @@ instance FromJSON Config where
     <*> ( v .:? "BLOCKTIME_STRIKE_SHOULD_EXISTS_AHEAD_CURRENT_TIP" .!= (configBlockTimeStrikeShouldExistsAheadCurrentTip defaultConfig))
     <*> ( v .:? "BLOCKTIME_RECORDS_PER_REPLY" .!= (configRecordsPerReply defaultConfig))
     <*> ( v .:? "AVERAGE_BLOCK_DISCOVER_SECS" .!= (configAverageBlockDiscoverSecs defaultConfig))
+    <*> ( v .:? "BLOCKSPAN_DEFAULT_SIZE" .!= (configBlockSpanDefaultSize defaultConfig))
 
 -- need to get Key from json, which represented as base64-encoded string
 instance FromJSON Key where
@@ -122,6 +125,7 @@ defaultConfig = Config
   , configBlockTimeStrikeShouldExistsAheadCurrentTip = 12
   , configRecordsPerReply = 100
   , configAverageBlockDiscoverSecs = 600
+  , configBlockSpanDefaultSize = verifyPositive 24
   }
 
 getConfigFromEnvironment :: IO Config

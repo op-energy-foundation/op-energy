@@ -27,13 +27,13 @@ import           Prometheus(MonadMonitor)
 import           Data.OpEnergy.Account.API
 import           Data.OpEnergy.API.V1.Positive
 import           OpEnergy.Account.Server.V1
-import           OpEnergy.BlockTimeStrike.Server.V1
 import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), defaultState, runAppT, runLogging)
 import           OpEnergy.Account.Server.V1.DB
 import           OpEnergy.Account.Server.V1.Metrics
-
 import           OpEnergy.Account.Server.V2
+import           OpEnergy.BlockTimeStrike.Server.V1
+import qualified OpEnergy.BlockTimeStrike.Server.V2 as V2
 
 -- required by prometheus-client
 instance MonadMonitor (LoggingT IO)
@@ -77,7 +77,10 @@ runServer = do
                :<|> OpEnergy.Account.Server.V2.accountServer
                )
           :<|> (return blockTimeApiSwagger)
-          :<|> OpEnergy.BlockTimeStrike.Server.V1.blockTimeServer
+          :<|>
+            ( OpEnergy.BlockTimeStrike.Server.V1.blockTimeServer
+            :<|> V2.blockTimeServer
+            )
 
 -- | tasks, that should be running during start
 bootstrapTasks :: (MonadLoggerIO m, MonadMonitor m) => State -> m ()
