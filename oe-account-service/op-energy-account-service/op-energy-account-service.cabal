@@ -69,6 +69,7 @@ library
                    , OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeGuessesCount.BlockTimeStrikeGuess
                    , OpEnergy.BlockTimeStrike.Server.V1.Class
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
+                   , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.GetBlockTimeStrikesPage
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledStrikeCreation
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeJudgement
@@ -78,6 +79,10 @@ library
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
                    , OpEnergy.BlockTimeStrike.Server.V1.SlowFast
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeFilter
+                   , OpEnergy.BlockTimeStrike.Server.V2
+                   , OpEnergy.BlockTimeStrike.Server.V2.StrikesAPI
+                   , OpEnergy.BlockTimeStrike.Server.V2.StrikesAPI.GetStrikes
+                   , OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrike
 
                    , Data.Text.Show
                    , Data.Conduit.Extra.Zip
