@@ -56,6 +56,9 @@ library
                    , Data.OpEnergy.Account.API.V1.FilterRequest
                    , Data.OpEnergy.Account.API.V1.Common
                    , Data.OpEnergy.Account.API.V2
+                   , Data.OpEnergy.BlockTime.API.V2
+                   , Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrike
+                   , Data.OpEnergy.BlockTime.API.V2.StrikesAPI
 
     build-depends:    base ^>=4.15.1.0
                     , aeson
