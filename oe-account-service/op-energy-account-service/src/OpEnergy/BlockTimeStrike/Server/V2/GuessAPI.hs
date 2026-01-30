@@ -11,12 +11,15 @@ import           Data.OpEnergy.API.V1.Natural(Natural)
 import qualified Data.OpEnergy.API.V1.Block as BlockV1
 
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountV1
+import qualified Data.OpEnergy.Account.API.V1.SlowFast as V1
 import           OpEnergy.Account.Server.V1.Class (AppM, AppT)
 
 import qualified Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrikeGuess
                  as API
 import qualified OpEnergy.BlockTimeStrike.Server.V2.GuessAPI.Get
                  as Get
+import qualified OpEnergy.BlockTimeStrike.Server.V2.GuessAPI.Create
+                 as Create
 
 handlers
   :: BlockV1.BlockHeight
@@ -26,6 +29,13 @@ handlers block mediantime
   =    ( Get.getHandler block mediantime
          :: AccountV1.AccountToken
          -> Maybe (Positive Int)
+         -> AppM API.BlockSpanTimeStrikeGuess
+       )
+
+  :<|> ( Create.createHandler block mediantime
+         :: AccountV1.AccountToken
+         -> Maybe (Positive Int)
+         -> V1.SlowFast
          -> AppM API.BlockSpanTimeStrikeGuess
        )
 
