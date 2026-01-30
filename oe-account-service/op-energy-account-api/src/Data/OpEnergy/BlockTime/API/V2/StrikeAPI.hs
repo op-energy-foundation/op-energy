@@ -6,11 +6,14 @@ module Data.OpEnergy.BlockTime.API.V2.StrikeAPI where
 
 import           Servant.API
 
+import           Data.OpEnergy.API.Tags
+
 import           Data.OpEnergy.API.V1.Natural
 import           Data.OpEnergy.API.V1.Positive
 import qualified Data.OpEnergy.API.V1.Block as BlockV1
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountV1
 import           Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrike
+import qualified Data.OpEnergy.BlockTime.API.V2.GuessAPI as GuessAPI
 
 type StrikeAPI
   =    Capture "StrikeBlockHeight" BlockV1.BlockHeight
@@ -49,4 +52,10 @@ type StrikeAPI
                    \future than current confirmed tip.\
                    \ - StrikeMediantime is a POSIX time in the future."
     :> Post '[JSON] BlockSpanTimeStrike
+
+  :<|> Tags "Guess API"
+    :> Capture "StrikeBlockHeight" BlockV1.BlockHeight
+    :> Capture "StrikeMediantime" (Natural Int)
+    :> "guess"
+    :> GuessAPI.GuessAPI
 
