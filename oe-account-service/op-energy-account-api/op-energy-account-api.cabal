@@ -62,6 +62,8 @@ library
                    , Data.OpEnergy.BlockTime.API.V2.StrikeAPI
                    , Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrikeGuess
                    , Data.OpEnergy.BlockTime.API.V2.GuessAPI
+                   , Data.OpEnergy.BlockTime.API.V2.StrikeGuessesAPI
+                   , Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrikeGuessesSummary
 
     build-depends:    base ^>=4.15.1.0
                     , aeson

@@ -67,6 +67,10 @@ library
                    , OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeGuessesCount.Migration
                    , OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeGuessesCount.BlockTimeStrike
                    , OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeGuessesCount.BlockTimeStrikeGuess
+                   , OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeGuessesCountSlowFast.Migration
+                   , OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeGuessesCountSlowFast.BlockTimeStrike
+                   , OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeGuessesCountSlowFast.BlockTimeStrikeGuessBefore
+                   , OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeGuessesCountSlowFast.BlockTimeStrikeGuessAfter
                    , OpEnergy.BlockTimeStrike.Server.V1.Class
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.GetBlockTimeStrikesPage
@@ -90,6 +94,8 @@ library
                    , OpEnergy.BlockTimeStrike.Server.V2.GuessAPI
                    , OpEnergy.BlockTimeStrike.Server.V2.GuessAPI.Get
                    , OpEnergy.BlockTimeStrike.Server.V2.GuessAPI.Create
+                   , OpEnergy.BlockTimeStrike.Server.V2.StrikeGuessesAPI
+                   , OpEnergy.BlockTimeStrike.Server.V2.StrikeGuessesAPI.Summary
 
                    , Data.Text.Show
                    , Data.Conduit.Extra.Zip
