@@ -7,6 +7,7 @@ import           Servant
 
 import           Data.OpEnergy.BlockTime.API.V2.StrikeAPI
 import           Data.OpEnergy.BlockTime.API.V2.GuessAPI
+import           Data.OpEnergy.BlockTime.API.V2.StrikeGuessesAPI
 import           Data.OpEnergy.API.V1.Natural(Natural)
 import           Data.OpEnergy.API.V1.Positive
 import qualified Data.OpEnergy.API.V1.Block as BlockV1
@@ -22,6 +23,8 @@ import qualified OpEnergy.BlockTimeStrike.Server.V2.StrikeAPI.Create
                  as Create
 import qualified OpEnergy.BlockTimeStrike.Server.V2.GuessAPI
                  as GuessAPI
+import qualified OpEnergy.BlockTimeStrike.Server.V2.StrikeGuessesAPI
+                 as StrikeGuessesAPI
 
 handlers :: ServerT StrikeAPI (AppT Handler)
 handlers
@@ -44,5 +47,11 @@ handlers
          :: BlockV1.BlockHeight
          -> Natural Int
          -> ServerT GuessAPI (AppT Handler)
+       )
+
+  :<|> ( StrikeGuessesAPI.handlers
+         :: BlockV1.BlockHeight
+         -> Natural Int
+         -> ServerT StrikeGuessesAPI (AppT Handler)
        )
 
