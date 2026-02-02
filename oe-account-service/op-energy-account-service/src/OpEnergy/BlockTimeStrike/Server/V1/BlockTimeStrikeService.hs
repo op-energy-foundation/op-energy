@@ -324,13 +324,16 @@ getBlockTimeStrikesPage mpage mfilterAPI =
       case mguessesCount of
         Just _ -> return [(strikeE, mObserved, mguessesCount)]
         Nothing -> do
-          mguessesCount <- selectFirst
+          mguessesCountFound <- selectFirst
             [ CalculatedBlockTimeStrikeGuessesCountStrike ==. strikeId]
             []
-          case mguessesCount of
-            Just _ -> return [(strikeE, mObserved, mguessesCount)]
-            Nothing -> do -- fallback mode, recount online, which maybe a bad thing to do here TODO decide if it should be removed
-              return []
+          case mguessesCountFound of
+            Just _ -> thereWereGuessesMade
+              where
+                thereWereGuessesMade = return [(strikeE, mObserved, mguessesCountFound)]
+            Nothing -> noGuessesMadeYet
+              where
+                noGuessesMadeYet = return [(strikeE, mObserved, Nothing)]
     fetchStrikeByGuessesCount
       :: [Filter BlockTimeStrike]
       -> Entity CalculatedBlockTimeStrikeGuessesCount
@@ -364,13 +367,13 @@ getBlockTimeStrikesPage mpage mfilterAPI =
       where
       tryFetchValidObservedStrikeByClass = do
         let
-            anyStrikeClassContraintByFilter = maybe
+            anyStrikeClassConstraintByFilter = maybe
               Nothing
               ( API.blockTimeStrikeFilterClass
               . fst
               . API.unFilterRequest
               ) mfilter
-        case anyStrikeClassContraintByFilter of
+        case anyStrikeClassConstraintByFilter of
           Nothing -> do
             let
                 observedStrikeFilter = maybe
@@ -451,7 +454,9 @@ getBlockTimeStrikesPage mpage mfilterAPI =
          ]
     unwrapGuessesCount (strikeE, mObserved, mguessesCount) = do
       case mguessesCount of
-        Nothing -> return []
+        Nothing -> thereIsNoGuessesMadeYet
+          where
+            thereIsNoGuessesMadeYet = return [(strikeE, mObserved, 0)]
         Just (Entity _ guessesCount) ->
           return [( strikeE
                   , mObserved
