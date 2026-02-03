@@ -28,6 +28,7 @@ import           Data.OpEnergy.API.V1.Natural(Natural, verifyNatural)
 
 import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.BlockTimeStrike.Server.V1.SlowFast (SlowFast(..))
+import           OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeGuessesCountSlowFast.BlockTimeStrike
 import           OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeGuessesCountSlowFast.BlockTimeStrikeGuessBefore
 import qualified OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeGuessesCountSlowFast.BlockTimeStrikeGuessAfter
                  as After
@@ -49,10 +50,11 @@ migration config = do
   runConduit
     $ streamEntities -- search for calculated block time strike guesses
       []
-      CalculatedBlockTimeStrikeGuessesCountId
+      BlockTimeStrikeId
       (PageSize (fromPositive recordsPerReply + 1))
       Descend
       (Range Nothing Nothing)
+    .| C.mapM fetchOrCreateCalculatedBlockTimeStrikeGuessesCount
     .| C.mapM calculateSlowFastCounts
     .| C.mapM updateCalculatedBlockTimeStrikeStrikeGuesses
     .| C.sinkNull
@@ -60,6 +62,26 @@ migration config = do
   runMigration After.createCalculatedBlockTimeStrikeGuessesCountSlowFastAfter
   where
     recordsPerReply = configRecordsPerReply config
+    fetchOrCreateCalculatedBlockTimeStrikeGuessesCount
+      :: Entity BlockTimeStrike
+      -> ReaderT SqlBackend (NoLoggingT (ResourceT IO))
+         (Entity CalculatedBlockTimeStrikeGuessesCount)
+    fetchOrCreateCalculatedBlockTimeStrikeGuessesCount (Entity strikeId _) = do
+      mexist <- selectFirst
+        [CalculatedBlockTimeStrikeGuessesCountStrike ==. strikeId]
+        []
+      case mexist of
+        Just exist -> return exist
+        Nothing -> do
+          let
+              record = CalculatedBlockTimeStrikeGuessesCount
+                { calculatedBlockTimeStrikeGuessesCountStrike = strikeId
+                , calculatedBlockTimeStrikeGuessesCountGuessesCount = 0
+                , calculatedBlockTimeStrikeGuessesCountFastCount = Just 0
+                , calculatedBlockTimeStrikeGuessesCountSlowCount = Just 0
+                }
+          calculatedId <- insert record
+          return (Entity calculatedId record)
     calculateSlowFastCounts
       :: Entity CalculatedBlockTimeStrikeGuessesCount
       -> ReaderT SqlBackend (NoLoggingT (ResourceT IO))

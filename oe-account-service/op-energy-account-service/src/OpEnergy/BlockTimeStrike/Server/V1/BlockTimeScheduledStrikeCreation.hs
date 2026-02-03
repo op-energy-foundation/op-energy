@@ -19,6 +19,7 @@ import           Data.OpEnergy.Client as Blockspan
 
 import           Data.OpEnergy.API.V1.Block
 import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
+import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
 import           Data.OpEnergy.API.V1.Positive
 import           Data.OpEnergy.API.V1.Natural
 import           OpEnergy.Account.Server.V1.Class as Account (profile, AppT, State(..), runLogging, withDBTransaction)
@@ -75,13 +76,24 @@ ensureGuessableStrikeExistsAhead confirmedTip = profile "ensureGuessableStrikeEx
                 (\height-> height `notElem` futureStrikes)
                 [ minimumStrikeHeight .. maximumStrikeHeight ]
           forM_ nonExistentStrikeHeights $ \height-> do
-            insert (BlockTimeStrike { blockTimeStrikeBlock = height
-                                    , blockTimeStrikeStrikeMediantime =
-                                      fromIntegral
-                                      $ blockHeaderMediantime confirmedTip
-                                      + fromIntegral ((fromNatural (height - blockHeaderHeight confirmedTip)) * 600) -- assume 10 minutes time slices for strike mediantime
-                                    , blockTimeStrikeCreationTime = utcTimeToPOSIXSeconds now
-                                    })
+            strikeId <- insert
+              ( BlockTimeStrike
+                { blockTimeStrikeBlock = height
+                , blockTimeStrikeStrikeMediantime =
+                  fromIntegral
+                  $ blockHeaderMediantime confirmedTip
+                  + fromIntegral ((fromNatural (height - blockHeaderHeight confirmedTip)) * 600) -- assume 10 minutes time slices for strike mediantime
+                , blockTimeStrikeCreationTime = utcTimeToPOSIXSeconds now
+                }
+              )
+            insert
+              ( CalculatedBlockTimeStrikeGuessesCount
+                { calculatedBlockTimeStrikeGuessesCountStrike = strikeId
+                , calculatedBlockTimeStrikeGuessesCountGuessesCount = 0
+                , calculatedBlockTimeStrikeGuessesCountFastCount = 0
+                , calculatedBlockTimeStrikeGuessesCountSlowCount = 0
+                }
+              )
           return nonExistentStrikeHeights
       when (List.length nonExistentBlockHeights > 0) $ do
         runLogging $ $(logInfo) ("ensureStrikeExistsAhead: created future strikes: " <> (tshow nonExistentBlockHeights))
