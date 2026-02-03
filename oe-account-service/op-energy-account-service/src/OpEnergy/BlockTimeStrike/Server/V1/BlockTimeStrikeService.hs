@@ -134,7 +134,15 @@ createBlockTimeStrikeFuture token blockHeight strikeMediantime =
             , blockTimeStrikeCreationTime = now
             }
       withDBTransaction "" $ do
-        insert_ record
+        strikeId <- insert record
+        insert_
+          ( CalculatedBlockTimeStrikeGuessesCount
+          { calculatedBlockTimeStrikeGuessesCountStrike = strikeId
+          , calculatedBlockTimeStrikeGuessesCountGuessesCount = 0
+          , calculatedBlockTimeStrikeGuessesCountFastCount = 0
+          , calculatedBlockTimeStrikeGuessesCountSlowCount = 0
+          }
+          )
         return record
 
 -- | this function is an entry point for a process, that creates blocktime past strikes when such block is being
