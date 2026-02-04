@@ -179,6 +179,7 @@ getStrikes mspanSize mpage mfilterAPI =
         (APIV1.pagingResultResults blockTimeStrikesGuesses)
         ( \(strike, Entity _ guessesCount) -> ExceptT
           $ BlockSpanTimeStrike.apiBlockSpanTimeStrikeModelBlockTimeStrike
+            latestConfirmedBlock
             spanSize
             strike
             guessesCount

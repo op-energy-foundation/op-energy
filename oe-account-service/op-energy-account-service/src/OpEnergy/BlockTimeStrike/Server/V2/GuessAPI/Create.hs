@@ -11,6 +11,8 @@ import           Control.Monad.Logger( logError)
 import           Control.Monad.Trans
 import           Control.Monad.Trans.Except( ExceptT (..))
 import           Data.Maybe(fromMaybe)
+import qualified Control.Concurrent.STM as STM
+import qualified Control.Concurrent.STM.TVar as TVar
 
 import           Servant ( err500, err400, ServerError)
 import           Database.Persist
@@ -27,14 +29,15 @@ import qualified Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrikeGuess
 import           OpEnergy.Account.Server.V1.Class
                  ( AppM, State(..), runLogging, profile, withDBTransaction )
 
-import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 import           OpEnergy.Error( eitherThrowJSON, runExceptPrefixT)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
                  as V1
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
                  as V1
+import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
                  as V1
+import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import qualified OpEnergy.Account.Server.V1.Config as Config
 import qualified OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeGuess
                  as BlockSpanTimeStrikeGuess
@@ -68,6 +71,12 @@ create
 create strikeBlock strikeMediantime token mspanSize guess =
     let name = "create"
     in profile name $ runExceptPrefixT name $ do
+  latestConfirmedBlockV <- lift
+    $ asks (BlockTime.latestConfirmedBlock . blockTimeState)
+  latestConfirmedBlock <-
+    ExceptT $ liftIO $ STM.atomically $ runExceptPrefixT "STM" $ do
+      exceptTMaybeT (err500, "latest confirmed block hasn't been received yet")
+        $ TVar.readTVar latestConfirmedBlockV
   guessV1 <- ExceptT $ V1.createBlockTimeStrikeFutureGuess token strikeBlock
     strikeMediantime guess
   eguessesCount <- exceptTMaybeT
@@ -90,6 +99,7 @@ create strikeBlock strikeMediantime token mspanSize guess =
     $ (`fromMaybe` mspanSize)
     . Config.configBlockSpanDefaultSize . config
   ExceptT $ BlockSpanTimeStrikeGuess.apiBlockSpanTimeStrikeGuessModelBlockTimeStrikeGuess
+    latestConfirmedBlock
     spanSize
     guessV1
     guessesCount
