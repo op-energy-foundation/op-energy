@@ -59,7 +59,7 @@ type AccountV1API
 
 type BlockTimeV1API
   = "ws"
-    :> Description "websockets handler. The goal is to be able to recieve \
+    :> Description "websockets handler. The goal is to be able to receive \
                    \notifications about newly created blocktime strikes and/or \
                    \guesses"
     :> WebSocket
