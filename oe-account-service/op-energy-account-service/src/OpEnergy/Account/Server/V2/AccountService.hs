@@ -20,18 +20,20 @@ import qualified Prometheus as P
 
 
 import           Data.OpEnergy.Account.API.V2
-import           Data.OpEnergy.Account.API.V1.Hash
-import           Data.OpEnergy.Account.API.V1.Account
+import qualified Data.OpEnergy.Account.API.V1.Hash as API
+import qualified Data.OpEnergy.Account.API.V1.Account as API
+import           Data.OpEnergy.API.V1.Error
+
 import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.Account.Server.V1.Class ( AppM, State(..), runLogging)
 import           OpEnergy.Account.Server.V1.Metrics(MetricsState(..))
-import           Data.OpEnergy.API.V1.Error
 import           OpEnergy.Account.Server.V1.AccountService(mgetPersonByHashedSecret)
+import           OpEnergy.Account.Server.V1.Person
 
 
 -- | see OpEnergy.Account.API.V2.AccountV2API for reference of 'login' API call
 -- 3 * O(ln n)
-login :: AccountSecret -> AppM LoginResult
+login :: API.AccountSecret -> AppM LoginResult
 login secret = do
   State{ config = Config { configSalt = configSalt
                          , configAccountTokenEncryptionPrivateKey =
@@ -44,7 +46,7 @@ login secret = do
                                 }
        } <- ask
   P.observeDuration accountLogin $ do
-    let hashedSecret = hashSBS configSalt unAccountSecret secret
+    let hashedSecret = API.hashSBS configSalt API.unAccountSecret secret
     mperson <- mgetPersonByHashedSecret hashedSecret
     case mperson of
       Nothing -> do
@@ -61,7 +63,7 @@ login secret = do
           $! ClientSession.encryptIO configAccountTokenEncryptionPrivateKey
           $! LBS.toStrict $! Aeson.encode (personUuid person, loginsCount)
         return $! LoginResult
-          { accountToken = verifyAccountToken $! Text.decodeUtf8 token
-          , personUUID = personUuid person
+          { accountToken = API.verifyAccountToken $! Text.decodeUtf8 token
+          , personUUID = apiModelUUIDPerson $ personUuid person
           }
 

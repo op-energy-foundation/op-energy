@@ -18,7 +18,7 @@ import           Prometheus(MonadMonitor)
 import           Data.OpEnergy.Client as Blockspan
 
 import           Data.OpEnergy.API.V1.Block
-import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
+import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
 import           Data.OpEnergy.API.V1.Positive
 import           Data.OpEnergy.API.V1.Natural
 import           OpEnergy.Account.Server.V1.Class as Account (profile, AppT, State(..), runLogging, withDBTransaction)

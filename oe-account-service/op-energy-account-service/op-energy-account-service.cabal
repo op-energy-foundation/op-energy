@@ -56,6 +56,10 @@ library
                    , OpEnergy.Account.Server.V1.WebSocketService
                    , OpEnergy.Account.Server.V1.WebSocketService.Message
                    , OpEnergy.Account.Server.V1.AccountService
+                   , OpEnergy.Account.Server.V1.Person
+                   , OpEnergy.Account.Server.V2
+                   , OpEnergy.Account.Server.V2.AccountService
+
                    , OpEnergy.BlockTimeStrike.Server
                    , OpEnergy.BlockTimeStrike.Server.V1
                    , OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.SplitBlockTimeStrikeObservedFromBlockTimeStrike
@@ -67,14 +71,17 @@ library
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeJudgement
                    , OpEnergy.BlockTimeStrike.Server.V1.Context
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeObserve
+                   , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
+                   , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
+                   , OpEnergy.BlockTimeStrike.Server.V1.SlowFast
+                   , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeFilter
+
                    , Data.Text.Show
                    , Data.Conduit.Extra.Zip
                    , OpEnergy.Error
                    , OpEnergy.PagingResult
                    , OpEnergy.ExceptMaybe
-                   , OpEnergy.Account.Server.V2
-                   , OpEnergy.Account.Server.V2.AccountService
-                   , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeFilter
+
     build-depends:    base ^>=4.15.1.0
                     , aeson
                     , aeson-pretty

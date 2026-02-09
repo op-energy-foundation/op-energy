@@ -12,7 +12,8 @@ import           Database.Persist
 import           Data.OpEnergy.API.V1.Block
 import           OpEnergy.BlockTimeStrike.Server.V1.Context (Context, unContext)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Context as Context
-import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
+import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
+import           OpEnergy.BlockTimeStrike.Server.V1.SlowFast
 
 
 data BlockObserved

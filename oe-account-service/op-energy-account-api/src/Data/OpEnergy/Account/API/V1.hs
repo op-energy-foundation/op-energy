@@ -3,9 +3,6 @@
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE DeriveDataTypeable         #-}
 {-# LANGUAGE DeriveGeneric              #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings          #-}
-{-# LANGUAGE EmptyDataDecls             #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE DuplicateRecordFields      #-}
 module Data.OpEnergy.Account.API.V1 where
@@ -23,12 +20,22 @@ import           Data.OpEnergy.API.V1(GitHashResponse)
 import           Data.OpEnergy.API.V1.Block
 import           Data.OpEnergy.API.V1.Natural
 import           Data.OpEnergy.Account.API.V1.Account
-import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
+                   ( BlockTimeStrikeGuess
+                   , BlockTimeStrikeGuessResult
+                   , BlockTimeStrikeGuessResultFilter
+                   )
+import           Data.OpEnergy.Account.API.V1.SlowFast
+                   ( SlowFast
+                   )
 import           Data.OpEnergy.Account.API.V1.PagingResult
 import           Data.OpEnergy.Account.API.V1.FilterRequest
 import           Data.OpEnergy.Account.API.V1.UUID
-import           Data.OpEnergy.Account.API.V1.BlockTimeStrikePublic
+import           Data.OpEnergy.Account.API.V1.BlockTimeStrike
+                   ( BlockTimeStrike
+                   , BlockTimeStrikeFilter
+                   , BlockTimeStrikeWithGuessesCount
+                   )
 
 -- | API specifications of a backend service for Swagger
 type AccountV1API
@@ -52,63 +59,166 @@ type AccountV1API
 
 type BlockTimeV1API
   = "ws"
-    :> Description "websockets handler. The goal is to be able to recieve notifications about newly created blocktime strikes and/or guesses"
+    :> Description "websockets handler. The goal is to be able to receive \
+                   \notifications about newly created blocktime strikes and/or \
+                   \guesses"
     :> WebSocket
 
   :<|> "strike"
-    :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "Authorization" AccountToken -- require authentication
+    :> Header'
+       '[ Required
+        , Strict
+        , Description "Account token gotten from /login or /register"
+        ]
+        "Authorization"
+        AccountToken -- require authentication
     :> Capture "BlockHeight" BlockHeight
     :> Capture "StrikeMediantime" (Natural Int)
-    :> Description "Creates new time strike by given BlockHeight and strike mediantime. Requires authentication. Where: BlockHeight - height of the block in the future. It is expected, that it should be at least at 12 block in the future than current confirmed tip. StrikeMediantime is a POSIX time in the future."
+    :> Description "Creates new time strike by given BlockHeight and strike \
+                   \mediantime. Requires authentication. Where: \
+                   \BlockHeight - height of the block in the future. It is \
+                   \expected, that it should be at least at 12 block in the \
+                   \future than current confirmed tip. StrikeMediantime is a \
+                   \POSIX time in the future."
     :> Post '[JSON] ()
 
   :<|> "strike"
     :> "guess"
-    :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "Authorization" AccountToken -- require authentication
+    :> Header'
+       '[ Required
+        , Strict
+        , Description "Account token gotten from /login or /register"
+        ]
+       "Authorization"
+       AccountToken -- require authentication
     :> Capture "BlockHeight" BlockHeight
     :> Capture "StrikeMediantime" (Natural Int)
     :> Capture "guess" SlowFast
-    :> Description "creates a guess for the given future time strike. Requires authentication."
-    :> Post '[JSON] BlockTimeStrikeGuessPublic
+    :> Description "creates a guess for the given future time strike. Requires \
+                   \authentication."
+    :> Post '[JSON] BlockTimeStrikeGuess
 
   :<|> "strikes"
     :> "page"
-    :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
-    :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter. Available filter options are listed in the format of current field. Meaning of fields' suffixes: 'GTE' - 'great-than-or-equal', 'LTE'- 'less-than-or-equal', 'EQ' - equal, 'NEQ' - 'not equal'. 'sort' field can have those values: 'descend', 'ascend', 'ascend_guesses_count' or 'descend_guesses_count'. '*_guesses_count' options changes sort orders by guesses count instead of block strike id. 'class' field can have those values: 'guessable', 'outcomeKnown', 'outcomeUnknown'" ] "filter" (FilterRequest BlockTimeStrike BlockTimeStrikeFilter)
-    :> Description "returns list of strikes. By default, results are ordered by strike id in descending order. (ie, from newer to older)"
-    :> Get '[JSON] (PagingResult BlockTimeStrikeWithGuessesCountPublic)
+    :> QueryParam'
+       '[ Optional
+        , Strict
+        , Description "defines page count to get"
+        ]
+       "page"
+       (Natural Int)
+    :> QueryParam'
+       '[ Optional
+        , Strict
+        , Description "possible filter as a string in JSON format. you can \
+                      \pass any combination of it's unique fields to build a \
+                      \filter. Available filter options are listed in the \
+                      \format of current field. Meaning of fields' suffixes: \
+                      \'GTE' - 'great-than-or-equal', \
+                      \'LTE'- 'less-than-or-equal', \
+                      \'EQ' - equal, 'NEQ' - 'not equal'. \
+                      \'sort' field can have those values: 'descend', \
+                      \'ascend', 'ascend_guesses_count' or \
+                      \'descend_guesses_count'. '*_guesses_count' options \
+                      \changes sort orders by guesses count instead of block \
+                      \strike id. 'class' field can have those values: \
+                      \'guessable', 'outcomeKnown', 'outcomeUnknown'"
+        ]
+       "filter"
+       (FilterRequest BlockTimeStrike BlockTimeStrikeFilter)
+    :> Description "returns list of strikes. By default, results are ordered \
+                   \by strike id in descending order. \
+                   \(ie, from newer to older)"
+    :> Get '[JSON] (PagingResult BlockTimeStrikeWithGuessesCount)
 
   :<|> "strikes"
     :> "guesses"
     :> "page"
-    :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
-    :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter. Available filter options are listed in the format of current field. Meaning of fields' suffixes: 'GTE' - 'great-than-or-equal', 'LTE'- 'less-than-or-equal', 'EQ' - equal, 'NEQ' - 'not equal'. 'sort' field can have those values: 'descend', 'ascend'. 'class' field can have those values: 'guessable', 'outcomeKnown', 'outcomeUnknown'" ] "filter" (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
-    :> Description "returns guesses for the given blocktime strike. By default, results are order by id in decending order (from new to old)"
-    :> Get '[JSON] (PagingResult BlockTimeStrikeGuessResultPublic)
+    :> QueryParam'
+       '[ Optional
+        , Strict
+        , Description "defines page count to get"
+        ]
+       "page"
+       (Natural Int)
+    :> QueryParam'
+       '[ Optional
+        , Strict
+        , Description "possible filter as a string in JSON format. you can \
+                      \pass any combination of it's unique fields to build a \
+                      \filter. Available filter options are listed in the \
+                      \format of current field. Meaning of fields' suffixes: \
+                      \'GTE' - 'great-than-or-equal', \
+                      \'LTE'- 'less-than-or-equal', \
+                      \'EQ' - equal, \
+                      \'NEQ' - 'not equal'. \
+                      \'sort' field can have those values: 'descend', \
+                      \'ascend'. 'class' field can have those values: \
+                      \'guessable', 'outcomeKnown', 'outcomeUnknown'"
+        ]
+       "filter"
+       ( FilterRequest
+           BlockTimeStrikeGuess
+           BlockTimeStrikeGuessResultFilter
+       )
+    :> Description "returns guesses for the given blocktime strike. By \
+                   \default, results are order by id in decending order \
+                   \(from new to old)"
+    :> Get '[JSON] (PagingResult BlockTimeStrikeGuessResult)
 
   :<|> "strike"
     :> "guesses"
     :> "page"
     :> Capture "BlockHeight" BlockHeight
     :> Capture "StrikeMediantime" (Natural Int)
-    :> QueryParam' '[Optional, Strict, Description "defines page count to get" ] "page" (Natural Int)
-    :> QueryParam' '[Optional, Strict, Description "possible filter as a string in JSON format. you can pass any combination of it's unique fields to build a filter. Available filter options are listed in the format of current field. Meaning of fields' suffixes: 'GTE' - 'great-than-or-equal', 'LTE'- 'less-than-or-equal', 'EQ' - equal, 'NEQ' - 'not equal'. 'sort' field can have those values: 'descend', 'ascend'." ] "filter" (FilterRequest BlockTimeStrikeGuess BlockTimeStrikeGuessResultPublicFilter)
-    :> Description "returns guesses for the given blocktime strike. By default, results are order by id in decending order (from new to old)"
-    :> Get '[JSON] (PagingResult BlockTimeStrikeGuessResultPublic)
+    :> QueryParam'
+       '[ Optional
+        , Strict
+        , Description "defines page count to get"
+        ]
+       "page"
+       (Natural Int)
+    :> QueryParam'
+       '[ Optional
+        , Strict
+        , Description "possible filter as a string in JSON format. you can \
+                      \pass any combination of it's unique fields to build a \
+                      \filter. Available filter options are listed in the \
+                      \format of current field. Meaning of fields' suffixes: \
+                      \'GTE' - 'great-than-or-equal', \
+                      \'LTE'- 'less-than-or-equal', \
+                      \'EQ' - equal, 'NEQ' - 'not equal'. \
+                      \'sort' field can have those values: 'descend', 'ascend'."
+        ]
+       "filter"
+       ( FilterRequest
+         BlockTimeStrikeGuess
+         BlockTimeStrikeGuessResultFilter
+       )
+    :> Description "returns guesses for the given blocktime strike. By \
+                   \default, results are order by id in decending order (from \
+                   \new to old)"
+    :> Get '[JSON] (PagingResult BlockTimeStrikeGuessResult)
 
   :<|> "strike"
     :> Capture "BlockHeight" BlockHeight
     :> Capture "StrikeMediantime" (Natural Int)
     :> Description "returns strikes"
-    :> Get '[JSON] BlockTimeStrikeWithGuessesCountPublic
+    :> Get '[JSON] BlockTimeStrikeWithGuessesCount
 
   :<|> "strike"
     :> "guess"
-    :> Header' '[Required, Strict, Description "Account token gotten from /login or /register" ] "Authorization" AccountToken -- require authentication
+    :> Header'
+       '[ Required
+        , Strict
+        , Description "Account token gotten from /login or /register"
+        ]
+        "Authorization"
+        AccountToken -- require authentication
     :> Capture "BlockHeight" BlockHeight
     :> Capture "StrikeMediantime" (Natural Int)
     :> Description "returns user's guess for the given blocktime strike."
-    :> Get '[JSON] BlockTimeStrikeGuessResultPublic
+    :> Get '[JSON] BlockTimeStrikeGuessResult
 
   :<|> "strike"
     :> "guess"
@@ -117,7 +227,7 @@ type BlockTimeV1API
     :> Capture "BlockHeight" BlockHeight
     :> Capture "StrikeMediantime" (Natural Int)
     :> Description "returns user's guess for the given blocktime strike."
-    :> Get '[JSON] BlockTimeStrikeGuessResultPublic
+    :> Get '[JSON] BlockTimeStrikeGuessResult
 
   :<|> "git-hash"
     :> Description "returns short hash of commit of the op-energy git repo that had been used to build backend"

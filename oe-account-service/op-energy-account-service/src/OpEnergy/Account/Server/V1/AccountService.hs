@@ -41,11 +41,13 @@ import qualified Prometheus as P
 
 import           Data.OpEnergy.Account.API.V1
 import           Data.OpEnergy.Account.API.V1.Hash
-import           Data.OpEnergy.Account.API.V1.Account
+import qualified Data.OpEnergy.Account.API.V1.Account as API
 import           Data.OpEnergy.Account.API.V1.UUID
+
 import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging)
 import           OpEnergy.Account.Server.V1.Metrics(MetricsState(..))
+import           OpEnergy.Account.Server.V1.Person
 import           Data.OpEnergy.API.V1.Error
 
 
@@ -66,13 +68,13 @@ register = do
     nowUTC <- liftIO getCurrentTime
     let now = utcTimeToPOSIXSeconds nowUTC
     uuid <- liftIO generateRandomUUID
-    secret <- liftIO $! generateAccountSecret configSalt
-    let hashedSecret = hashSBS configSalt unAccountSecret secret
+    secret <- liftIO $! API.generateAccountSecret configSalt
+    let hashedSecret = hashSBS configSalt API.unAccountSecret secret
         UUID rawUUID = uuid
-        userNameHash = verifyDisplayName $! "user" <> (Text.decodeUtf8 $! BS.take 6 $! BS.fromShort rawUUID)
+        userNameHash = API.verifyDisplayName $! "user" <> (Text.decodeUtf8 $! BS.take 6 $! BS.fromShort rawUUID)
         person = Person
           { personCreationTime = now
-          , personUuid = uuid
+          , personUuid = modelApiUUIDPerson uuid
           , personLastSeenTime = now
           , personLastUpdated = now
           , personEmail = Nothing
@@ -86,13 +88,13 @@ register = do
     token <- liftIO $ P.observeDuration accountTokenEncrypt $! ClientSession.encryptIO configAccountTokenEncryptionPrivateKey $! LBS.toStrict $! Aeson.encode (uuid, (0:: Word64) {- logins count is 0 for a new user -}) {- payload is of type (UUID Person, Word64) -}
     return $! RegisterResult
       { accountSecret = secret
-      , accountToken = verifyAccountToken $! Text.decodeUtf8 token
+      , accountToken = API.verifyAccountToken $! Text.decodeUtf8 token
       , personUUID = uuid
       }
 
 -- | see OpEnergy.Account.API.V1.AccountV1API for reference of 'login' API call
 -- 3 * O(ln n)
-login :: AccountSecret -> AppM AccountToken
+login :: API.AccountSecret -> AppM API.AccountToken
 login secret = do
   State{ config = Config { configSalt = configSalt
                          , configAccountTokenEncryptionPrivateKey = configAccountTokenEncryptionPrivateKey
@@ -104,7 +106,7 @@ login secret = do
                                 }
        } <- ask
   P.observeDuration accountLogin $ do
-    let hashedSecret = hashSBS configSalt unAccountSecret secret
+    let hashedSecret = hashSBS configSalt API.unAccountSecret secret
     mperson <- mgetPersonByHashedSecret hashedSecret
     case mperson of
       Nothing -> do
@@ -117,12 +119,12 @@ login secret = do
           update personKey [ PersonLoginsCount =. (personLoginsCount person + 1) ]
           return (personLoginsCount person + 1)
         token <- liftIO $ P.observeDuration accountTokenEncrypt $! ClientSession.encryptIO configAccountTokenEncryptionPrivateKey $! LBS.toStrict $! Aeson.encode (personUuid person, loginsCount)
-        return $! verifyAccountToken $! Text.decodeUtf8 token
+        return $! API.verifyAccountToken $! Text.decodeUtf8 token
 
 -- | 2 * O(ln n): lookup + update. This function returns Nothing if there is no Person exist in DB with given hashed secret. Otherwise, it will update LastSeenTime to the current UTC time and returns (Entity Person)
 mgetPersonByHashedSecret
   :: MonadIO m
-  => Hashed AccountSecret
+  => Hashed API.AccountSecret
   -> AppT m (Maybe (Entity Person))
 mgetPersonByHashedSecret hashedSecret = do
   State{ accountDBPool = pool
@@ -142,7 +144,7 @@ mgetPersonByHashedSecret hashedSecret = do
           return (Just (Entity key person { personLastSeenTime = now}))
 
 -- | 2 * O(ln n): lookup + update. This function returns Nothing if there is no Person exist in DB with given display name. Otherwise, it will update LastSeenTime to the current UTC time and returns (Entity Person)
-mgetPersonByDisplayName :: MonadIO m => DisplayName-> AppT m (Maybe (Entity Person))
+mgetPersonByDisplayName :: MonadIO m => API.DisplayName-> AppT m (Maybe (Entity Person))
 mgetPersonByDisplayName displayName = do
   State{ accountDBPool = pool
        , metrics = MetricsState { accountDBLookup = accountDBLookup
@@ -161,7 +163,7 @@ mgetPersonByDisplayName displayName = do
 
 -- | 2 * O(ln n): lookup + update. This function returns Nothing if there is no Person exist in DB with given AccountToken. Otherwise, it will update LastSeenTime to the current UTC time and returns (Entity Person)
 -- this function is expected to be used by other services in order to authenticate user
-mgetPersonByAccountToken :: (MonadIO m, MonadMonitor m) => AccountToken-> AppT m (Maybe (Entity Person))
+mgetPersonByAccountToken :: (MonadIO m, MonadMonitor m) => API.AccountToken-> AppT m (Maybe (Entity Person))
 mgetPersonByAccountToken token = do
   State{ config = Config { configAccountTokenEncryptionPrivateKey = configAccountTokenEncryptionPrivateKey
                          }
@@ -173,7 +175,9 @@ mgetPersonByAccountToken token = do
        } <- ask
   P.observeDuration accountMgetPersonByAccountToken $! do
     mtuple <- P.observeDuration accountTokenDecrypt $! do
-      case ClientSession.decrypt configAccountTokenEncryptionPrivateKey $! Text.encodeUtf8 (unAccountToken token) of
+      case ClientSession.decrypt configAccountTokenEncryptionPrivateKey
+             $! Text.encodeUtf8 (API.unAccountToken token)
+        of
         Nothing-> return Nothing
         Just decrypted -> do
           let mtuple :: (Maybe (UUID Person, Word64)) = Aeson.decode $! LBS.fromStrict $! decrypted

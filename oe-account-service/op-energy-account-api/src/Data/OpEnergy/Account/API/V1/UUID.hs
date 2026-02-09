@@ -1,7 +1,6 @@
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE OverloadedLists            #-}
 {-# LANGUAGE DeriveGeneric              #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module Data.OpEnergy.Account.API.V1.UUID where
 
