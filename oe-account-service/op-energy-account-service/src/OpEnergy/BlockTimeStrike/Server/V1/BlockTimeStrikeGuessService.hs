@@ -599,7 +599,7 @@ getBlockTimeStrikeGuessPerson uuid blockHeight strikeMediantime =
   mpersonE <- exceptTMaybeT "DB query errors, check logs" $ mgetPersonByUUID uuid
   personE <- exceptTMaybeT "person was not able to authenticate itself"
     $ return mpersonE
-  mstrike <- exceptTMaybeT "DB query errrors, see logs for details"
+  mstrike <- exceptTMaybeT "DB query errors, see logs for details"
     $ actualGetStrikeGuess personE blockHeight (fromIntegral strikeMediantime)
   exceptTMaybeT "no strike or guess found"
     $ return mstrike
