@@ -166,7 +166,7 @@ getBlockTimeStrikesPageHandler mpage mfilterAPI =
   eitherThrowJSON
     (\reason-> do
       callstack <- asks callStack
-      runLogging $ $(logError) $ callstack <> ": " <> callstack
+      runLogging $ $(logError) $ callstack <> ": " <> reason
       return (err500, reason)
     )
     $ runExceptPrefixT name $ ExceptT $ getBlockTimeStrikesPage mpage mfilterAPI
