@@ -454,7 +454,7 @@ getBlockTimeStrikeHandler blockHeight strikeMediantime =
     in profile name $ eitherThrowJSON
   (\reason-> do
     callstack <- asks callStack
-    runLogging $ $(logError) $ callstack <> ": " <> callstack
+    runLogging $ $(logError) $ callstack <> ": " <> reason
     return (err500, reason)
   )
   $ getBlockTimeStrike blockHeight strikeMediantime
