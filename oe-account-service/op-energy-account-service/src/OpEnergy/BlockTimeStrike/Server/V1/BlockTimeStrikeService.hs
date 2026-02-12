@@ -80,8 +80,9 @@ createBlockTimeStrikeFutureHandler token blockHeight strikeMediantime =
   eitherThrowJSON
     (\reason-> do
       callstack <- asks callStack
-      runLogging $ $(logError) $ callstack <> ": " <> reason
-      return (err500, reason)
+      let msg = callstack <> ": " <> reason
+      runLogging $ $(logError) msg
+      return (err500, msg)
     )
     $ runExceptPrefixT name $ do
     void $ ExceptT $ createBlockTimeStrikeFuture token blockHeight
@@ -171,8 +172,9 @@ getBlockTimeStrikesPageHandler mpage mfilterAPI =
   eitherThrowJSON
     (\reason-> do
       callstack <- asks callStack
-      runLogging $ $(logError) $ callstack <> ": " <> reason
-      return (err500, reason)
+      let msg = callstack <> ": " <> reason
+      runLogging $ $(logError) msg
+      return (err500, msg)
     )
     $ runExceptPrefixT name $ ExceptT $ getBlockTimeStrikesPage mpage mfilterAPI
 
@@ -459,8 +461,9 @@ getBlockTimeStrikeHandler blockHeight strikeMediantime =
     in profile name $ eitherThrowJSON
   (\reason-> do
     callstack <- asks callStack
-    runLogging $ $(logError) $ callstack <> ": " <> reason
-    return (err500, reason)
+    let msg = callstack <> ": " <> reason
+    runLogging $ $(logError) msg
+    return (err500, msg)
   )
   $ getBlockTimeStrike blockHeight strikeMediantime
 

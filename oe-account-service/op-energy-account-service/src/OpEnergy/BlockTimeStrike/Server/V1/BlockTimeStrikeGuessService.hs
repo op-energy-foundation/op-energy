@@ -100,7 +100,8 @@ createBlockTimeStrikeFutureGuessHandler
     in profile name $
   eitherThrowJSON
     (\reason-> do
-      let msg = "getBlockTimeStrikesGuessesPage: " <> reason
+      callstack <- asks callStack
+      let msg = callstack <> ": " <> reason
       runLogging $ $(logError) msg
       return (err500, msg)
     )
@@ -265,7 +266,8 @@ getBlockTimeStrikesGuessesPageHandler mpage mfilterAPI =
     in profile name $ do
   eitherThrowJSON
     (\reason-> do
-      let msg = "getBlockTimeStrikesGuessesPage: " <> reason
+      callstack <- asks callStack
+      let msg = callstack <> ": " <> reason
       runLogging $ $(logError) msg
       return (err500, msg)
     )
@@ -446,7 +448,8 @@ getBlockTimeStrikeGuessesPageHandler
     in profile name $
   eitherThrowJSON
     (\reason-> do
-      let msg = name <> ": " <> reason
+      callstack <- asks callStack
+      let msg = callstack <> ": " <> reason
       runLogging $ $(logError) msg
       return (err500, msg)
     )
@@ -520,8 +523,9 @@ getBlockTimeStrikeGuessHandler token blockHeight strikeMediantime =
     in profile name $ eitherThrowJSON
       (\reason-> do
         callstack <- asks callStack
-        runLogging $ $(logError) $ callstack <> ":" <> reason
-        return (err500, reason)
+        let msg = callstack <> ": " <> reason
+        runLogging $ $(logError) msg
+        return (err500, msg)
       )
       $ runExceptPrefixT name $ do
   ExceptT $ getBlockTimeStrikeGuess token blockHeight strikeMediantime
@@ -581,7 +585,7 @@ getBlockTimeStrikeGuessPersonHandler uuid blockHeight strikeMediantime =
   eitherThrowJSON
     (\reason-> do
       callstack <- asks callStack
-      let msg = callstack <> ": " <> name <> ": " <> reason
+      let msg = callstack <> ": " <> reason
       runLogging $ $(logError) msg
       return (err500, msg)
     )
