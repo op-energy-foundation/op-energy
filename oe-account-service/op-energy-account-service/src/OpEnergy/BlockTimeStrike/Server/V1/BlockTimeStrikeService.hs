@@ -97,14 +97,19 @@ createBlockTimeStrikeFuture token blockHeight strikeMediantime =
     in profile name $ runExceptPrefixT name $ do
   configBlockTimeStrikeMinimumBlockAheadCurrentTip <- lift $ asks
     $ Config.configBlockTimeStrikeMinimumBlockAheadCurrentTip . config
-  latestUnconfirmedBlockHeightV <- lift $ asks
-    $ BlockTime.latestUnconfirmedBlockHeight . blockTimeState
-  tip <- exceptTMaybeT "there is no current observed tip yet"
-    $ liftIO $ TVar.readTVarIO latestUnconfirmedBlockHeightV
-  when (tip > fromIntegral strikeMediantime) $
-    throwE "is in the past, which is not expected"
-  when (tip > fromIntegral strikeMediantime) $
-    throwE "is in the past, which is not expected"
+  latestUnconfirmedBlockHeightV <- lift $ asks (BlockTime.latestUnconfirmedBlockHeight . blockTimeState)
+  latestConfirmedBlockV <- lift $ asks
+    $ BlockTime.latestConfirmedBlock . blockTimeState
+  (tip, latestConfirmedBlock) <-
+    ExceptT $ liftIO $ STM.atomically $ runExceptT $ (,)
+      <$> (exceptTMaybeT "latest unconfirmed block hasn't been received yet"
+          $ TVar.readTVar latestUnconfirmedBlockHeightV
+          )
+      <*> (exceptTMaybeT "latest confirmed block hasn't been received yet"
+          $ TVar.readTVar latestConfirmedBlockV
+          )
+  when (blockHeaderMediantime latestConfirmedBlock >= fromIntegral strikeMediantime) $
+    throwE "strikeMediantime is in the past, which is not expected"
   when ( tip + naturalFromPositive configBlockTimeStrikeMinimumBlockAheadCurrentTip
          > blockHeight
        ) $ throwE "block height for new block time strike should be in the \
