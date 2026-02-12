@@ -80,7 +80,7 @@ createBlockTimeStrikeFutureHandler token blockHeight strikeMediantime =
   eitherThrowJSON
     (\reason-> do
       callstack <- asks callStack
-      runLogging $ $(logError) $ callstack <> ": " <> callstack
+      runLogging $ $(logError) $ callstack <> ": " <> reason
       return (err500, reason)
     )
     $ runExceptPrefixT name $ do
