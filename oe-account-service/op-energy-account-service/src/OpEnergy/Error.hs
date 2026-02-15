@@ -42,7 +42,9 @@ eitherThrowJSON handler payload = do
 
 -- | The goal of this function is to add prefix to the error reason
 -- example
--- @ runExceptT "MyFunction" $ throwE "error" @ will return @Left "MyFunction: error"@
+-- ```haskell
+-- runExceptPrefixT "MyFunction" $ throwE "error" -- will return @Left "MyFunction: error"@
+-- ```
 runExceptPrefixT
   :: Monad m
   => Text
