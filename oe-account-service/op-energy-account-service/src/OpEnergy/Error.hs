@@ -40,7 +40,7 @@ eitherThrowJSON handler payload = do
       throwJSON err msg
 
 
--- | The goal of this function is to add prefix to the error reason:w
+-- | The goal of this function is to add prefix to the error reason
 -- example
 -- @ runExceptT "MyFunction" $ throwE "error" @ will return @Left "MyFunction: error"@
 runExceptPrefixT
