@@ -12,7 +12,7 @@ import           Control.Monad.Trans
 import           Control.Monad.Trans.Except( ExceptT (..))
 import           Data.Maybe(fromMaybe)
 
-import           Servant ( err500)
+import           Servant ( ServerError)
 
 import           Data.OpEnergy.API.V1.Natural(Natural)
 import           Data.OpEnergy.API.V1.Positive
@@ -40,10 +40,11 @@ getStrikeHandler
 getStrikeHandler strikeBlock strikeMediantime mspanSize =
     let name = "V2.strikeAPI.GetStrike.getStrikeHandler"
     in profile name $ eitherThrowJSON
-      (\reason-> do
+      (\ reason-> do
         callstack <- asks callStack
-        runLogging $ $(logError) $ callstack <> ":" <> reason
-        return (err500, reason)
+        let msg = callstack <> ":" <> reason
+        runLogging $ $(logError) msg
+        return msg
       )
       $ runExceptPrefixT name $ do
   ExceptT $ getStrike strikeBlock strikeMediantime mspanSize
@@ -52,7 +53,7 @@ getStrike
   :: BlockV1.BlockHeight
   -> Natural Int
   -> Maybe (Positive Int)
-  -> AppM (Either Text API.BlockSpanTimeStrike)
+  -> AppM (Either (ServerError, Text) API.BlockSpanTimeStrike)
 getStrike strikeBlock strikeMediantime mspanSize =
     let name = "getStrike"
     in profile name $ runExceptPrefixT name $ do

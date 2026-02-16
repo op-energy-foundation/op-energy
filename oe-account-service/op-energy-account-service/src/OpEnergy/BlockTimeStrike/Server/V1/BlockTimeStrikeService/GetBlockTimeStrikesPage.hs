@@ -11,7 +11,7 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.GetBlockTimeStr
   , maybeFetchObservedStrike
   ) where
 
-import           Servant ( err500)
+import           Servant ( err500, ServerError)
 import           Control.Monad.Trans.Reader ( asks, ReaderT)
 import           Control.Monad.Logger( logError,  NoLoggingT)
 import qualified Control.Concurrent.STM as STM
@@ -65,8 +65,9 @@ getBlockTimeStrikesPageHandler mpage mfilterAPI =
   eitherThrowJSON
     (\reason-> do
       callstack <- asks callStack
-      runLogging $ $(logError) $ callstack <> ": " <> callstack
-      return (err500, reason)
+      let msg = callstack <> ": " <> reason
+      runLogging $ $(logError) msg
+      return msg
     )
     $ runExceptPrefixT name $ ExceptT $ getBlockTimeStrikesPage mpage mfilterAPI
 
@@ -76,7 +77,7 @@ getBlockTimeStrikesPage
      )
   => Maybe (Natural Int)
   -> Maybe (API.FilterRequest API.BlockTimeStrike API.BlockTimeStrikeFilter)
-  -> AppT m (Either Text (API.PagingResult API.BlockTimeStrikeWithGuessesCount))
+  -> AppT m (Either (ServerError, Text) (API.PagingResult API.BlockTimeStrikeWithGuessesCount))
 getBlockTimeStrikesPage mpage mfilterAPI =
     let name = "getBlockTimeStrikesPage"
     in profile name $ runExceptPrefixT name $ do
@@ -85,10 +86,10 @@ getBlockTimeStrikesPage mpage mfilterAPI =
   latestConfirmedBlockV <- lift $ asks (BlockTime.latestConfirmedBlock . blockTimeState)
   (latestUnconfirmedBlockHeight, latestConfirmedBlock) <-
     ExceptT $ liftIO $ STM.atomically $ runExceptT $ (,)
-      <$> (exceptTMaybeT "latest unconfirmed block hasn't been received yet"
+      <$> (exceptTMaybeT ( err500, "latest unconfirmed block hasn't been received yet")
           $ TVar.readTVar latestUnconfirmedBlockHeightV
           )
-      <*> (exceptTMaybeT "latest confirmed block hasn't been received yet"
+      <*> (exceptTMaybeT (err500, "latest confirmed block hasn't been received yet")
           $ TVar.readTVar latestConfirmedBlockV
           )
   let
@@ -112,7 +113,7 @@ getBlockTimeStrikesPage mpage mfilterAPI =
           latestConfirmedBlock
           configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
         ++ staticPartFilter
-  exceptTMaybeT "getBlockTimeStrikePast failed"
+  exceptTMaybeT (err500, "getBlockTimeStrikePast failed")
     $ getBlockTimeStrikePast strikeFilter
   where
     mfilter = fmap coerceFilterRequestBlockTimeStrike mfilterAPI

@@ -11,6 +11,7 @@ import           Control.Monad.Trans
 import           Control.Monad.Trans.Except( withExceptT, ExceptT (..))
 
 import           Prometheus(MonadMonitor)
+import           Servant ( err500, ServerError)
 
 
 import qualified Data.OpEnergy.API.V1.Positive as APIV1
@@ -34,7 +35,7 @@ apiBlockSpanTimeStrikeModelBlockTimeStrike
      )
   => APIV1.Positive Int
   -> APIV1.BlockTimeStrike
-  -> AppT m (Either Text API.BlockSpanTimeStrike)
+  -> AppT m (Either (ServerError, Text) API.BlockSpanTimeStrike)
 apiBlockSpanTimeStrikeModelBlockTimeStrike spanSize v =
     let name = "apiBlockSpanTimeStrikeModelBlockTimeStrike"
     in profile name $ runExceptPrefixT name $ do
@@ -43,13 +44,14 @@ apiBlockSpanTimeStrikeModelBlockTimeStrike spanSize v =
       Nothing -> return Nothing
       Just _ -> do
         url <- lift $ asks $ Config.configBlockspanURL . config
-        eBlockSpan <- ExceptT
+        eBlockSpan <- withExceptT (\msg -> (err500, Text.pack (show msg))) $ ExceptT
           $ liftIO $ eitherException
             $ BlockSpanClient.withClientEither url $ do
               BlockSpanClient.v2getSingleBlockspan
                 (APIV1.blockTimeStrikeBlock v)
                 (Just spanSize)
-        eret <- withExceptT (Text.pack . show) $ ExceptT $ return eBlockSpan
+        eret <- withExceptT (\msg -> (err500, Text.pack (show msg))) $ ExceptT
+          $ return eBlockSpan
         return $! Just eret
   return $! API.BlockSpanTimeStrike
     { API.block = APIV1.blockTimeStrikeBlock v

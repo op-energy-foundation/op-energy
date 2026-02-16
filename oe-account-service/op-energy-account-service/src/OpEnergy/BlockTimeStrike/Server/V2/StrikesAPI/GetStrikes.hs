@@ -9,7 +9,7 @@ module OpEnergy.BlockTimeStrike.Server.V2.StrikesAPI.GetStrikes
   ) where
 
 import           Data.Text(Text)
-import           Servant ( err500)
+import           Servant ( err500, ServerError)
 import           Control.Monad.Trans.Reader ( asks)
 import           Control.Monad.Logger( logError)
 import           Control.Monad(forM)
@@ -67,8 +67,9 @@ getStrikesHandler mspanSize mpage mfilter =
     in profile name $ eitherThrowJSON
       (\reason-> do
         callstack <- asks callStack
-        runLogging $ $(logError) $ callstack <> ":" <> reason
-        return (err500, reason)
+        let msg = callstack <> ":" <> reason
+        runLogging $ $(logError) msg
+        return msg
       )
       $ getStrikes mspanSize mpage mfilter
 
@@ -79,7 +80,7 @@ getStrikes
              APIV1.BlockTimeStrike
              APIV1.BlockTimeStrikeFilter
            )
-  -> AppM (Either Text (APIV1.PagingResult BlockSpanTimeStrike))
+  -> AppM (Either (ServerError, Text) (APIV1.PagingResult BlockSpanTimeStrike))
 getStrikes mspanSize mpage mfilterAPI =
     let name = "V2.getStrikes"
     in profile name $ runExceptPrefixT name $ do
@@ -101,10 +102,10 @@ getStrikes mspanSize mpage mfilterAPI =
     $ asks (BlockTime.latestConfirmedBlock . blockTimeState)
   (latestUnconfirmedBlockHeight, latestConfirmedBlock) <-
     ExceptT $ liftIO $ STM.atomically $ runExceptT $ (,)
-      <$> (exceptTMaybeT "latest unconfirmed block hasn't been received yet"
+      <$> (exceptTMaybeT ( err500, "latest unconfirmed block hasn't been received yet")
           $ TVar.readTVar latestUnconfirmedBlockHeightV
           )
-      <*> (exceptTMaybeT "latest confirmed block hasn't been received yet"
+      <*> (exceptTMaybeT ( err500, "latest confirmed block hasn't been received yet")
           $ TVar.readTVar latestConfirmedBlockV
           )
   let
@@ -132,7 +133,7 @@ getStrikes mspanSize mpage mfilterAPI =
     (asks $ Config.configBlockSpanDefaultSize . config)
     pure
     mspanSize
-  blockTimeStrikePage <- exceptTMaybeT "DB query failed"
+  blockTimeStrikePage <- exceptTMaybeT (err500, "DB query failed")
     $ PagingResult.pagingResult
       mpage
       linesPerPage

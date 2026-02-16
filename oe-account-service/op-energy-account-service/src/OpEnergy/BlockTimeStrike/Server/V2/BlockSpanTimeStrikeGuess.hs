@@ -9,7 +9,7 @@ import           Control.Monad.Trans
 import           Control.Monad.Trans.Except( ExceptT (..))
 
 import           Prometheus(MonadMonitor)
-
+import           Servant ( ServerError)
 
 import qualified Data.OpEnergy.API.V1.Positive as APIV1
 import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
@@ -30,7 +30,7 @@ apiBlockSpanTimeStrikeGuessModelBlockTimeStrikeGuess
      )
   => APIV1.Positive Int
   -> APIV1.BlockTimeStrikeGuess
-  -> AppT m (Either Text API.BlockSpanTimeStrikeGuess)
+  -> AppT m (Either (ServerError, Text) API.BlockSpanTimeStrikeGuess)
 apiBlockSpanTimeStrikeGuessModelBlockTimeStrikeGuess spanSize v =
     let name = "apiBlockSpanTimeStrikeGuessModelBlockTimeStrikeGuess"
     in profile name $ runExceptPrefixT name $ do

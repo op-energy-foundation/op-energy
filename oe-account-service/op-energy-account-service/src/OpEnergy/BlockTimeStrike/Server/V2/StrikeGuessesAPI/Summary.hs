@@ -42,12 +42,13 @@ get strikeBlock strikeMediantime =
     in profile name $ eitherThrowJSON
       (\reason-> do
         callstack <- asks callStack
-        runLogging $ $(logError) $ callstack <> ":" <> reason
-        return (err500, reason)
+        let msg = callstack <> ":" <> reason
+        runLogging $ $(logError) msg
+        return msg
       )
       $ runExceptPrefixT name  $ do
   lift $ runLogging $ $(logInfo) $! name <> ": " <> tshow (strikeBlock, strikeMediantime)
-  mGuessesCount <- exceptTMaybeT "DB query failed"
+  mGuessesCount <- exceptTMaybeT (err500, "DB query failed")
     $ withDBTransaction "CalculatedBlockTimeStrikeGuessesCount" $ runMaybeT $ do
       Persist.Entity strikeId _ <- MaybeT $ Persist.selectFirst
         [ V1.BlockTimeStrikeBlock ==. strikeBlock
@@ -58,7 +59,7 @@ get strikeBlock strikeMediantime =
         [ V1.CalculatedBlockTimeStrikeGuessesCountStrike ==. strikeId
         ]
         []
-  Persist.Entity _ guessesCount <- exceptTMaybeT "strike not found"
+  Persist.Entity _ guessesCount <- exceptTMaybeT(err400, "strike not found")
     $ return mGuessesCount
   return $! API.BlockSpanTimeStrikeGuessesSummary
     { API.slowCount =

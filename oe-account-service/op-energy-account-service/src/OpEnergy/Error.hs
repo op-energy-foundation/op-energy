@@ -28,15 +28,15 @@ eitherThrowJSON
      , MonadError ServerError m
      , ToJSON l
      )
-  => (l -> m (ServerError, Text))
-  -> m (Either l r)
+  => (l -> m Text)
+  -> m (Either (ServerError, l) r)
   -> m r
 eitherThrowJSON handler payload = do
   eret <- payload
   case eret of
     Right ret -> return ret
-    Left reason -> do
-      (err, msg) <- handler reason
+    Left (err, reason) -> do
+      msg <- handler reason
       throwJSON err msg
 
 
@@ -48,12 +48,12 @@ eitherThrowJSON handler payload = do
 runExceptPrefixT
   :: Monad m
   => Text
-  -> ExceptT Text m r
-  -> m (Either Text r)
+  -> ExceptT (ServerError, Text) m r
+  -> m (Either (ServerError, Text) r)
 runExceptPrefixT prefix payload = do
   eret <- runExceptT payload
   return $! either
-    (\reason-> Left (prefix <> ": " <> reason))
+    (\(errType, reason)-> Left (errType, prefix <> ": " <> reason))
     Right
     eret
 
