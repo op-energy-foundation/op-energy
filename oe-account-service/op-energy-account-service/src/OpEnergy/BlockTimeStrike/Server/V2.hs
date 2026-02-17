@@ -1,5 +1,5 @@
 {-- |
- - This module is the top module of backend V1
+ - This module is the top module of backend V2
  -}
 {-# LANGUAGE DataKinds                  #-}
 {-# LANGUAGE DeriveDataTypeable         #-}

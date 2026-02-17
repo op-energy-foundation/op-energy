@@ -61,7 +61,7 @@ instance ToSchema BlockSpanTimeStrike where
         , "- observedBlockHeight - contains height of the 'judgement' block."
         , "where:"
         , "- judgement block is the block, that used to calculate result against."
-        , "  judgement block is used accordigly to the following rules:"
+        , "  judgement block is used accordingly to the following rules:"
         , "  assume:"
         , "      1. CONFIRMED_MEDIANTIME(n) - is a mediantime of the confirmed block with height n;"
         , "      2. CONFIRMED_BLOCKHASH(n) - is a hash of the confirmed block with height n;"
@@ -94,12 +94,6 @@ instance ToSchema BlockSpanTimeStrike where
         , "      - observedBlockHash = CONFIRMED_BLOCKHASH(judgementBlockHeight)"
         ]
     & mapped.schema.example ?~ toJSON defaultBlockSpanTimeStrike
---    TODO: recheck
---    & mapped.schema.required .~
---        [ "block"
---        , "strikeMediantime"
---        , "creationTime"
---        ]
 instance Default BlockSpanTimeStrike where
   def = defaultBlockSpanTimeStrike
 defaultBlockSpanTimeStrike :: BlockSpanTimeStrike
