@@ -9,6 +9,8 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.GetBlockTimeStr
   ( getBlockTimeStrikesPage
   , getBlockTimeStrikesPageHandler
   , maybeFetchObservedStrike
+  , fetchStrikeByGuessesCount
+  , maybeFetchGuessesCount
   ) where
 
 import           Servant ( err500, ServerError)
@@ -164,10 +166,8 @@ getBlockTimeStrikesPage mpage mfilterAPI =
           strikeFilter
           sort
           BlockTimeStrikeId -- select strikes with given filter first
-          $  C.map guessesCountWillBeFetchedLater
+          $  C.concatMapM maybeFetchGuessesCount
           .| C.concatMapM (maybeFetchObservedStrike mfilter)
-          .| C.concatMapM maybeFetchGuessesCount
-          .| C.concatMapM unwrapGuessesCount
           .| C.map renderBlockTimeStrike
         SortByGuessesCountNeeded -> pagingResult
           mpage
@@ -176,46 +176,23 @@ getBlockTimeStrikesPage mpage mfilterAPI =
           sort
           CalculatedBlockTimeStrikeGuessesCountGuessesCount
           $  C.concatMapM (fetchStrikeByGuessesCount strikeFilter)
-          .| C.map guessesCountAlreadyFetched
           .| C.concatMapM (maybeFetchObservedStrike mfilter)
-          .| C.concatMapM unwrapGuessesCount
           .| C.map renderBlockTimeStrike
-guessesCountWillBeFetchedLater
-  :: Entity BlockTimeStrike
-  -> ( Maybe (Entity CalculatedBlockTimeStrikeGuessesCount)
-     , Entity BlockTimeStrike
-     )
-guessesCountWillBeFetchedLater strikeE = (Nothing, strikeE)
-guessesCountAlreadyFetched
-  :: ( Entity CalculatedBlockTimeStrikeGuessesCount
-     , Entity BlockTimeStrike
-     )
-  -> ( Maybe (Entity CalculatedBlockTimeStrikeGuessesCount)
-     , Entity BlockTimeStrike
-     )
-guessesCountAlreadyFetched (guessE, strikeE) = (Just guessE, strikeE)
 maybeFetchGuessesCount
-  :: ( Entity BlockTimeStrike
-     , Maybe (Entity BlockTimeStrikeObserved)
-     , Maybe (Entity CalculatedBlockTimeStrikeGuessesCount)
-     )
+  :: Entity BlockTimeStrike
   -> (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
-     [( Entity BlockTimeStrike
-      , Maybe (Entity BlockTimeStrikeObserved)
-      , Maybe (Entity CalculatedBlockTimeStrikeGuessesCount)
+     [( Entity CalculatedBlockTimeStrikeGuessesCount
+      , Entity BlockTimeStrike
       )
      ]
-maybeFetchGuessesCount (strikeE@(Entity strikeId _), mObserved, mguessesCount) = do
+maybeFetchGuessesCount strikeE@(Entity strikeId _) = do
+  mguessesCount <- selectFirst
+    [ CalculatedBlockTimeStrikeGuessesCountStrike ==. strikeId]
+    []
   case mguessesCount of
-    Just _ -> return [(strikeE, mObserved, mguessesCount)]
-    Nothing -> do
-      mguessesCount <- selectFirst
-        [ CalculatedBlockTimeStrikeGuessesCountStrike ==. strikeId]
-        []
-      case mguessesCount of
-        Just _ -> return [(strikeE, mObserved, mguessesCount)]
-        Nothing -> do -- fallback mode, recount online, which maybe a bad thing to do here TODO decide if it should be removed
-          return []
+    Just guessesCount -> return [(guessesCount, strikeE )]
+    Nothing -> do -- guesses count should exist. if it's not, then this is unexpected
+      return []
 fetchStrikeByGuessesCount
   :: [Filter BlockTimeStrike]
   -> Entity CalculatedBlockTimeStrikeGuessesCount
@@ -232,21 +209,21 @@ fetchStrikeByGuessesCount strikeFilter guessE@(Entity _ guessesCount) = do
     Nothing -> return []
 maybeFetchObservedStrike
   :: Maybe (API.FilterRequest BlockTimeStrike API.BlockTimeStrikeFilter)
-  -> ( Maybe (Entity CalculatedBlockTimeStrikeGuessesCount)
+  -> ( Entity CalculatedBlockTimeStrikeGuessesCount
      , Entity BlockTimeStrike
      )
   -> (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
      [( Entity BlockTimeStrike
       , Maybe (Entity BlockTimeStrikeObserved)
-      , Maybe (Entity CalculatedBlockTimeStrikeGuessesCount)
+      , Entity CalculatedBlockTimeStrikeGuessesCount
       )
      ]
-maybeFetchObservedStrike mfilter (mguessesCount, strikeE@(Entity strikeId _)) = do
+maybeFetchObservedStrike mfilter (guessesCount, strikeE@(Entity strikeId _)) = do
   anyValidObservedStrike <- tryFetchValidObservedStrikeByClass
   case anyValidObservedStrike of
     Nothing -> return [ ]
     Just maybeObservedStrike ->
-      return [ (strikeE, maybeObservedStrike, mguessesCount)]
+      return [ (strikeE, maybeObservedStrike, guessesCount)]
   where
   tryFetchValidObservedStrikeByClass = do
     let
@@ -297,10 +274,10 @@ maybeFetchObservedStrike mfilter (mguessesCount, strikeE@(Entity strikeId _)) = 
 renderBlockTimeStrike
   :: ( Entity BlockTimeStrike
      , Maybe (Entity BlockTimeStrikeObserved)
-     , Natural Int
+     , Entity CalculatedBlockTimeStrikeGuessesCount
      )
   -> API.BlockTimeStrikeWithGuessesCount
-renderBlockTimeStrike (Entity _ strike, mObserved, guessesCount) =
+renderBlockTimeStrike (Entity _ strike, mObserved, Entity _ guessesCount) =
   API.BlockTimeStrikeWithGuessesCount
     { blockTimeStrikeWithGuessesCountStrike = API.BlockTimeStrike
       { blockTimeStrikeObservedResult = fmap
@@ -322,26 +299,6 @@ renderBlockTimeStrike (Entity _ strike, mObserved, guessesCount) =
         blockTimeStrikeCreationTime strike
       }
     , blockTimeStrikeWithGuessesCountGuessesCount =
-      fromIntegral guessesCount
+      fromIntegral ( calculatedBlockTimeStrikeGuessesCountGuessesCount guessesCount)
     }
-unwrapGuessesCount
-  :: ( Entity BlockTimeStrike
-     , Maybe (Entity BlockTimeStrikeObserved)
-     , Maybe (Entity CalculatedBlockTimeStrikeGuessesCount)
-     )
-  -> (ReaderT SqlBackend (NoLoggingT (ResourceT IO)))
-     [( Entity BlockTimeStrike
-      , Maybe (Entity BlockTimeStrikeObserved)
-      , Natural Int
-      )
-     ]
-unwrapGuessesCount (strikeE, mObserved, mguessesCount) = do
-  case mguessesCount of
-    Nothing -> return []
-    Just (Entity _ guessesCount) ->
-      return [( strikeE
-              , mObserved
-              , calculatedBlockTimeStrikeGuessesCountGuessesCount guessesCount
-              )
-             ]
 
