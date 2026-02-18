@@ -50,6 +50,8 @@ import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeFilter
                  as BlockTimeStrikeFilter
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
                  as V1
+import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
+                 as V1
 import qualified OpEnergy.BlockTimeStrike.Server.V1.SlowFast as SlowFast
 
 -- | this handler returns pageable result of the BlockSpanTimeStrikes for a
@@ -72,6 +74,10 @@ getStrikesHandler mspanSize mpage mfilter =
         return msg
       )
       $ getStrikes mspanSize mpage mfilter
+
+data IsSortByGuessesCountNeeded
+  = SortByGuessesCountNotNeeded
+  | SortByGuessesCountNeeded
 
 getStrikes
   :: Maybe (APIV1.Positive Int)
@@ -133,25 +139,53 @@ getStrikes mspanSize mpage mfilterAPI =
     (asks $ Config.configBlockSpanDefaultSize . config)
     pure
     mspanSize
-  blockTimeStrikePage <- exceptTMaybeT (err500, "DB query failed")
-    $ PagingResult.pagingResult
-      mpage
-      linesPerPage
-      strikeFilter
-      sort
-      V1.BlockTimeStrikeId -- select strikes with given filter first
-      $  C.map (\strikeE-> (Nothing, strikeE) )
-      .| C.concatMapM (V1.maybeFetchObservedStrike mfilter)
-      .| C.map (\(strikeE, mObserved, _) -> (strikeE, mObserved))
-      .| C.map renderBlockTimeStrike
+  let
+      eSortGuessesCount = case maybe
+            APIV1.StrikeSortOrderDescend
+            ( fromMaybe APIV1.StrikeSortOrderDescend
+            . APIV1.blockTimeStrikeFilterSort
+            . fst
+            . APIV1.unFilterRequest
+            )
+            mfilter
+          of
+        APIV1.StrikeSortOrderAscend -> SortByGuessesCountNotNeeded
+        APIV1.StrikeSortOrderDescend -> SortByGuessesCountNotNeeded
+        APIV1.StrikeSortOrderAscendGuessesCount ->  SortByGuessesCountNeeded
+        APIV1.StrikeSortOrderDescendGuessesCount -> SortByGuessesCountNeeded
+  blockTimeStrikesGuesses <- exceptTMaybeT (err500, "DB query failed")
+    $ case eSortGuessesCount of
+      SortByGuessesCountNotNeeded-> PagingResult.pagingResult
+        mpage
+        linesPerPage
+        strikeFilter
+        sort
+        V1.BlockTimeStrikeId -- select strikes with given filter first
+        $  C.concatMapM V1.maybeFetchGuessesCount
+        .| C.concatMapM (V1.maybeFetchObservedStrike mfilter)
+        .| C.map (\(strikeE, mObserved, guessCount) ->
+            ( renderBlockTimeStrike (strikeE, mObserved), guessCount))
+      SortByGuessesCountNeeded -> PagingResult.pagingResult
+        mpage
+        linesPerPage
+        []
+        sort
+        V1.CalculatedBlockTimeStrikeGuessesCountGuessesCount
+        $  C.concatMapM (V1.fetchStrikeByGuessesCount strikeFilter)
+        .| C.concatMapM (V1.maybeFetchObservedStrike mfilter)
+        .| C.map (\(strikeE, mObserved, guessCount) ->
+             ( renderBlockTimeStrike (strikeE, mObserved), guessCount))
   blockSpanTimeStrikes <- forM
-        (APIV1.pagingResultResults blockTimeStrikePage)
-        ( ExceptT
-        . BlockSpanTimeStrike.apiBlockSpanTimeStrikeModelBlockTimeStrike spanSize
+        (APIV1.pagingResultResults blockTimeStrikesGuesses)
+        ( \(strike, Entity _ guessesCount) -> ExceptT
+          $ BlockSpanTimeStrike.apiBlockSpanTimeStrikeModelBlockTimeStrike
+            spanSize
+            strike
+            guessesCount
         )
   return $! APIV1.PagingResult
     { APIV1.pagingResultNextPage =
-      APIV1.pagingResultNextPage blockTimeStrikePage
+      APIV1.pagingResultNextPage blockTimeStrikesGuesses
     , APIV1.pagingResultResults = blockSpanTimeStrikes
     }
   where

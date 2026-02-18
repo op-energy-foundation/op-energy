@@ -23,6 +23,7 @@ import           Data.Default
 
 import           Data.OpEnergy.API.V1.Block(BlockHash, BlockHeight, defaultBlockHeight)
 import           Data.OpEnergy.API.V1.Positive(Positive)
+import           Data.OpEnergy.API.V1.Natural(Natural)
 import qualified Data.OpEnergy.API.V1.Positive as Positive
 import qualified Data.OpEnergy.API.V1.Hash as BlockHash (defaultHash)
 import           Data.OpEnergy.Account.API.V1.FilterRequest()
@@ -43,6 +44,7 @@ data BlockSpanTimeStrike = BlockSpanTimeStrike
   , observedBlockMediantime :: Maybe POSIXTime
   , observedBlockHash :: Maybe BlockHash
   , observedBlockHeight :: Maybe BlockHeight
+  , guessesCount :: Natural Int
   }
   deriving (Show, Generic)
 instance FromJSON BlockSpanTimeStrike
@@ -107,5 +109,6 @@ defaultBlockSpanTimeStrike =  BlockSpanTimeStrike
   , observedBlockHeight = Just defaultBlockHeight
   , spanSize = Positive.verifyPositive 24
   , mBlockSpan = Just BlockSpan.defaultBlockSpanHeadersNbdrHashrate
+  , guessesCount = 0
   }
 

@@ -21,6 +21,8 @@ import qualified Data.OpEnergy.Client as BlockSpanClient
 
 import qualified Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrike as API
 
+import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
+                 as V1
 import           OpEnergy.Error
                  ( runExceptPrefixT
                  , eitherException
@@ -35,8 +37,9 @@ apiBlockSpanTimeStrikeModelBlockTimeStrike
      )
   => APIV1.Positive Int
   -> APIV1.BlockTimeStrike
+  -> V1.CalculatedBlockTimeStrikeGuessesCount
   -> AppT m (Either (ServerError, Text) API.BlockSpanTimeStrike)
-apiBlockSpanTimeStrikeModelBlockTimeStrike spanSize v =
+apiBlockSpanTimeStrikeModelBlockTimeStrike spanSize v guessesCount =
     let name = "apiBlockSpanTimeStrikeModelBlockTimeStrike"
     in profile name $ runExceptPrefixT name $ do
   mBlockSpan <- do
@@ -63,5 +66,7 @@ apiBlockSpanTimeStrikeModelBlockTimeStrike spanSize v =
     , API.observedBlockMediantime = APIV1.blockTimeStrikeObservedBlockMediantime v
     , API.observedBlockHash = APIV1.blockTimeStrikeObservedBlockHash v
     , API.observedBlockHeight = APIV1.blockTimeStrikeObservedBlockHeight v
+    , API.guessesCount =
+      V1.calculatedBlockTimeStrikeGuessesCountGuessesCount guessesCount
     }
 
