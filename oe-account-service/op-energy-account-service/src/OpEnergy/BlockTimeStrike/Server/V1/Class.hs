@@ -30,3 +30,4 @@ defaultState _ = do
     , blockTimeStrikeConfirmedTip = blockTimeStrikeConfirmedTipV
     , latestUnconfirmedBlockHeight = latestUnconfirmedBlockHeightV
     }
+

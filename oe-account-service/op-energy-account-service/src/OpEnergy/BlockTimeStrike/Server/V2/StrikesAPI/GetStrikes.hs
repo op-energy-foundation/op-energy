@@ -14,10 +14,8 @@ import           Control.Monad.Trans.Reader ( asks)
 import           Control.Monad.Logger( logError)
 import           Control.Monad(forM)
 import           Control.Monad.Trans
-import           Control.Monad.Trans.Except( runExceptT, ExceptT (..))
+import           Control.Monad.Trans.Except( ExceptT (..))
 import           Data.Maybe( fromMaybe)
-import qualified Control.Concurrent.STM as STM
-import qualified Control.Concurrent.STM.TVar as TVar
 
 import           Data.Conduit( (.|) )
 import qualified Data.Conduit.List as C
@@ -41,8 +39,7 @@ import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.GetBl
                  as V1
 import qualified OpEnergy.Account.Server.V1.Config as Config
 import           OpEnergy.Account.Server.V1.Class
-                 ( AppM, State(..), runLogging, profile )
-import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
+                 ( AppM, State(..), runLogging, profile, getCurrentHeaderTip)
 import qualified OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrike
                  as BlockSpanTimeStrike
 import qualified OpEnergy.PagingResult as PagingResult
@@ -100,20 +97,10 @@ getStrikes mspanSize mpage mfilterAPI =
         . APIV1.unFilterRequest
         )
         mfilter
-  latestUnconfirmedBlockHeightV <- lift
-    $ asks (BlockTime.latestUnconfirmedBlockHeight . blockTimeState)
   configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip <- lift
     $ asks (Config.configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip . config)
-  latestConfirmedBlockV <- lift
-    $ asks (BlockTime.latestConfirmedBlock . blockTimeState)
   (latestUnconfirmedBlockHeight, latestConfirmedBlock) <-
-    ExceptT $ liftIO $ STM.atomically $ runExceptT $ (,)
-      <$> (exceptTMaybeT ( err500, "latest unconfirmed block hasn't been received yet")
-          $ TVar.readTVar latestUnconfirmedBlockHeightV
-          )
-      <*> (exceptTMaybeT ( err500, "latest confirmed block hasn't been received yet")
-          $ TVar.readTVar latestConfirmedBlockV
-          )
+    ExceptT getCurrentHeaderTip
   let
       staticPartFilter = maybe
                            []

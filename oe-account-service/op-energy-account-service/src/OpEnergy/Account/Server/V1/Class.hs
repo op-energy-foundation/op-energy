@@ -7,13 +7,15 @@ module OpEnergy.Account.Server.V1.Class where
 import           Data.Text(Text)
 import qualified Data.Text as Text
 import           Data.Map(Map)
+import qualified Control.Concurrent.STM as STM
 import           Control.Concurrent.STM.TVar (TVar)
 import qualified Control.Concurrent.STM.TVar as TVar
+import           Control.Monad.Trans.Except(runExceptT, ExceptT(..))
 import           Control.Monad.Trans.Reader (runReaderT, ReaderT, ask, asks, local)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Trans(lift)
 import           Control.Monad.Logger (runLoggingT, filterLogger, LoggingT, MonadLoggerIO, Loc, LogSource, LogLevel, LogStr, logError, NoLoggingT)
-import           Servant (Handler)
+import           Servant (Handler, err500, ServerError)
 import           Data.Pool(Pool)
 import           Database.Persist.Postgresql (SqlBackend, runSqlPersistMPool)
 import           Control.Monad.Trans.Resource
@@ -24,6 +26,9 @@ import           Control.Exception.Safe (SomeException)
 import qualified Control.Exception.Safe as E
 
 import           Data.OpEnergy.Account.API.V1.Account
+import           Data.OpEnergy.API.V1.Block(BlockHeight, BlockHeader)
+import           OpEnergy.Error( runExceptPrefixT)
+import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.Account.Server.V1.Metrics
@@ -141,3 +146,18 @@ withDBTransaction name next = profile name $ do
   state <- ask
   liftIO $ withDBTransactionIO state header next
 
+getCurrentHeaderTip
+  :: MonadIO m
+  => AppT m (Either (ServerError, Text) (BlockHeight, BlockHeader))
+getCurrentHeaderTip =
+    let name = "getCurrentHeaderTip"
+    in runExceptPrefixT name $ do
+  latestUnconfirmedBlockHeightV <- lift $ asks (BlockTime.latestUnconfirmedBlockHeight . blockTimeState)
+  latestConfirmedBlockV <- lift $ asks (BlockTime.latestConfirmedBlock . blockTimeState)
+  ExceptT $ liftIO $ STM.atomically $ runExceptT $ (,)
+    <$> (exceptTMaybeT ( err500, "latest unconfirmed block hasn't been received yet")
+        $ TVar.readTVar latestUnconfirmedBlockHeightV
+        )
+    <*> (exceptTMaybeT (err500, "latest confirmed block hasn't been received yet")
+        $ TVar.readTVar latestConfirmedBlockV
+        )

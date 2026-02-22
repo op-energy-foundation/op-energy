@@ -20,8 +20,6 @@ import           Control.Monad.Logger( logError, logInfo, NoLoggingT)
 import           Control.Monad(forever, when, void)
 import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
-import qualified Control.Concurrent.STM as STM
-import qualified Control.Concurrent.STM.TVar as TVar
 import qualified Control.Concurrent.MVar as MVar
 import           Data.Text (Text)
 import           Data.Conduit( (.|) )
@@ -29,7 +27,7 @@ import qualified Data.Conduit as C
 import qualified Data.Conduit.List as C
 import           Control.Monad.Trans
 import           Control.Monad.Trans.Except
-                   ( runExceptT, ExceptT (..), throwE)
+                   ( ExceptT (..), throwE)
 import           Control.Monad.Trans.Resource( ResourceT)
 
 import           Database.Persist
@@ -59,7 +57,10 @@ import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.GetBl
 import           OpEnergy.Account.Server.V1.Config
                  as Config(Config(..))
 import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
-import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging, profile, withDBTransaction )
+import           OpEnergy.Account.Server.V1.Class
+                 ( AppT, AppM, State(..), runLogging, profile
+                 , withDBTransaction, getCurrentHeaderTip
+                 )
 import           OpEnergy.Account.Server.V1.Person
 
 -- | O(ln accounts).
@@ -93,17 +94,8 @@ createBlockTimeStrikeFuture token blockHeight strikeMediantime =
     in profile name $ runExceptPrefixT name $ do
   configBlockTimeStrikeMinimumBlockAheadCurrentTip <- lift $ asks
     $ Config.configBlockTimeStrikeMinimumBlockAheadCurrentTip . config
-  latestUnconfirmedBlockHeightV <- lift $ asks (BlockTime.latestUnconfirmedBlockHeight . blockTimeState)
-  latestConfirmedBlockV <- lift $ asks
-    $ BlockTime.latestConfirmedBlock . blockTimeState
   (tip, latestConfirmedBlock) <-
-    ExceptT $ liftIO $ STM.atomically $ runExceptT $ (,)
-      <$> (exceptTMaybeT (err500, "latest unconfirmed block hasn't been received yet")
-          $ TVar.readTVar latestUnconfirmedBlockHeightV
-          )
-      <*> (exceptTMaybeT (err500, "latest confirmed block hasn't been received yet")
-          $ TVar.readTVar latestConfirmedBlockV
-          )
+    ExceptT getCurrentHeaderTip
   when (blockHeaderMediantime latestConfirmedBlock >= fromIntegral strikeMediantime) $
     throwE ( err400, "strikeMediantime is in the past, which is not expected")
   when ( tip + naturalFromPositive configBlockTimeStrikeMinimumBlockAheadCurrentTip
