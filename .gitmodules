@@ -1,3 +1,4 @@
 [submodule "oe-blockspan-service"]
 	path = oe-blockspan-service
 	url = ssh://git@github.com/op-energy-foundation/op-energy-blockspan-service
+	branch = devel
