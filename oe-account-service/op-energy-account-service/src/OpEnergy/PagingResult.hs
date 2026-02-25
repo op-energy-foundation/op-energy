@@ -7,7 +7,8 @@ module OpEnergy.PagingResult
 
 import qualified Data.List as List
 import           Control.Monad.Trans.Reader ( ReaderT)
-import           Control.Monad(forM_)
+import           Control.Monad(forM_, when)
+import           Data.Maybe(fromMaybe)
 
 import qualified Data.Conduit as C
 import           Data.Conduit ((.|), runConduit, ConduitT)
@@ -16,7 +17,6 @@ import           Control.Monad.Logger hiding (logDebug)
 import           Control.Monad.Trans
 import           Database.Persist.Pagination
 import           Database.Persist.Postgresql
-import           Control.Exception.Safe as E
 import           Control.Monad.Trans.Resource
 import           Prometheus(MonadMonitor(..))
 
@@ -32,7 +32,6 @@ pagingResult
      , PersistEntityBackend r ~ SqlBackend
      , Ord typ
      , MonadIO m
-     , MonadCatch m
      , MonadMonitor m
      )
   =>  Maybe (Natural Int)
@@ -42,20 +41,21 @@ pagingResult
   -> EntityField r typ
   -> ConduitT
     (Entity r)
-    (r1)
+    r1
     (ReaderT SqlBackend (NoLoggingT (ResourceT IO))) ()
   -> AppT m (Maybe (PagingResult r1) )
-pagingResult mpage recordsPerReply filter sortOrder field next = profile "pagingResult" $ do
-  mret <- withDBTransaction "" $ do
-    pageResults <- runConduit
-      $ loopSource Nothing
-      .| next
-      .| skipToNeededPage -- navigate to page
-      .| C.take (fromPositive recordsPerReply + 1) -- we take +1 to understand if there is a next page available
-    return (pageResults)
+pagingResult mpage recordsPerReply filter sortOrder field next =
+    let name = "pagingResult"
+    in profile name $ do
+  mret <- withDBTransaction "" $ runConduit
+    $ loopSource Nothing
+    .| next
+    .| skipToNeededPage -- navigate to page
+    .| C.take (fromPositive recordsPerReply + 1) -- we take +1 to understand
+                                          -- if there is a next page available
   case mret of
     Nothing -> return Nothing
-    Just (resultsTail) -> do
+    Just resultsTail -> do
       let newPage =
             if List.length resultsTail > fromPositive recordsPerReply
             then Just (fromIntegral (fromNatural page + 1))
@@ -66,11 +66,12 @@ pagingResult mpage recordsPerReply filter sortOrder field next = profile "paging
         , pagingResultResults = results
         }
   where
-    skipToNeededPage = (C.drop (fromNatural page * fromPositive recordsPerReply) >> C.awaitForever C.yield)
-    page = maybe 0 id mpage
+    skipToNeededPage = C.drop (fromNatural page * fromPositive recordsPerReply)
+      >> C.awaitForever C.yield
+    page = fromMaybe 0 mpage
     loopSource moffset = do
       let
-          offset = maybe 0 id moffset
+          offset = fromMaybe 0 moffset
       rows <- lift $ selectList
         filter
         [ LimitTo (recordsPerReplyInt + 1)
@@ -84,9 +85,8 @@ pagingResult mpage recordsPerReply filter sortOrder field next = profile "paging
         then return ()
         else do
           forM_ (List.take recordsPerReplyInt rows) C.yield
-          if isMoreRowsThanRecordsPerReplyAvailable
-            then loopSource (Just (offset + recordsPerReplyInt))
-            else return ()
+          when isMoreRowsThanRecordsPerReplyAvailable
+            $ loopSource (Just (offset + recordsPerReplyInt))
       where
         sort = case sortOrder of
           Descend-> Desc field
