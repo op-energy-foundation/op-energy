@@ -15,7 +15,7 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
   , getBlockTimeStrikeHandler
   ) where
 
-import           Servant ( err500)
+import           Servant ( err500, err400, ServerError)
 import           Control.Monad.Trans.Reader ( ask, asks, ReaderT)
 import           Control.Monad.Logger( logError, logInfo, NoLoggingT)
 import           Control.Monad(forever, when, void)
@@ -82,7 +82,7 @@ createBlockTimeStrikeFutureHandler token blockHeight strikeMediantime =
       callstack <- asks callStack
       let msg = callstack <> ": " <> reason
       runLogging $ $(logError) msg
-      return (err500, msg)
+      return msg
     )
     $ runExceptPrefixT name $ do
     void $ ExceptT $ createBlockTimeStrikeFuture token blockHeight
@@ -92,7 +92,7 @@ createBlockTimeStrikeFuture
   :: API.AccountToken
   -> BlockHeight
   -> Natural Int
-  -> AppM (Either Text BlockTimeStrike)
+  -> AppM (Either (ServerError, Text) BlockTimeStrike)
 createBlockTimeStrikeFuture token blockHeight strikeMediantime =
     let name = "createBlockTimeStrikeFuture"
     in profile name $ runExceptPrefixT name $ do
@@ -103,21 +103,21 @@ createBlockTimeStrikeFuture token blockHeight strikeMediantime =
     $ BlockTime.latestConfirmedBlock . blockTimeState
   (tip, latestConfirmedBlock) <-
     ExceptT $ liftIO $ STM.atomically $ runExceptT $ (,)
-      <$> (exceptTMaybeT "latest unconfirmed block hasn't been received yet"
+      <$> (exceptTMaybeT (err500, "latest unconfirmed block hasn't been received yet")
           $ TVar.readTVar latestUnconfirmedBlockHeightV
           )
-      <*> (exceptTMaybeT "latest confirmed block hasn't been received yet"
+      <*> (exceptTMaybeT (err500, "latest confirmed block hasn't been received yet")
           $ TVar.readTVar latestConfirmedBlockV
           )
   when (blockHeaderMediantime latestConfirmedBlock >= fromIntegral strikeMediantime) $
-    throwE "strikeMediantime is in the past, which is not expected"
+    throwE ( err400, "strikeMediantime is in the past, which is not expected")
   when ( tip + naturalFromPositive configBlockTimeStrikeMinimumBlockAheadCurrentTip
          > blockHeight
-       ) $ throwE "block height for new block time strike should be in the \
-           \future + minimum configBlockTimeStrikeMinimumBlockAheadCurrentTip"
-  person <- exceptTMaybeT "person was not able to authenticate itself"
+       ) $ throwE (err400, "block height for new block time strike should be in the \
+           \future + minimum configBlockTimeStrikeMinimumBlockAheadCurrentTip")
+  person <- exceptTMaybeT (err400, "person was not able to authenticate itself")
     $ mgetPersonByAccountToken token
-  exceptTMaybeT "something went wrong"
+  exceptTMaybeT (err500, "something went wrong")
     $ createBlockTimeStrikeEnsuredConditions person
   where
     createBlockTimeStrikeEnsuredConditions
@@ -134,7 +134,15 @@ createBlockTimeStrikeFuture token blockHeight strikeMediantime =
             , blockTimeStrikeCreationTime = now
             }
       withDBTransaction "" $ do
-        insert_ record
+        strikeId <- insert record
+        insert_
+          ( CalculatedBlockTimeStrikeGuessesCount
+          { calculatedBlockTimeStrikeGuessesCountStrike = strikeId
+          , calculatedBlockTimeStrikeGuessesCountGuessesCount = 0
+          , calculatedBlockTimeStrikeGuessesCountFastCount = 0
+          , calculatedBlockTimeStrikeGuessesCountSlowCount = 0
+          }
+          )
         return record
 
 -- | this function is an entry point for a process, that creates blocktime past strikes when such block is being
@@ -174,7 +182,7 @@ getBlockTimeStrikesPageHandler mpage mfilterAPI =
       callstack <- asks callStack
       let msg = callstack <> ": " <> reason
       runLogging $ $(logError) msg
-      return (err500, msg)
+      return msg
     )
     $ runExceptPrefixT name $ ExceptT $ getBlockTimeStrikesPage mpage mfilterAPI
 
@@ -184,7 +192,7 @@ getBlockTimeStrikesPage
      )
   => Maybe (Natural Int)
   -> Maybe (API.FilterRequest API.BlockTimeStrike API.BlockTimeStrikeFilter)
-  -> AppT m (Either Text (API.PagingResult API.BlockTimeStrikeWithGuessesCount))
+  -> AppT m (Either (ServerError, Text) (API.PagingResult API.BlockTimeStrikeWithGuessesCount))
 getBlockTimeStrikesPage mpage mfilterAPI =
     let name = "getBlockTimeStrikesPage"
     in profile name $ runExceptPrefixT name $ do
@@ -193,10 +201,10 @@ getBlockTimeStrikesPage mpage mfilterAPI =
   latestConfirmedBlockV <- lift $ asks (BlockTime.latestConfirmedBlock . blockTimeState)
   (latestUnconfirmedBlockHeight, latestConfirmedBlock) <-
     ExceptT $ liftIO $ STM.atomically $ runExceptT $ (,)
-      <$> (exceptTMaybeT "latest unconfirmed block hasn't been received yet"
+      <$> (exceptTMaybeT (err500, "latest unconfirmed block hasn't been received yet")
           $ TVar.readTVar latestUnconfirmedBlockHeightV
           )
-      <*> (exceptTMaybeT "latest confirmed block hasn't been received yet"
+      <*> (exceptTMaybeT (err500, "latest confirmed block hasn't been received yet")
           $ TVar.readTVar latestConfirmedBlockV
           )
   let
@@ -220,7 +228,7 @@ getBlockTimeStrikesPage mpage mfilterAPI =
           latestConfirmedBlock
           configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
         ++ staticPartFilter
-  exceptTMaybeT "getBlockTimeStrikePast failed"
+  exceptTMaybeT ( err500, "getBlockTimeStrikePast failed")
     $ getBlockTimeStrikePast strikeFilter
   where
     mfilter = fmap coerceFilterRequestBlockTimeStrike mfilterAPI
@@ -463,7 +471,7 @@ getBlockTimeStrikeHandler blockHeight strikeMediantime =
     callstack <- asks callStack
     let msg = callstack <> ": " <> reason
     runLogging $ $(logError) msg
-    return (err500, msg)
+    return msg
   )
   $ getBlockTimeStrike blockHeight strikeMediantime
 
@@ -471,12 +479,12 @@ getBlockTimeStrikeHandler blockHeight strikeMediantime =
 getBlockTimeStrike
   :: BlockHeight
   -> Natural Int
-  -> AppM (Either Text API.BlockTimeStrikeWithGuessesCount)
+  -> AppM (Either (ServerError, Text) API.BlockTimeStrikeWithGuessesCount)
 getBlockTimeStrike blockHeight strikeMediantime =
     let name = "getBlockTimeStrike"
     in profile name $ runExceptPrefixT name $ do
   recordsPerReply <- lift $ asks (configRecordsPerReply . config)
-  mStrike <- exceptTMaybeT "something went wrong"
+  mStrike <- exceptTMaybeT (err500, "something went wrong")
     $ withDBTransaction "" $ do
         C.runConduit
           $ streamEntities
@@ -489,7 +497,7 @@ getBlockTimeStrike blockHeight strikeMediantime =
           .| C.mapM maybeFetchObserved
           .| C.map renderBlockTimeStrikeWithGuessesCount
           .| C.head
-  exceptTMaybeT "strike not found" $ return mStrike
+  exceptTMaybeT (err400, "strike not found") $ return mStrike
   where
     getGuessesCountByBlockTimeStrike
       :: Entity BlockTimeStrike

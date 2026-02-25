@@ -64,8 +64,16 @@ library
                    , OpEnergy.BlockTimeStrike.Server.V1
                    , OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.SplitBlockTimeStrikeObservedFromBlockTimeStrike
                    , OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.SplitBlockTimeStrikeObservedFromBlockTimeStrike.Model
+                   , OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeGuessesCount.Migration
+                   , OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeGuessesCount.BlockTimeStrike
+                   , OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeGuessesCount.BlockTimeStrikeGuess
+                   , OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeGuessesCountSlowFast.Migration
+                   , OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeGuessesCountSlowFast.BlockTimeStrike
+                   , OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeGuessesCountSlowFast.BlockTimeStrikeGuessBefore
+                   , OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.CalculateBlockTimeStrikeGuessesCountSlowFast.BlockTimeStrikeGuessAfter
                    , OpEnergy.BlockTimeStrike.Server.V1.Class
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
+                   , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.GetBlockTimeStrikesPage
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledStrikeCreation
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeJudgement
@@ -75,6 +83,18 @@ library
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
                    , OpEnergy.BlockTimeStrike.Server.V1.SlowFast
                    , OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeFilter
+                   , OpEnergy.BlockTimeStrike.Server.V2
+                   , OpEnergy.BlockTimeStrike.Server.V2.StrikesAPI
+                   , OpEnergy.BlockTimeStrike.Server.V2.StrikesAPI.GetStrikes
+                   , OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrike
+                   , OpEnergy.BlockTimeStrike.Server.V2.StrikeAPI
+                   , OpEnergy.BlockTimeStrike.Server.V2.StrikeAPI.GetStrike
+                   , OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeGuess
+                   , OpEnergy.BlockTimeStrike.Server.V2.GuessAPI
+                   , OpEnergy.BlockTimeStrike.Server.V2.GuessAPI.Get
+                   , OpEnergy.BlockTimeStrike.Server.V2.GuessAPI.Create
+                   , OpEnergy.BlockTimeStrike.Server.V2.StrikeGuessesAPI
+                   , OpEnergy.BlockTimeStrike.Server.V2.StrikeGuessesAPI.Summary
 
                    , Data.Text.Show
                    , Data.Conduit.Extra.Zip

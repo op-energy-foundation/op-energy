@@ -19,7 +19,7 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
   , getBlockTimeStrikeGuessPerson
   ) where
 
-import           Servant ( err500)
+import           Servant ( err500, err400, ServerError)
 import           Control.Monad.Trans.Reader (asks, ReaderT(..))
 import           Control.Monad.Logger( logError, NoLoggingT)
 import           Data.Time.Clock( getCurrentTime)
@@ -103,7 +103,7 @@ createBlockTimeStrikeFutureGuessHandler
       callstack <- asks callStack
       let msg = callstack <> ": " <> reason
       runLogging $ $(logError) msg
-      return (err500, msg)
+      return msg
     )
     $ createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess
 
@@ -112,7 +112,7 @@ createBlockTimeStrikeFutureGuess
   -> BlockHeight
   -> Natural Int
   -> API.SlowFast
-  -> AppM (Either Text API.BlockTimeStrikeGuess)
+  -> AppM (Either (ServerError, Text) API.BlockTimeStrikeGuess)
 createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess =
     let name = "BlockTimeStrikeGuessService.createBlockTimeStrikeFutureGuess"
     in profile name $ runExceptPrefixT name $ do
@@ -120,23 +120,25 @@ createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess =
     $ asks (configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip . config)
   latestConfirmedBlockV <- lift
     $ asks (BlockTime.latestConfirmedBlock . blockTimeState)
-  tip <- exceptTMaybeT "there is no current tip yet"
+  tip <- exceptTMaybeT (err500, "there is no current tip yet")
     $ liftIO $ TVar.readTVarIO latestConfirmedBlockV
   when (blockHeaderMediantime tip > fromIntegral strikeMediantime)
-    $ throwE "strikeMediantime is in the past, which is not expected"
+    $ throwE (err400, "strikeMediantime is in the past, which is not expected")
   when ( blockHeaderHeight tip
        + naturalFromPositive configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
        > blockHeight)
-    $ throwE "block height for new block time strike should be in the future \
-             \+ minimum configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip"
+    $ throwE (err400,"block height for new block time strike should be in the \
+              \future + minimum \
+              \configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip"
+             )
   Entity personKey person <- exceptTMaybeT
-    "person was not able to authenticate itself"
+    (err400, "person was not able to authenticate itself")
     $ mgetPersonByAccountToken token
   Entity strikeKey strike <- exceptTMaybeT
-    "future strike was not able to authenticate itself"
+    (err400, "future strike was not able to authenticate itself")
     $ mgetBlockTimeStrikeFuture blockHeight strikeMediantime
   v <- exceptTMaybeT
-    "something went wrong"
+    (err500, "something went wrong")
     $ createBlockTimeStrikeFutureGuess personKey strikeKey guess
   return $ API.BlockTimeStrikeGuess
     { API.person = apiModelUUIDPerson $ personUuid person
@@ -167,12 +169,31 @@ createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess =
           Just (Entity guessesCountId _) -> -- there is a record of precalculated counts, update it
             update guessesCountId
               [ CalculatedBlockTimeStrikeGuessesCountGuessesCount +=. verifyNatural 1
+              , if guess == API.Fast
+                then
+                  CalculatedBlockTimeStrikeGuessesCountFastCount
+                    +=. verifyNatural 1
+                else
+                  CalculatedBlockTimeStrikeGuessesCountSlowCount
+                    +=. verifyNatural 1
               ]
           Nothing -> do -- no record exist yet, recalculate to be idempotent TODO: maybe it is a bad place to recalculate and we need some kind of scheduled task for this
-            guessesCount <- count [ BlockTimeStrikeGuessStrike ==. strikeKey ]
+            fastCount <- count
+              [ BlockTimeStrikeGuessStrike ==. strikeKey
+              , BlockTimeStrikeGuessIsFast ==. SlowFast.Fast
+              ]
+            slowCount <- count
+              [ BlockTimeStrikeGuessStrike ==. strikeKey
+              , BlockTimeStrikeGuessIsFast ==. SlowFast.Slow
+              ]
             void $! insert $! CalculatedBlockTimeStrikeGuessesCount
-              { calculatedBlockTimeStrikeGuessesCountGuessesCount = verifyNatural guessesCount
+              { calculatedBlockTimeStrikeGuessesCountGuessesCount =
+                verifyNatural (fastCount + slowCount)
               , calculatedBlockTimeStrikeGuessesCountStrike = strikeKey
+              , calculatedBlockTimeStrikeGuessesCountSlowCount =
+                verifyNatural slowCount
+              , calculatedBlockTimeStrikeGuessesCountFastCount =
+                verifyNatural fastCount
               }
         return value
 
@@ -269,7 +290,7 @@ getBlockTimeStrikesGuessesPageHandler mpage mfilterAPI =
       callstack <- asks callStack
       let msg = callstack <> ": " <> reason
       runLogging $ $(logError) msg
-      return (err500, msg)
+      return msg
     )
     $ getBlockTimeStrikesGuessesPage mpage mfilterAPI
 
@@ -277,7 +298,7 @@ getBlockTimeStrikesGuessesPageHandler mpage mfilterAPI =
 getBlockTimeStrikesGuessesPage
   :: Maybe (Natural Int)
   -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessFilter)
-  -> AppM (Either Text (API.PagingResult API.BlockTimeStrikeGuess))
+  -> AppM (Either (ServerError, Text) (API.PagingResult API.BlockTimeStrikeGuess))
 getBlockTimeStrikesGuessesPage mpage mfilterAPI =
     let name = "getBlockTimeStrikesGuessesPage"
     in profile name $ runExceptPrefixT name $ do
@@ -300,10 +321,10 @@ getBlockTimeStrikesGuessesPage mpage mfilterAPI =
         mfilter
   (latestUnconfirmedBlockHeight, latestConfirmedBlock) <- ExceptT
     $ liftIO $ STM.atomically $ runExceptT $ (,)
-      <$> (exceptTMaybeT "latest unconfirmed block hasn't been received yet"
+      <$> (exceptTMaybeT (err500, "latest unconfirmed block hasn't been received yet")
           $ TVar.readTVar latestUnconfirmedBlockHeightV
           )
-      <*> ( exceptTMaybeT "latest confirmed block hasn't been received yet"
+      <*> ( exceptTMaybeT (err500, "latest confirmed block hasn't been received yet")
           $ TVar.readTVar latestConfirmedBlockV
           )
   let
@@ -314,7 +335,7 @@ getBlockTimeStrikesGuessesPage mpage mfilterAPI =
           latestConfirmedBlock
           configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
         ++ strikeFilter
-  exceptTMaybeT "db query failed"
+  exceptTMaybeT (err500, "db query failed")
     $ pagingResult
       mpage
       linesPerPage
@@ -451,7 +472,7 @@ getBlockTimeStrikeGuessesPageHandler
       callstack <- asks callStack
       let msg = callstack <> ": " <> reason
       runLogging $ $(logError) msg
-      return (err500, msg)
+      return msg
     )
     $ getBlockTimeStrikeGuessesPage strikeBlockHeight strikeMediantime mpage
       mfilterAPI
@@ -462,7 +483,7 @@ getBlockTimeStrikeGuessesPage
   -> Natural Int
   -> Maybe (Natural Int)
   -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessFilter)
-  -> AppM (Either Text (API.PagingResult API.BlockTimeStrikeGuess))
+  -> AppM (Either (ServerError, Text) (API.PagingResult API.BlockTimeStrikeGuess))
 getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilterAPI =
     let name = "getBlockTimeStrikeGuessesPage"
     in profile name $ runExceptPrefixT name $ do
@@ -476,7 +497,8 @@ getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilterAPI =
                        . API.unFilterRequest
                        )
                        mfilter
-  guessesTail <- exceptTMaybeT "something went wrong, check logs for details"
+  guessesTail <- exceptTMaybeT
+    (err500, "something went wrong, check logs for details")
     $ withDBTransaction "" $ do
       C.runConduit
         $ filters linesPerPage
@@ -525,7 +547,7 @@ getBlockTimeStrikeGuessHandler token blockHeight strikeMediantime =
         callstack <- asks callStack
         let msg = callstack <> ": " <> reason
         runLogging $ $(logError) msg
-        return (err500, msg)
+        return msg
       )
       $ runExceptPrefixT name $ do
   ExceptT $ getBlockTimeStrikeGuess token blockHeight strikeMediantime
@@ -534,15 +556,15 @@ getBlockTimeStrikeGuess
   :: API.AccountToken
   -> BlockHeight
   -> Natural Int
-  -> AppM (Either Text API.BlockTimeStrikeGuess)
+  -> AppM (Either (ServerError, Text) API.BlockTimeStrikeGuess)
 getBlockTimeStrikeGuess token blockHeight strikeMediantime =
     let name = "getBlockTimeStrikeGuess"
     in profile "getBlockTimeStrikeGuess" $ runExceptPrefixT name $ do
-  personE <- exceptTMaybeT "person was not able to authenticate itself"
+  personE <- exceptTMaybeT (err400, "person was not able to authenticate itself")
     $ mgetPersonByAccountToken token
-  mGuess <- exceptTMaybeT "something went wrong, see logs for details"
+  mGuess <- exceptTMaybeT (err500, "something went wrong, see logs for details")
     $ actualGetStrikeGuess personE blockHeight (fromIntegral strikeMediantime)
-  exceptTMaybeT "no strike or guess found"
+  exceptTMaybeT (err400, "no strike or guess found")
     $ return mGuess
   where
     actualGetStrikeGuess (Entity personKey person) blockHeight strikeMediantime = do
@@ -587,7 +609,7 @@ getBlockTimeStrikeGuessPersonHandler uuid blockHeight strikeMediantime =
       callstack <- asks callStack
       let msg = callstack <> ": " <> reason
       runLogging $ $(logError) msg
-      return (err500, msg)
+      return msg
     )
     $ getBlockTimeStrikeGuessPerson uuid blockHeight strikeMediantime
 
@@ -596,16 +618,17 @@ getBlockTimeStrikeGuessPerson
   => UUID API.Person
   -> BlockHeight
   -> Natural Int
-  -> AppT m (Either Text API.BlockTimeStrikeGuess)
+  -> AppT m (Either (ServerError, Text) API.BlockTimeStrikeGuess)
 getBlockTimeStrikeGuessPerson uuid blockHeight strikeMediantime =
     let name = "getBlockTimeStrikeGuessPerson"
     in profile name $ runExceptPrefixT name $ do
-  mpersonE <- exceptTMaybeT "DB query errors, check logs" $ mgetPersonByUUID uuid
-  personE <- exceptTMaybeT "person was not able to authenticate itself"
+  mpersonE <- exceptTMaybeT (err500, "DB query errors, check logs")
+    $ mgetPersonByUUID uuid
+  personE <- exceptTMaybeT (err400, "person was not able to authenticate itself")
     $ return mpersonE
-  mstrike <- exceptTMaybeT "DB query errors, see logs for details"
+  mstrike <- exceptTMaybeT (err500, "DB query errors, see logs for details")
     $ actualGetStrikeGuess personE blockHeight (fromIntegral strikeMediantime)
-  exceptTMaybeT "no strike or guess found"
+  exceptTMaybeT (err400, "no strike or guess found")
     $ return mstrike
   where
     mgetPersonByUUID uuid = do
