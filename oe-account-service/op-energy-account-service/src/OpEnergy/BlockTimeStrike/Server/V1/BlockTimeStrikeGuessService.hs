@@ -24,13 +24,12 @@ import           Control.Monad.Trans.Reader (asks, ReaderT(..))
 import           Control.Monad.Logger( logError, NoLoggingT)
 import           Data.Time.Clock( getCurrentTime)
 import           Data.Time.Clock.POSIX(POSIXTime, utcTimeToPOSIXSeconds)
-import qualified Control.Concurrent.STM as STM
 import qualified Control.Concurrent.STM.TVar as TVar
 import           Control.Monad(void, when)
 import qualified Data.List as List
 import           Data.Text(Text)
 import           Control.Monad.Trans.Resource( ResourceT)
-import           Control.Monad.Trans.Except( runExceptT, ExceptT(..), throwE)
+import           Control.Monad.Trans.Except( ExceptT(..), throwE)
 import           Data.Maybe(fromMaybe)
 
 import           Data.Conduit ((.|), ConduitT)
@@ -63,7 +62,10 @@ import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 import           OpEnergy.Error( eitherThrowJSON, runExceptPrefixT)
 import           OpEnergy.PagingResult( pagingResult)
 import           OpEnergy.Account.Server.V1.Config (Config(..))
-import           OpEnergy.Account.Server.V1.Class ( AppT, AppM, State(..), runLogging, profile, withDBTransaction)
+import           OpEnergy.Account.Server.V1.Class
+                 ( AppT, AppM, State(..), runLogging, profile
+                 , withDBTransaction, getCurrentHeaderTip
+                 )
 import           OpEnergy.Account.Server.V1.AccountService (mgetPersonByAccountToken)
 import           OpEnergy.Account.Server.V1.Person
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
@@ -302,12 +304,8 @@ getBlockTimeStrikesGuessesPage
 getBlockTimeStrikesGuessesPage mpage mfilterAPI =
     let name = "getBlockTimeStrikesGuessesPage"
     in profile name $ runExceptPrefixT name $ do
-  latestUnconfirmedBlockHeightV <- lift
-    $ asks (BlockTime.latestUnconfirmedBlockHeight . blockTimeState)
   configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip <- lift
     $ asks (configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip . config)
-  latestConfirmedBlockV <- lift
-    $ asks (BlockTime.latestConfirmedBlock . blockTimeState)
   recordsPerReply <- lift
     $ asks (configRecordsPerReply . config)
   let
@@ -319,14 +317,8 @@ getBlockTimeStrikesGuessesPage mpage mfilterAPI =
         . API.unFilterRequest
         )
         mfilter
-  (latestUnconfirmedBlockHeight, latestConfirmedBlock) <- ExceptT
-    $ liftIO $ STM.atomically $ runExceptT $ (,)
-      <$> (exceptTMaybeT (err500, "latest unconfirmed block hasn't been received yet")
-          $ TVar.readTVar latestUnconfirmedBlockHeightV
-          )
-      <*> ( exceptTMaybeT (err500, "latest confirmed block hasn't been received yet")
-          $ TVar.readTVar latestConfirmedBlockV
-          )
+  (latestUnconfirmedBlockHeight, latestConfirmedBlock) <-
+    ExceptT getCurrentHeaderTip
   let
       finalStrikesFilter =
         BlockTimeStrikeFilter.buildFilterByClass

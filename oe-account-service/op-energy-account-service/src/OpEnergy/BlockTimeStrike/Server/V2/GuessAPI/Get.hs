@@ -11,6 +11,8 @@ import           Control.Monad.Logger( logError)
 import           Control.Monad.Trans
 import           Control.Monad.Trans.Except( ExceptT (..))
 import           Data.Maybe(fromMaybe)
+import qualified Control.Concurrent.STM as STM
+import qualified Control.Concurrent.STM.TVar as TVar
 
 import           Servant ( err400, err500, ServerError)
 import           Database.Persist hiding (get)
@@ -36,6 +38,7 @@ import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
                  as V1
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
                  as V1
+import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import qualified OpEnergy.Account.Server.V1.Config as Config
 import qualified OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeGuess
                  as BlockSpanTimeStrikeGuess
@@ -67,6 +70,12 @@ get
 get strikeBlock strikeMediantime token mspanSize =
     let name = "V2.GuessAPI.Get.get"
     in profile name $ runExceptPrefixT name $ do
+  latestConfirmedBlockV <- lift
+    $ asks (BlockTime.latestConfirmedBlock . blockTimeState)
+  latestConfirmedBlock <-
+    ExceptT $ liftIO $ STM.atomically $ runExceptPrefixT "STM" $ do
+      exceptTMaybeT (err500, "latest confirmed block hasn't been received yet")
+        $ TVar.readTVar latestConfirmedBlockV
   guessV1 <- ExceptT $ V1.getBlockTimeStrikeGuess token strikeBlock
     strikeMediantime
   eguessesCount <- exceptTMaybeT
@@ -89,6 +98,7 @@ get strikeBlock strikeMediantime token mspanSize =
     $ (`fromMaybe` mspanSize)
     . Config.configBlockSpanDefaultSize . config
   ExceptT $ BlockSpanTimeStrikeGuess.apiBlockSpanTimeStrikeGuessModelBlockTimeStrikeGuess
+    latestConfirmedBlock
     spanSize
     guessV1
     guessesCount

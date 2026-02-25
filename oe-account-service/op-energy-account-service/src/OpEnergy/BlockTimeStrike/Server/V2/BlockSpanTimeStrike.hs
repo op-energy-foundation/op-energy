@@ -17,6 +17,8 @@ import           Servant ( err500, ServerError)
 import qualified Data.OpEnergy.API.V1.Positive as APIV1
 import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrike
                  as APIV1
+import qualified Data.OpEnergy.API.V1.Block
+                 as APIV1
 import qualified Data.OpEnergy.Client as BlockSpanClient
 
 import qualified Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrike as API
@@ -35,17 +37,18 @@ apiBlockSpanTimeStrikeModelBlockTimeStrike
   :: ( MonadIO m
      , MonadMonitor m
      )
-  => APIV1.Positive Int
+  => APIV1.BlockHeader
+  -> APIV1.Positive Int
   -> APIV1.BlockTimeStrike
   -> V1.CalculatedBlockTimeStrikeGuessesCount
   -> AppT m (Either (ServerError, Text) API.BlockSpanTimeStrike)
-apiBlockSpanTimeStrikeModelBlockTimeStrike spanSize v guessesCount =
+apiBlockSpanTimeStrikeModelBlockTimeStrike confirmedBlock spanSize v guessesCount =
     let name = "apiBlockSpanTimeStrikeModelBlockTimeStrike"
     in profile name $ runExceptPrefixT name $ do
   mBlockSpan <- do
-    case APIV1.blockTimeStrikeObservedResult v of
-      Nothing -> return Nothing
-      Just _ -> do
+    if APIV1.blockTimeStrikeBlock v > APIV1.blockHeaderHeight confirmedBlock
+      then return Nothing
+      else do
         url <- lift $ asks $ Config.configBlockspanURL . config
         eBlockSpan <- withExceptT (\msg -> (err500, Text.pack (show msg))) $ ExceptT
           $ liftIO $ eitherException
