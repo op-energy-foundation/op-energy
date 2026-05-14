@@ -61,6 +61,7 @@ library
                    , Data.OpEnergy.BlockTime.API.V2.StrikesAPI
                    , Data.OpEnergy.BlockTime.API.V2.StrikeAPI
                    , Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrikeGuess
+                   , Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrikeGuessFilter
                    , Data.OpEnergy.BlockTime.API.V2.GuessAPI
                    , Data.OpEnergy.BlockTime.API.V2.StrikeGuessesAPI
                    , Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrikeGuessesSummary
