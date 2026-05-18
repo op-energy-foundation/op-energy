@@ -2,6 +2,7 @@
 {-# LANGUAGE GADTs                      #-}
 module OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeGuess
   ( apiBlockSpanTimeStrikeGuessModelBlockTimeStrikeGuess
+  , apiBlockSpanTimeStrikeGuessModelBlockTimeStrikeGuess1
   ) where
 
 import           Data.Text (Text)
@@ -23,10 +24,15 @@ import           OpEnergy.Error
                  ( runExceptPrefixT
                  )
 import           OpEnergy.Account.Server.V1.Class ( AppT,  profile )
+import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
+                 as BlockTimeStrike
+import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
+                 as BlockTimeStrikeGuess
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
                  as BlockSpanTimeStrikeGuess
 import qualified OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrike
                  as BlockSpanTimeStrike
+import qualified OpEnergy.BlockTimeStrike.Server.V1.SlowFast as SlowFast
 
 apiBlockSpanTimeStrikeGuessModelBlockTimeStrikeGuess
   :: ( MonadIO m
@@ -47,5 +53,31 @@ apiBlockSpanTimeStrikeGuessModelBlockTimeStrikeGuess
     { API.strike = spanStrike
     , API.creationTime = APIV1.creationTime v
     , API.guess = APIV1.guess v
+    }
+
+apiBlockSpanTimeStrikeGuessModelBlockTimeStrikeGuess1
+  :: ( MonadIO m
+     , MonadMonitor m
+     )
+  => APIV1.BlockHeader
+  -> APIV1.Positive Int
+  -> BlockTimeStrike.BlockTimeStrike
+  -> Maybe BlockTimeStrike.BlockTimeStrikeObserved
+  -> BlockSpanTimeStrikeGuess.BlockTimeStrikeGuess
+  -> BlockSpanTimeStrikeGuess.CalculatedBlockTimeStrikeGuessesCount
+  -> AppT m (Either (ServerError, Text) API.BlockSpanTimeStrikeGuess)
+apiBlockSpanTimeStrikeGuessModelBlockTimeStrikeGuess1
+  confirmedBlock spanSize strike observed guess guessesCount =
+    let name = "apiBlockSpanTimeStrikeGuessModelBlockTimeStrikeGuess1"
+    in profile name $ runExceptPrefixT name $ do
+  let
+      strikeAPI = BlockTimeStrike.apiModelBlockTimeStrike strike observed
+  spanStrike <- ExceptT $ BlockSpanTimeStrike.apiBlockSpanTimeStrikeModelBlockTimeStrike
+    confirmedBlock spanSize strikeAPI guessesCount
+  return $! API.BlockSpanTimeStrikeGuess
+    { API.strike = spanStrike
+    , API.creationTime = BlockTimeStrikeGuess.blockTimeStrikeGuessCreationTime guess
+    , API.guess = SlowFast.apiModel
+      (BlockTimeStrikeGuess.blockTimeStrikeGuessIsFast guess)
     }
 

@@ -29,5 +29,5 @@ jobs:
     - run: git submodule set-branch -b devel oe-blockspan-service && git submodule update --remote --recursive
     - run: git config user.name "dev-deploy"; git config user.email "dev@dev.deploy"; git commit -a -m "switch to branch devel"
     - run: git push --force -u origin devel
-    - run: ssh -oStrictHostKeyChecking=no root@${{ vars.DEV_INSTANCE }} "cd /etc/nixos; git pull --rebase; git submodule update --remote --recursive; nixos-rebuild switch"
+    - run: ssh -oStrictHostKeyChecking=no root@${{ vars.DEV_INSTANCE }} "cd /etc/nixos; git pull --rebase; git submodule update --remote --recursive; systemctl stop op-energy-backend-mainnet.service op-energy-account-service.service && nixos-rebuild switch; systemctl start op-energy-backend-mainnet.service op-energy-account-service.service"
 
