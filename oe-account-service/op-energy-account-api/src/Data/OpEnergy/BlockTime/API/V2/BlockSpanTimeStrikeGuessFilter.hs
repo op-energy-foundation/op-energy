@@ -124,7 +124,7 @@ instance ToSchema StrikeSortOrder where
 instance ToParamSchema StrikeSortOrder where
   toParamSchema _ = mempty
     & type_ ?~ SwaggerString
-    & enum_ ?~ (map toJSON $ enumFrom Ascend)
+    & enum_ ?~ (map toJSON $ enumFrom StrikeSortOrderAscend)
 instance ToHttpApiData StrikeSortOrder where
   toUrlPiece = Text.pack . show
 instance FromHttpApiData StrikeSortOrder where
