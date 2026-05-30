@@ -1,6 +1,7 @@
 let
+  stable = import ../../nixpkgs.nix;
   overlay = import ../../overlay.nix { GIT_COMMIT_HASH = "";};
-  pkgs = (import <nixpkgs> {
+  pkgs = (import stable {
     overlays = [ overlay ];
   }); # first, load the nixpkgs with system-wide overlays
   shell = pkgs.stdenv.mkDerivation {
