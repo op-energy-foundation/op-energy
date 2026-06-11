@@ -14,6 +14,7 @@ let
     $$
     ;
     ALTER USER ${cfg.db_user} WITH PASSWORD '${cfg.db_psk}';
+    GRANT ALL PRIVILEGES ON DATABASE ${cfg.db_name} TO ${cfg.db_user};
   '';
 
   cfg = config.services.op-energy-account-service;
@@ -111,12 +112,9 @@ in
     services.postgresql = {
       enable = true;
       ensureDatabases = [ "${cfg.db_name}" ];
-      ensureUsers = [ {
-        name = "${cfg.db_user}";
-        ensurePermissions = {
-          "DATABASE ${cfg.db_name}" = "ALL PRIVILEGES";
-        };
-      } ];
+      ensureUsers =
+        [ { name = "${cfg.db_user}"; }
+        ];
     };
     systemd.services = {
       postgresql-op-energy-users = {
