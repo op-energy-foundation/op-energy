@@ -10,11 +10,12 @@ let
       if not exists (select * from pg_user where usename = '${cfg.db_user}') then
         CREATE USER ${cfg.db_user} WITH PASSWORD '${cfg.db_psk}';
       end if;
+      ALTER USER ${cfg.db_user} WITH PASSWORD '${cfg.db_psk}';
+      GRANT ALL PRIVILEGES ON DATABASE ${cfg.db_name} TO ${cfg.db_user};
+      ALTER DATABASE ${cfg.db_name} OWNER TO ${cfg.db_user};
     end
     $$
     ;
-    ALTER USER ${cfg.db_user} WITH PASSWORD '${cfg.db_psk}';
-    GRANT ALL PRIVILEGES ON DATABASE ${cfg.db_name} TO ${cfg.db_user};
   '';
 
   cfg = config.services.op-energy-account-service;
@@ -117,7 +118,7 @@ in
         ];
     };
     systemd.services = {
-      postgresql-op-energy-users = {
+      postgresql-op-energy-account-users = {
         wantedBy = [ "multi-user.target" ];
         after = [
           "postgresql.service"
