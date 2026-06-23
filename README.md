@@ -7,42 +7,100 @@ Another way is to copy-past the content into https://stackedit.io
 
 We use nix package manager for deployment. Our primary target is NixOS, but you can use nix to build OpEnergy on any OS supporting Nix and then setup OS-specific system services yourself.
 
-## How to install on NixOS
+## How to install NixOS
+
+Installing NixOS is an offtopic here, but here is a short version just to provide you a vector
+
+### Get NixOS ISO from website
+
+Go to https://nixos.org and get the ISO image.
+Download it to your iso location, boot from it into live os and login into
+terminal shell
+
+### Format the storage and install OS
+
+WARNING! This will erase all your data on the disk!
+
+Assuming, that your drive for OS is /dev/vda, issue in terminal:
+
+```
+export DISK=/dev/vda
+dd if=/dev/zero of=$DISK bs=1M count=1000
+sudo sfdisk -f $DISK <<EOF
+label: dos
+, 2G, S
+, 500M, L, *
+, , L
+EOF
+mkswap ${DISK}1
+swapon ${DISK}1
+mkfs.ext4 ${DISK}2
+mkfs.xfs -f -mreflink=1 ${DISK}3
+mkdir -p /mnt/
+mount ${DISK}3 /mnt
+mkdir -p /mnt/boot
+mount ${DISK}2 /mnt/boot
+nixos-generate-config --root /mnt
+sed -i 's/# services.openssh.enable = true;/services.openssh.enable = true;/' /mnt/etc/nixos/configuration.nix
+sed -i 's/# environment.systemPackages = with pkgs; \[/environment.systemPackages = with pkgs; \[ wget vim git \];/' /mnt/etc/nixos/configuration.nix
+sed -i 's/# boot.loader.grub.device = "\/dev\/sda";/boot.loader.grub.device = "\/dev\/vda";/' /mnt/etc/nixos/configuration.nix
+sed -i 's/# boot.loader.grub.efiSupport = true;/boot.loader.grub.efiSupport = false;/' /mnt/etc/nixos/configuration.nix
+sed -i 's/# users.users.alice = {/users.users.user = { isNormalUser = true; extraGroups = \[ "wheel" \];};/' /mnt/etc/nixos/configuration.nix
+nixos-install --root /mnt
+echo "set a password for user 'user'"
+nixos-enter --root /mnt -- passwd user
+reboot
+```
+
+https://channels.nixos.org/nixos-26.05/latest-nixos-minimal-x86_64-linux.iso
+
+### Login into installed OS
+
+After reboot, login with user 'user' with the last password you provided
+
+## How to install on an already existing NixOS
 
 As NixOS is our primary target, you just need to:
 
-1. clone OpEnergy repo:
+1. clone OpEnergy repos:
 
 ```
 sudo -i
 mkdir -p /etc/nixos/overlays
 git clone https://github.com/op-energy-foundation/op-energy --recursive /etc/nixos/overlays/op-energy
+git clone https://github.com/op-energy-foundation/op-energy-blockspan-service --recursive /etc/nixos/overlays/op-energy-blockspan-service
+git clone https://github.com/op-energy-foundation/op-energy-frontend --recursive /etc/nixos/overlays/op-energy-frontend
 ```
 
 2. generate random secrets with
 
 ```
 sudo mkdir -p /etc/nixos/private
-cd op-energy/oe-blockspan-service/op-energy-backend/
-sudo nix-shell shell.nix
+cd /etc/nixos/overlays/op-energy-blockspan-service/op-energy-backend/
+sudo nix-shell gen-psk-shell.nix
 ./gen-psk.sh /etc/nixos/private mainnet
 ```
 
-3. add config to `/etc/nixos/configuration.nix`
+3. add config to `/etc/nixos/op-energy.nix`
 
 ```
-args@{ pkgs
-, lib
-, config
-, GIT_COMMIT_HASH ? ""
-, OP_ENERGY_REPO_LOCATION ? /etc/nixos/.git/modules/overlays/op-energy/modules/oe-blockspan-service
-, OP_ENERGY_ACCOUNT_REPO_LOCATION ? /etc/nixos/.git/modules/overlays/op-energy
+cat > /etc/nixos/op-energy.nix <<EOF
+env@{ GIT_COMMIT_HASH ? ""
+, OP_ENERGY_REPO_LOCATION ? /etc/nixos/overlays/op-energy-blockspan-service/.git
+, OP_ENERGY_FRONTEND_REPO_LOCATION ? /etc/nixos/overlays/op-energy-frontend/.git
+, OP_ENERGY_ACCOUNT_REPO_LOCATION ? /etc/nixos/overlays/op-energy/.git
   # import psk from out-of-git file
 , bitcoind-mainnet-rpc-psk ? builtins.readFile ( "/etc/nixos/private/bitcoind-mainnet-rpc-psk.txt")
 , bitcoind-mainnet-rpc-pskhmac ? builtins.readFile ( "/etc/nixos/private/bitcoind-mainnet-rpc-pskhmac.txt")
 , op-energy-db-psk-mainnet ? builtins.readFile ( "/etc/nixos/private/op-energy-db-psk-mainnet.txt")
 , op-energy-db-salt-mainnet ? builtins.readFile ( "/etc/nixos/private/op-energy-db-salt-mainnet.txt")
 , op-energy-account-token-encryption-key ? builtins.readFile ( "/etc/nixos/private/op-energy-account-token-encryption-key.txt")
+, ...
+}:
+
+args@{ pkgs
+, lib
+, config
 , ...
 }:
 
@@ -57,13 +115,15 @@ let
       pkgs.runCommand "get-rev1" {
         nativeBuildInputs = [ pkgs.git ];
       } ''
-        echo "OP_ENERGY_REPO_LOCATION = ${REPO_LOCATION}"
-        HASH=$(cat ${sourceWithGit}/HEAD | cut -c 1-8 | tr -d '\n' || printf 'NOT A GIT REPO')
-        printf $HASH > $out
+        echo "OP_ENERGY_REPO_LOCATION = \${REPO_LOCATION}"
+        REF=\$(cat \${sourceWithGit}/HEAD | awk '{ print \$2}')
+        HASH_FILE=\$(cat \${sourceWithGit}/\$REF)
+        HASH=\$(echo \$HASH_FILE | cut -c 1-8 | tr -d '\n' || printf 'NOT A GIT REPO')
+        printf \$HASH > \$out
       ''
     );
-  opEnergyFrontendModule = import ./overlays/op-energy/oe-blockspan-service/frontend/module-frontend.nix { GIT_COMMIT_HASH = GIT_COMMIT_HASH OP_ENERGY_REPO_LOCATION; };
-  opEnergyBackendModule = import ./overlays/op-energy/oe-blockspan-service/op-energy-backend/module-backend.nix { GIT_COMMIT_HASH = GIT_COMMIT_HASH OP_ENERGY_REPO_LOCATION; };
+  opEnergyFrontendModule = import ./overlays/op-energy-frontend/frontend/module-frontend.nix { GIT_COMMIT_HASH = GIT_COMMIT_HASH OP_ENERGY_FRONTEND_REPO_LOCATION; };
+  opEnergyBackendModule = import ./overlays/op-energy-blockspan-service/op-energy-backend/module-backend.nix { GIT_COMMIT_HASH = GIT_COMMIT_HASH OP_ENERGY_REPO_LOCATION; };
   opEnergyAccountServiceModule = import ./overlays/op-energy/oe-account-service/op-energy-account-service/module-backend.nix { GIT_COMMIT_HASH = GIT_COMMIT_HASH OP_ENERGY_ACCOUNT_REPO_LOCATION; };
 in
 {
@@ -88,7 +148,7 @@ in
     rpc.users = {
       op-energy = {
         name = "op-energy";
-        passwordHMAC = "${bitcoind-mainnet-rpc-pskhmac}";
+        passwordHMAC = "\${bitcoind-mainnet-rpc-pskhmac}";
       };
     };
   };
@@ -106,14 +166,14 @@ in
         {
           "DB_PORT": 5432,
           "DB_HOST": "127.0.0.1",
-          "DB_USER": "${db}",
-          "DB_NAME": "${db}",
-          "DB_PASSWORD": "${op-energy-db-psk-mainnet}",
-          "SECRET_SALT": "${op-energy-db-salt-mainnet}",
+          "DB_USER": "\${db}",
+          "DB_NAME": "\${db}",
+          "DB_PASSWORD": "\${op-energy-db-psk-mainnet}",
+          "SECRET_SALT": "\${op-energy-db-salt-mainnet}",
           "API_HTTP_PORT": 8999,
-          "BTC_URL": "http://127.0.0.1:8332", # in case of using another node, define it's address and credentials
-          "BTC_USER": "op-energy", # and here
-          "BTC_PASSWORD": "${bitcoind-mainnet-rpc-psk}", # and here as well
+          "BTC_URL": "http://127.0.0.1:8332",
+          "BTC_USER": "op-energy",
+          "BTC_PASSWORD": "\${bitcoind-mainnet-rpc-psk}",
           "BTC_POLL_RATE_SECS": 10,
           "PROMETHEUS_PORT": 7999,
           "SCHEDULER_POLL_RATE_SECS": 10
@@ -133,9 +193,9 @@ in
         "DB_HOST": "127.0.0.1",
         "DB_USER": "openergy",
         "DB_NAME": "openergyacc",
-        "DB_PASSWORD": "${op-energy-db-psk-mainnet}",
-        "SECRET_SALT": "${op-energy-db-salt-mainnet}",
-        "ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY": "${op-energy-account-token-encryption-key}",
+        "DB_PASSWORD": "\${op-energy-db-psk-mainnet}",
+        "SECRET_SALT": "\${op-energy-db-salt-mainnet}",
+        "ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY": "\${op-energy-account-token-encryption-key}",
         "API_HTTP_PORT": 8899,
         "PROMETHEUS_PORT": 7899,
         "LOG_LEVEL_MIN": "Debug",
@@ -154,16 +214,51 @@ in
     80
   ];
 }
-
+EOF
+sed -i 's=./hardware-configuration.nix$=./hardware-configuration.nix \(import .\/op-energy.nix {}\)=' /etc/nixos/configuration.nix
 ```
 
-4. rebuild config:
+4. (optional) change connection options to Bitcoin node
+
+Edit file `/etc/nixos/op-energy.nix` with your favourite text editor and adjust
+those options as you need:
+
+```
+"BTC_URL": "http://127.0.0.1:8332", # in case of using another node, define it's address and credentials
+"BTC_USER": "op-energy", # and here
+"BTC_PASSWORD": "\${bitcoind-mainnet-rpc-psk}", # and here as well
+```
+
+in this case you should disable local bitcoind instance as well by changing:
+
+```
+  services.bitcoind.mainnet = {
+    enable = true;
+```
+
+to `false`.
+
+5. rebuild config:
 
 ```
 nixos-rebuild switch
 ```
 
 this command will build and enable all the services
+
+6. wait for initial block header sync
+
+You can check logs of the blockspan service while it will be fetching block
+header data using this command:
+
+```
+journalctl -f -u op-energy-blockspan-service
+```
+
+it will take a while, especially if you are using local bitcoin node
+After the initial sync of the bitcoin node and of the blockspan services, HTTP
+service will appear at `http://<VM_IP>:80`
+
 
 ## How to build
 
@@ -178,7 +273,23 @@ We provide 3 services at the moment:
 2. frontend;
 3. account + blocktime service.
 
-#### building blockspan + frontend service
+#### building frontend
+
+clone repo with
+
+```
+git clone https://github.com/op-energy-foundation/op-energy-frontend
+```
+then build with `nix-build`:
+
+```
+cd op-energy-frontend/frontend
+nix-build default.nix
+```
+
+both folders will have symlink called `result`, which contain compiled binaries
+
+#### building blockspan service
 
 clone repo with
 
@@ -188,10 +299,7 @@ git clone https://github.com/op-energy-foundation/op-energy-blockspan-service
 then build with `nix-build`:
 
 ```
-cd op-energy-blockspan-service/frontend
-nix-build default.nix -A op-energy-frontend
-
-cd ../op-energy-backend
+cd op-energy-blockspan-service/op-energy-backend
 nix-build default.nix
 ```
 
