@@ -18,12 +18,11 @@ jobs:
         extra_nix_config: "system-features = nixos-test benchmark big-parallel kvm"
     - run: git clone ssh://git@github.com/op-energy-foundation/op-energy-dev-instance.git ../op-energy-dev-instance --recursive --remote -b devel
     # current repo's use case is to be submodule in 80% of cases, so we need to copy content of op-energy repo into a proper submodule location
-    - run: rm -rf oe-blockspan-service && cp -rf ../op-energy-dev-instance/overlays/op-energy/oe-blockspan-service ./
-    - run: git submodule update --remote
+    - run: git submodule update --remote --init --recursive
     - run: rm -rf ../op-energy-dev-instance/overlays/op-energy/* && cp -r $(pwd)/* ../op-energy-dev-instance/overlays/op-energy/
     - run: echo \"ci-host\" > ../op-energy-dev-instance/local_hostname.nix
     # ci-tests.nix should be on the same level as op-energy-dev-instance
-    - run: cp ./oe-blockspan-service/ci-tests.nix ../
+    - run: cp ../op-energy-dev-instance/overlays/op-energy-blockspan-service/ci-tests.nix ../
     # now actually run the builds and tests with passing git commit hash as an argument
     - run: cd ../ && nix-build ci-tests.nix --argstr GIT_COMMIT_HASH $( echo ${{github.sha}} | cut -c 1-8 )
 

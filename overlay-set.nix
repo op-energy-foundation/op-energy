@@ -1,19 +1,21 @@
 {GIT_COMMIT_HASH}:
 let
-  op-energy-api-overlay = import ./oe-blockspan-service/op-energy-api/overlay.nix;
+  op-energy-blockspan-service-api-overlay =
+    import ../op-energy-blockspan-service/op-energy-api/overlay.nix;
+  op-energy-blockspan-service-overlay =
+    import ../op-energy-blockspan-service/op-energy-backend/overlay.nix {
+      GIT_COMMIT_HASH = GIT_COMMIT_HASH;
+    };
   op-energy-account-api-overlay = import ./oe-account-service/op-energy-account-api/overlay.nix;
   op-energy-account-service-overlay = import ./oe-account-service/op-energy-account-service/overlay.nix {
-    GIT_COMMIT_HASH = GIT_COMMIT_HASH;
-  };
-  op-energy-backend-overlay = import ./oe-blockspan-service/op-energy-backend/overlay.nix {
     GIT_COMMIT_HASH = GIT_COMMIT_HASH;
   };
   stable = import ./nixpkgs.nix;
   pkgs = import stable {
     config = {};
     overlays = [
-      op-energy-api-overlay
-      op-energy-backend-overlay
+      op-energy-blockspan-service-api-overlay
+      op-energy-blockspan-service-overlay
       op-energy-account-api-overlay
       op-energy-account-service-overlay
     ];

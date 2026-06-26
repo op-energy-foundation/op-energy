@@ -10,10 +10,12 @@ let
       if not exists (select * from pg_user where usename = '${cfg.db_user}') then
         CREATE USER ${cfg.db_user} WITH PASSWORD '${cfg.db_psk}';
       end if;
+      ALTER USER ${cfg.db_user} WITH PASSWORD '${cfg.db_psk}';
+      GRANT ALL PRIVILEGES ON DATABASE ${cfg.db_name} TO ${cfg.db_user};
+      ALTER DATABASE ${cfg.db_name} OWNER TO ${cfg.db_user};
     end
     $$
     ;
-    ALTER USER ${cfg.db_user} WITH PASSWORD '${cfg.db_psk}';
   '';
 
   cfg = config.services.op-energy-account-service;
@@ -111,15 +113,12 @@ in
     services.postgresql = {
       enable = true;
       ensureDatabases = [ "${cfg.db_name}" ];
-      ensureUsers = [ {
-        name = "${cfg.db_user}";
-        ensurePermissions = {
-          "DATABASE ${cfg.db_name}" = "ALL PRIVILEGES";
-        };
-      } ];
+      ensureUsers =
+        [ { name = "${cfg.db_user}"; }
+        ];
     };
     systemd.services = {
-      postgresql-op-energy-users = {
+      postgresql-op-energy-account-users = {
         wantedBy = [ "multi-user.target" ];
         after = [
           "postgresql.service"
@@ -150,12 +149,12 @@ in
       in {
         wantedBy = [ "multi-user.target" ];
         after = [
-          "network-setup.service"
+          "network-online.target"
           "postgresql.service"
         ];
         requires = [
-          "network-setup.service"
           "postgresql.service"
+          "network-online.target"
           ];
         serviceConfig = {
           Type = "simple";
