@@ -26,7 +26,6 @@ jobs:
     - run: git remote -v
     - run: echo ${{ github.ref_name }}
     - run: git checkout -b devel
-    - run: git config user.name "dev-deploy"; git config user.email "dev@dev.deploy"; git commit -a -m "switch to branch devel"
     - run: git push --force -u origin devel
     - run: ssh -oStrictHostKeyChecking=no root@${{ vars.DEV_INSTANCE }} "cd /etc/nixos; git pull --rebase; git submodule update --init --remote --recursive; systemctl stop op-energy-backend-mainnet.service op-energy-account-service.service && nixos-rebuild switch && nix-collect-garbage -d; systemctl start op-energy-backend-mainnet.service op-energy-account-service.service"
 
