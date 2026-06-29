@@ -241,21 +241,21 @@ getStrikesGuesses token mspanSize mpage mfilterAPI =
       []
       ( APIV1.buildFilter
       . APIV1.unFilterRequest
-      . APIV1.mapFilter
+      . APIV1.coerceFilter
       )
       mfilterObserved
     strikeStaticPartFilter = maybe
       []
       ( APIV1.buildFilter
       . APIV1.unFilterRequest
-      . APIV1.mapFilter
+      . APIV1.coerceFilter
       )
       mfilter
     guessStaticPartFilter = maybe
       []
       ( APIV1.buildFilter
       . APIV1.unFilterRequest
-      . APIV1.mapFilter
+      . APIV1.coerceFilter
       )
       mfilterGuess
     sort = maybe

@@ -91,7 +91,7 @@ getBlockTimeStrikesPage mpage mfilterAPI =
                            []
                            ( API.buildFilter
                            . API.unFilterRequest
-                           . API.mapFilter
+                           . API.coerceFilter
                            )
                            mfilter
       strikeFilter =
@@ -231,7 +231,7 @@ maybeFetchObservedStrike mfilter (guessesCount, strikeE@(Entity strikeId _)) = d
             observedStrikeFilter = maybe
               [] ( API.buildFilter
                  . API.unFilterRequest
-                 . API.mapFilter
+                 . API.coerceFilter
                  ) mfilter
         anyObservedStrike <- selectFirst
           ( ( BlockTimeStrikeObservedStrike ==. strikeId
@@ -255,7 +255,7 @@ maybeFetchObservedStrike mfilter (guessesCount, strikeE@(Entity strikeId _)) = d
           ( (BlockTimeStrikeObservedStrike ==. strikeId)
           : maybe [] ( API.buildFilter
                       . API.unFilterRequest
-                      . API.mapFilter
+                      . API.coerceFilter
                       ) mfilter
           )
           []
