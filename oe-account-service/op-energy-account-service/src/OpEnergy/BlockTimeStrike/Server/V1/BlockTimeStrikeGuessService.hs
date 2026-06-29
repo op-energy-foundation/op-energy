@@ -246,7 +246,7 @@ getBlockTimeStrikeGuessResultsPage mpage mfilterAPI = profile "getBlockTimeStrik
               }
   where
     mfilter = fmap coerceFilterRequestBlockTimeStrikeGuess mfilterAPI
-    sort = maybe Descend (API.sortOrder . API.unFilterRequest . id1 . API.mapFilter) mfilter
+    sort = maybe Descend (API.sortOrder . API.unFilterRequest . id1 . API.coerceFilter) mfilter
       where
         id1
           :: API.FilterRequest BlockTimeStrike API.BlockTimeStrikeGuessFilter
@@ -270,7 +270,7 @@ getBlockTimeStrikeGuessResultsPage mpage mfilterAPI = profile "getBlockTimeStrik
          ()
     fetchConfirmedStrikes recordsPerReply confirmedBlock = streamEntities
       ((BlockTimeStrikeBlock <=. blockHeaderHeight confirmedBlock)
-      : maybe [] (API.buildFilter . API.unFilterRequest . API.mapFilter) mfilter
+      : maybe [] (API.buildFilter . API.unFilterRequest . API.coerceFilter) mfilter
       )
       BlockTimeStrikeId
       (PageSize (fromPositive recordsPerReply + 1))
@@ -338,10 +338,10 @@ getBlockTimeStrikesGuessesPage mpage mfilterAPI =
   where
     mfilter = fmap coerceFilterRequestBlockTimeStrikeGuess mfilterAPI
     strikeFilter :: [Filter BlockTimeStrike]
-    strikeFilter = maybe [] (API.buildFilter . API.unFilterRequest . API.mapFilter) mfilter
+    strikeFilter = maybe [] (API.buildFilter . API.unFilterRequest . API.coerceFilter) mfilter
     guessFilter :: [ Filter BlockTimeStrikeGuess]
-    guessFilter = maybe [] (API.buildFilter . API.unFilterRequest . API.mapFilter) mfilter
-    sort = maybe Descend (API.sortOrder . API.unFilterRequest . id1 . API.mapFilter) mfilter
+    guessFilter = maybe [] (API.buildFilter . API.unFilterRequest . API.coerceFilter) mfilter
+    sort = maybe Descend (API.sortOrder . API.unFilterRequest . id1 . API.coerceFilter) mfilter
       where
         id1
           :: API.FilterRequest BlockTimeStrike API.BlockTimeStrikeGuessFilter
@@ -425,7 +425,7 @@ getBlockTimeStrikesGuessesPage mpage mfilterAPI =
             (Entity _ guess, _, _) =
           streamEntities
             (( PersonId ==. blockTimeStrikeGuessPerson guess )
-            : maybe [] (API.buildFilter . API.unFilterRequest . API.mapFilter) mfilter
+            : maybe [] (API.buildFilter . API.unFilterRequest . API.coerceFilter) mfilter
             )
             PersonId
             (PageSize (fromPositive linesPerPage + 1))
@@ -509,7 +509,7 @@ getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilterAPI =
   where
     page = fromMaybe 0 mpage
     mfilter = fmap coerceFilterRequestBlockTimeStrikeGuess mfilterAPI
-    sort = maybe Descend (API.sortOrder . API.unFilterRequest . id1 . API.mapFilter) mfilter
+    sort = maybe Descend (API.sortOrder . API.unFilterRequest . id1 . API.coerceFilter) mfilter
       where
         id1
           :: API.FilterRequest BlockTimeStrike API.BlockTimeStrikeGuessFilter
@@ -728,7 +728,7 @@ fetchBlockTimeStrikeGuessByStrike
 fetchBlockTimeStrikeGuessByStrike recordsPerReply sort mfilter (Entity strikeId _) = do
   streamEntities
     ( ( BlockTimeStrikeGuessStrike ==. strikeId )
-    : maybe [] (API.buildFilter . API.unFilterRequest . API.mapFilter) mfilter
+    : maybe [] (API.buildFilter . API.unFilterRequest . API.coerceFilter) mfilter
     )
     BlockTimeStrikeGuessId
     (PageSize (fromPositive recordsPerReply + 1))
@@ -749,7 +749,7 @@ fetchGuessPersonByBlockTimeStrikeGuess
     recordsPerReply sort mfilter (_, Entity _ guess ) = do
   streamEntities
     ( ( PersonId ==. blockTimeStrikeGuessPerson guess )
-    : maybe [] (API.buildFilter . API.unFilterRequest . API.mapFilter) mfilter
+    : maybe [] (API.buildFilter . API.unFilterRequest . API.coerceFilter) mfilter
     )
     PersonId
     (PageSize (fromPositive recordsPerReply + 1))

@@ -106,7 +106,7 @@ getStrikes mspanSize mpage mfilterAPI =
                            []
                            ( APIV1.buildFilter
                            . APIV1.unFilterRequest
-                           . APIV1.mapFilter
+                           . APIV1.coerceFilter
                            )
                            mfilter
       strikeFilter =

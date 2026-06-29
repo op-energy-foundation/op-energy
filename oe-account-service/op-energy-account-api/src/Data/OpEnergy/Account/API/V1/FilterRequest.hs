@@ -8,7 +8,7 @@ module Data.OpEnergy.Account.API.V1.FilterRequest
   ( BuildFilter(..)
   , FilterRequest(..)
   , defaultFilterRequest
-  , mapFilter
+  , coerceFilter
   ) where
 
 import           Control.Lens
@@ -101,6 +101,6 @@ verifySortOrder _ = error "verifySortOrder: wrong value"
 defaultFilterRequest :: (Default b) => FilterRequest a b
 defaultFilterRequest = FilterRequest (def, Proxy)
 
-mapFilter :: FilterRequest a b -> FilterRequest c b
-mapFilter (FilterRequest (v, _)) = FilterRequest (v, Proxy)
+coerceFilter :: FilterRequest a b -> FilterRequest c b
+coerceFilter (FilterRequest (v, _)) = FilterRequest (v, Proxy)
 
