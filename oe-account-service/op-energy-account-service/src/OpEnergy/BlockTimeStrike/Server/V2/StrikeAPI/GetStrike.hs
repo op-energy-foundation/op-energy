@@ -11,8 +11,6 @@ import           Control.Monad.Logger( logError)
 import           Control.Monad.Trans
 import           Control.Monad.Trans.Except( ExceptT (..))
 import           Data.Maybe(fromMaybe)
-import qualified Control.Concurrent.STM as STM
-import qualified Control.Concurrent.STM.TVar as TVar
 
 import           Servant ( err500, err400, ServerError)
 
@@ -28,7 +26,7 @@ import qualified Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrike
 
 import           OpEnergy.Account.Server.V1.Class
                  ( AppM, State(..), runLogging, profile
-                 , withDBTransaction
+                 , withDBTransaction, getCurrentHeaderTip
                  )
 
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
@@ -39,7 +37,6 @@ import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
                  as V1
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
                  as V1
-import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import qualified OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrike
                  as BlockSpanTimeStrike
 import qualified OpEnergy.Account.Server.V1.Config as Config
@@ -69,12 +66,7 @@ getStrike
 getStrike strikeBlock strikeMediantime mspanSize =
     let name = "getStrike"
     in profile name $ runExceptPrefixT name $ do
-  latestConfirmedBlockV <- lift
-    $ asks (BlockTime.latestConfirmedBlock . blockTimeState)
-  latestConfirmedBlock <-
-    ExceptT $ liftIO $ STM.atomically $ runExceptPrefixT "STM" $ do
-      exceptTMaybeT ( err500, "latest confirmed block hasn't been received yet")
-        $ TVar.readTVar latestConfirmedBlockV
+  (_, latestConfirmedBlock) <- ExceptT getCurrentHeaderTip
   strikeV1 <- ExceptT $ V1.getBlockTimeStrike strikeBlock strikeMediantime
   eguessesCount <- exceptTMaybeT
     ( err500, "db query failed")
