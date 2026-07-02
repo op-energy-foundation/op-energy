@@ -31,7 +31,7 @@ import           Data.OpEnergy.Account.API.V1.SlowFast
 import qualified Data.OpEnergy.API.V1 as BlockSpan
 
 
--- | BlockSpanTimeStrike with possible observed result, judgement
+-- | API-side BlockSpanTimeStrike with possible observed result, judgement
 -- block's data, span size and possible blockspan headers with nbdr and hashrate
 data BlockSpanTimeStrike = BlockSpanTimeStrike
   { block :: BlockHeight
