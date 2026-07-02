@@ -50,9 +50,8 @@ BlockTimeStrikeGuess
   UniqueBlockTimeStrikeGuessPersonStrike person strike
   deriving Eq Show Generic
 
--- this table's goal is to contain precalculated guesses count for a given strike. The reason
--- it exists is to eliminate a need of walking through the db in order to return a result
--- sorted by guesses count
+-- precalculated guesses count for a given strike. Eliminates the need of
+-- walking through the db in order to sort by guesses count
 CalculatedBlockTimeStrikeGuessesCount
   strike BlockTimeStrikeId
   guessesCount (Natural Int)

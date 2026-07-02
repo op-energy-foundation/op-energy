@@ -1,4 +1,4 @@
-{-- | This module implements BlockTime strike service.
+{-- | BlockTimeStrike type and appropriate persistent instances
  -}
 {-# LANGUAGE RecordWildCards            #-}
 {-# LANGUAGE DataKinds                  #-}
