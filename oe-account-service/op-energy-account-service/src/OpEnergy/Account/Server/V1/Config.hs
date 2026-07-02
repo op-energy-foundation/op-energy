@@ -68,7 +68,7 @@ data Config = Config
   , configAverageBlockDiscoverSecs :: Positive Int
     -- ^ defines how much seconds takes to discover in average
   , configBlockSpanDefaultSize :: Positive Int
-    -- ^ default block span size to use when user do not provide one
+    -- ^ default block span size to use when user does not provide one
   }
   deriving Show
 instance FromJSON Config where
