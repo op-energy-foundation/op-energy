@@ -5,12 +5,10 @@ module OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrikeGuess
   , apiBlockSpanTimeStrikeGuessModelBlockTimeStrikeGuess1
   ) where
 
-import           Data.Text (Text)
 import           Control.Monad.Trans
 import           Control.Monad.Trans.Except( ExceptT (..))
 
 import           Prometheus(MonadMonitor)
-import           Servant ( ServerError)
 
 import qualified Data.OpEnergy.API.V1.Positive as APIV1
 import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess
@@ -22,6 +20,7 @@ import qualified Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrikeGuess as API
 
 import           OpEnergy.Error
                  ( runExceptPrefixT
+                 , CallstackError
                  )
 import           OpEnergy.Account.Server.V1.Class ( AppT,  profile )
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
@@ -42,7 +41,7 @@ apiBlockSpanTimeStrikeGuessModelBlockTimeStrikeGuess
   -> APIV1.Positive Int
   -> APIV1.BlockTimeStrikeGuess
   -> BlockSpanTimeStrikeGuess.CalculatedBlockTimeStrikeGuessesCount
-  -> AppT m (Either (ServerError, Text) API.BlockSpanTimeStrikeGuess)
+  -> AppT m (Either CallstackError API.BlockSpanTimeStrikeGuess)
 apiBlockSpanTimeStrikeGuessModelBlockTimeStrikeGuess
   confirmedBlock spanSize v guessesCount =
     let name = "apiBlockSpanTimeStrikeGuessModelBlockTimeStrikeGuess"
@@ -65,7 +64,7 @@ apiBlockSpanTimeStrikeGuessModelBlockTimeStrikeGuess1
   -> Maybe BlockTimeStrike.BlockTimeStrikeObserved
   -> BlockSpanTimeStrikeGuess.BlockTimeStrikeGuess
   -> BlockSpanTimeStrikeGuess.CalculatedBlockTimeStrikeGuessesCount
-  -> AppT m (Either (ServerError, Text) API.BlockSpanTimeStrikeGuess)
+  -> AppT m (Either CallstackError API.BlockSpanTimeStrikeGuess)
 apiBlockSpanTimeStrikeGuessModelBlockTimeStrikeGuess1
   confirmedBlock spanSize strike observed guess guessesCount =
     let name = "apiBlockSpanTimeStrikeGuessModelBlockTimeStrikeGuess1"

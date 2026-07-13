@@ -5,14 +5,12 @@ module OpEnergy.BlockTimeStrike.Server.V2.GuessAPI.Get
   , get
   ) where
 
-import           Data.Text(Text)
 import           Control.Monad.Trans.Reader ( asks)
 import           Control.Monad.Logger( logError)
 import           Control.Monad.Trans
 import           Control.Monad.Trans.Except( ExceptT (..))
 import           Data.Maybe(fromMaybe)
 
-import           Servant ( err400, err500, ServerError)
 import           Database.Persist hiding (get)
 
 import           Data.OpEnergy.API.V1.Natural(Natural)
@@ -30,7 +28,11 @@ import           OpEnergy.Account.Server.V1.Class
                  )
 
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
-import           OpEnergy.Error( eitherThrowJSON, runExceptPrefixT)
+import           OpEnergy.Error
+                   ( eitherThrowJSON, runExceptPrefixT
+                   , CallstackError, dbQueryError, calculatedGuessesCountNotFound
+                   , strikeNotFound
+                   )
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
                  as V1
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
@@ -50,12 +52,7 @@ getHandler
 getHandler strikeBlock strikeMediantime token mspanSize =
     let name = "V2.GuessAPI.Get.getHandler"
     in profile name $ eitherThrowJSON
-      (\reason-> do
-        callstack <- asks callStack
-        let msg = callstack <> ":" <> reason
-        runLogging $ $(logError) msg
-        return msg
-      )
+      ( runLogging . $(logError) )
       $ runExceptPrefixT name $ do
   ExceptT $ get strikeBlock strikeMediantime token mspanSize
 
@@ -64,25 +61,24 @@ get
   -> Natural Int
   -> AccountV1.AccountToken
   -> Maybe (Positive Int)
-  -> AppM (Either (ServerError, Text) API.BlockSpanTimeStrikeGuess)
+  -> AppM (Either CallstackError API.BlockSpanTimeStrikeGuess)
 get strikeBlock strikeMediantime token mspanSize =
     let name = "V2.GuessAPI.Get.get"
     in profile name $ runExceptPrefixT name $ do
   (_, latestConfirmedBlock) <- ExceptT getCurrentHeaderTip
   guessV1 <- ExceptT $ V1.getBlockTimeStrikeGuess token strikeBlock
     strikeMediantime
-  eguessesCount <- exceptTMaybeT
-    ( err500, "db query failed")
+  eguessesCount <- exceptTMaybeT dbQueryError
     $ withDBTransaction "" $ runExceptPrefixT "DB" $ do
       Entity strikeId _ <- exceptTMaybeT
-        (err400, "block time strike not found")
+        strikeNotFound
         $ selectFirst
           [ V1.BlockTimeStrikeBlock ==. strikeBlock
           , V1.BlockTimeStrikeStrikeMediantime ==. fromIntegral strikeMediantime
           ]
           []
       exceptTMaybeT
-        ( err400, "calculated guesses count not found")
+        calculatedGuessesCountNotFound
         $ selectFirst
           [ V1.CalculatedBlockTimeStrikeGuessesCountStrike ==. strikeId ]
           []
