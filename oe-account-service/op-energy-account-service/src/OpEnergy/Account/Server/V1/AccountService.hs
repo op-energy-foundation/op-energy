@@ -25,10 +25,10 @@ import           Servant (err400)
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.IO.Class (liftIO, MonadIO)
 import           Control.Monad.Logger(logError)
+import qualified Data.Text as T
+import qualified Data.Text as Text (intercalate)
 import qualified Data.Text.Encoding as Text
 import qualified Data.ByteString.Lazy as LBS
-import qualified Data.ByteString.Char8 as BS
-import qualified Data.ByteString.Short as BS
 import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
 import           Data.Word(Word64)
@@ -38,6 +38,7 @@ import qualified Web.ClientSession as ClientSession
 import           Database.Persist.Postgresql
 import           Prometheus(MonadMonitor)
 import qualified Prometheus as P
+import           System.Random(getStdRandom, randomR)
 
 
 import           Data.OpEnergy.Account.API.V1
@@ -48,6 +49,7 @@ import           Data.OpEnergy.Account.API.V1.UUID
 import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging)
 import           OpEnergy.Account.Server.V1.Metrics(MetricsState(..))
+import           OpEnergy.Account.Server.V1.BIP39Words(bip39Words)
 import           OpEnergy.Account.Server.V1.Person
 import           Data.OpEnergy.API.V1.Error
 
@@ -59,9 +61,7 @@ register = do
   State{ config = Config { configSalt = configSalt
                          , configAccountTokenEncryptionPrivateKey = configAccountTokenEncryptionPrivateKey
                          }
-       , accountDBPool = pool
        , metrics = MetricsState { accountRegister = accountRegister
-                                , accountInsert = accountInsert
                                 , accountTokenEncrypt = accountTokenEncrypt
                                 }
        } <- ask
@@ -71,15 +71,13 @@ register = do
     uuid <- liftIO generateRandomUUID
     secret <- liftIO $! API.generateAccountSecret configSalt
     let hashedSecret = hashSBS configSalt API.unAccountSecret secret
-        UUID rawUUID = uuid
-        userNameHash = API.verifyDisplayName $! "user" <> (Text.decodeUtf8 $! BS.take 6 $! BS.fromShort rawUUID)
-        person = Person
+        mkPerson displayName = Person
           { personCreationTime = now
           , personUuid = modelApiUUIDPerson uuid
           , personLastSeenTime = now
           , personLastUpdated = now
           , personEmail = Nothing
-          , personDisplayName = userNameHash
+          , personDisplayName = displayName
           , personHashedSecret = hashedSecret
           , personHashedPassword = Nothing -- a freshly registered person has
             -- no password yet: they log in with their AccountSecret until
@@ -87,7 +85,17 @@ register = do
           , personLoginsCount = 0
           }
     -- insert record into DB
-    _ <- liftIO $! P.observeDuration accountInsert $ flip runSqlPersistMPool pool $ insert person
+    minserted <- insertWithGeneratedDisplayName mkPerson maxDisplayNameAttempts
+    case minserted of
+      Nothing -> do
+        -- unreachable in practice: a name is drawn from ~1960^2 * 1000
+        -- possibilities and retried maxDisplayNameAttempts times, so getting
+        -- here means the generator or the unique constraint is broken rather
+        -- than that we were unlucky
+        let err = "ERROR: register: failed to generate a free display name"
+        runLogging $ $(logError) err
+        error $! T.unpack err
+      Just _ -> return ()
     -- if we are here then uuid and secret are unique
     token <- liftIO $ P.observeDuration accountTokenEncrypt $! ClientSession.encryptIO configAccountTokenEncryptionPrivateKey $! LBS.toStrict $! Aeson.encode (uuid, (0:: Word64) {- logins count is 0 for a new user -}) {- payload is of type (UUID Person, Word64) -}
     return $! RegisterResult
@@ -95,6 +103,63 @@ register = do
       , accountToken = API.verifyAccountToken $! Text.decodeUtf8 token
       , personUUID = uuid
       }
+
+-- | how many times to generate a fresh display name on a UniqueDisplayName
+-- collision before giving up. Generated names are drawn from ~1960 words
+-- squared times 1000, so a collision is already unlikely; retrying a handful
+-- of times makes it not worth reasoning about.
+maxDisplayNameAttempts :: Int
+maxDisplayNameAttempts = 5
+
+-- | inserts a person under a freshly generated display name, retrying with a
+-- new one if that name is already taken.
+--
+-- Unlike the UUID-derived name this replaced, a generated name really can
+-- collide, so the insert has to be able to fail and be retried -- hence
+-- insertUnique rather than insert.
+insertWithGeneratedDisplayName
+  :: (MonadIO m, MonadMonitor m)
+  => (API.DisplayName -> Person) -- ^ the person to insert, minus its name
+  -> Int -- ^ attempts left
+  -> AppT m (Maybe API.DisplayName) -- ^ the name that was inserted, or
+                                    -- Nothing once the attempts run out
+insertWithGeneratedDisplayName _ attemptsLeft | attemptsLeft <= 0 =
+  return Nothing
+insertWithGeneratedDisplayName mkPerson attemptsLeft = do
+  State{ accountDBPool = pool
+       , metrics = MetricsState { accountInsert = accountInsert }
+       } <- ask
+  displayName <- liftIO generateDisplayName
+  minserted <- liftIO $! P.observeDuration accountInsert
+    $ flip runSqlPersistMPool pool $ insertUnique $! mkPerson displayName
+  case minserted of
+    Just _ -> return (Just displayName)
+    Nothing ->
+      insertWithGeneratedDisplayName mkPerson (attemptsLeft - 1)
+
+-- | two distinct BIP39 words and a 3 digit number, e.g. \"brave_tiger_482\".
+-- Thematically apt for a bitcoin application, and a great deal easier to
+-- read out or retype than the slice of a UUID this replaced.
+generateDisplayName :: IO API.DisplayName
+generateDisplayName = do
+  firstIdx <- randomIndex
+  secondIdx <- pickDifferentFrom firstIdx
+  number <- getStdRandom (randomR (0:: Int, 999))
+  return $! API.verifyDisplayName $! Text.intercalate "_"
+    [ bip39Words !! firstIdx
+    , bip39Words !! secondIdx
+    , pad3 number
+    ]
+  where
+    wordCount = length bip39Words
+    randomIndex = getStdRandom (randomR (0, wordCount - 1))
+    -- two of the same word reads like a mistake rather than a name
+    pickDifferentFrom idx = do
+      other <- randomIndex
+      if other == idx then pickDifferentFrom idx else return other
+    pad3 n =
+      let shown = T.pack (show n)
+      in T.replicate (3 - T.length shown) "0" <> shown
 
 -- | see OpEnergy.Account.API.V1.AccountV1API for reference of 'login' API call
 -- 3 * O(ln n)
