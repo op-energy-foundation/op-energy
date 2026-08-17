@@ -44,6 +44,27 @@ type AccountV2API
     :> ReqBody '[JSON] PasswordLoginRequest
     :> Description "Performs login with a display name and password, for a person returning on a device that does not have their account secret. Returns the same LoginResult as the secret-based 'login' call above, so the caller treats both identically. Fails if the person has not set a password."
     :> Post '[JSON] LoginResult
+  :<|> "secret"
+    :> Header'
+       '[ Required
+        , Strict
+        , Description "Account token gotten from /login or /register"
+        ]
+        "Authorization"
+        AccountToken -- require authentication
+    :> Description "Returns the account secret of the account identified by the given account token, so that the frontend can display the secret link back to its owner. Fails for an account registered before secrets were stored recoverably, whose secret exists only as a hash: such an account has to regenerate to obtain a displayable one."
+    :> Get '[JSON] AccountSecretResult
+  :<|> "secret"
+    :> "regenerate"
+    :> Header'
+       '[ Required
+        , Strict
+        , Description "Account token gotten from /login or /register"
+        ]
+        "Authorization"
+        AccountToken -- require authentication
+    :> Description "Replaces the account secret of the account identified by the given account token with a freshly generated one, and returns it. The previous secret stops working immediately, which is the point of the call: it is how a person revokes a secret link they have shared or lost. The account token is left alone, so the caller's own session survives the rotation."
+    :> Post '[JSON] AccountSecretResult
   :<|> "register"
     :> Description "Registers a new person and returns their freshly generated account secret and account token, along with the display name that was assigned to them. Unauthenticated, as this call is what mints the caller's first credentials. Same underlying registration as the V1 call of this name, but the result also carries the assigned display name, which the frontend shows immediately and would otherwise have to fetch separately."
     :> Post '[JSON] RegisterResultV2
@@ -164,6 +185,22 @@ instance ToSchema PasswordLoginRequest where
   declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
     & mapped.schema.description ?~ "PasswordLoginRequest schema"
     & mapped.schema.example ?~ toJSON defaultPasswordLoginRequest
+
+-- | result of the 'secret' and 'secret/regenerate' API calls
+data AccountSecretResult = AccountSecretResult
+  { accountSecret :: AccountSecret
+  }
+  deriving (Show, Generic, Typeable)
+
+defaultAccountSecretResult :: AccountSecretResult
+defaultAccountSecretResult = AccountSecretResult defaultAccountSecret
+
+instance ToJSON AccountSecretResult
+instance FromJSON AccountSecretResult
+instance ToSchema AccountSecretResult where
+  declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
+    & mapped.schema.description ?~ "AccountSecretResult schema"
+    & mapped.schema.example ?~ toJSON defaultAccountSecretResult
 
 data LoginResult = LoginResult
   { accountToken  :: AccountToken

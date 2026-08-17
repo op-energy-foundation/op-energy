@@ -27,6 +27,8 @@ accountServer
   = OpEnergy.Account.Server.V2.AccountService.login
   :<|> OpEnergy.Account.Server.V2.AccountService.setPassword
   :<|> OpEnergy.Account.Server.V2.AccountService.loginByPassword
+  :<|> OpEnergy.Account.Server.V2.AccountService.getSecret
+  :<|> OpEnergy.Account.Server.V2.AccountService.regenerateSecret
   :<|> OpEnergy.Account.Server.V2.AccountService.register
   :<|> OpEnergy.Account.Server.V2.AccountService.getMe
   :<|> OpEnergy.Account.Server.V2.AccountService.postDisplayName
