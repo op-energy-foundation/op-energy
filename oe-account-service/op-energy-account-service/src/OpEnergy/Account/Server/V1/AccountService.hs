@@ -80,6 +80,9 @@ register = do
           , personEmail = Nothing
           , personDisplayName = userNameHash
           , personHashedSecret = hashedSecret
+          , personHashedPassword = Nothing -- a freshly registered person has
+            -- no password yet: they log in with their AccountSecret until
+            -- they set one
           , personLoginsCount = 0
           }
     -- insert record into DB
