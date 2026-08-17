@@ -6,23 +6,29 @@ module OpEnergy.Account.Server.V2.AccountService
   ( login
   , setPassword
   , loginByPassword
+  , register
+  , getMe
+  , postDisplayName
+  , displayNameExists
   ) where
 
 import           Servant (err400, err401, err500, NoContent(..))
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Logger(logError)
+import           Data.Maybe(isJust)
 import qualified Data.Text.Encoding as Text
 import qualified Data.ByteString.Lazy as LBS
 
-import qualified Data.Aeson as Aeson
 import qualified Crypto.BCrypt as BCrypt
+import qualified Data.Aeson as Aeson
 import qualified Web.ClientSession as ClientSession
 import           Database.Persist.Postgresql
 import qualified Prometheus as P
 
 
 import           Data.OpEnergy.Account.API.V2
+import qualified Data.OpEnergy.Account.API.V1 as V1API
 import qualified Data.OpEnergy.Account.API.V1.Hash as API
 import qualified Data.OpEnergy.Account.API.V1.Account as API
 import qualified Data.OpEnergy.Account.API.V1.Password as API
@@ -31,11 +37,13 @@ import           Data.OpEnergy.API.V1.Error
 import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.Account.Server.V1.Class ( AppM, State(..), runLogging)
 import           OpEnergy.Account.Server.V1.Metrics(MetricsState(..))
-import           OpEnergy.Account.Server.V1.AccountService
-                 ( mgetPersonByHashedSecret
-                 , mgetPersonByAccountToken
-                 , mgetPersonByDisplayName
-                 )
+import qualified OpEnergy.Account.Server.V1.AccountService
+                 as V1 ( register
+                       , postDisplayName
+                       , mgetPersonByHashedSecret
+                       , mgetPersonByAccountToken
+                       , mgetPersonByDisplayName
+                       )
 import           OpEnergy.Account.Server.V1.Person
 
 
@@ -55,7 +63,7 @@ login secret = do
        } <- ask
   P.observeDuration accountLogin $ do
     let hashedSecret = API.hashSBS configSalt API.unAccountSecret secret
-    mperson <- mgetPersonByHashedSecret hashedSecret
+    mperson <- V1.mgetPersonByHashedSecret hashedSecret
     case mperson of
       Nothing -> do
         let err = "ERROR: login: failed to find user account with given secret"
@@ -71,9 +79,8 @@ login secret = do
           $! ClientSession.encryptIO configAccountTokenEncryptionPrivateKey
           $! LBS.toStrict $! Aeson.encode (personUuid person, loginsCount)
         return $! LoginResult
-          { accountToken = API.verifyAccountToken $! Text.decodeUtf8 token
-          , personUUID = apiModelUUIDPerson $ personUuid person
-          }
+          (API.verifyAccountToken $! Text.decodeUtf8 token)
+          (apiModelUUIDPerson $ personUuid person)
 
 -- | see OpEnergy.Account.API.V2.AccountV2API for reference of 'password' API
 -- call.
@@ -83,7 +90,7 @@ login secret = do
 setPassword :: API.AccountToken-> SetPasswordRequest-> AppM NoContent
 setPassword token (SetPasswordRequest password) = do
   State{ accountDBPool = pool } <- ask
-  mperson <- mgetPersonByAccountToken token
+  mperson <- V1.mgetPersonByAccountToken token
   case mperson of
     Nothing -> do
       let err = "ERROR: setPassword: failed to find user account with given token"
@@ -119,7 +126,7 @@ loginByPassword (PasswordLoginRequest displayName password) = do
                                 }
        } <- ask
   P.observeDuration accountLogin $ do
-    mperson <- mgetPersonByDisplayName displayName
+    mperson <- V1.mgetPersonByDisplayName displayName
     case mperson of
       Nothing -> do
         -- deliberately the same error as a wrong password below: telling the
@@ -143,9 +150,8 @@ loginByPassword (PasswordLoginRequest displayName password) = do
               $! ClientSession.encryptIO configAccountTokenEncryptionPrivateKey
               $! LBS.toStrict $! Aeson.encode (personUuid person, loginsCount)
             return $! LoginResult
-              { accountToken = API.verifyAccountToken $! Text.decodeUtf8 token
-              , personUUID = apiModelUUIDPerson $ personUuid person
-              }
+              (API.verifyAccountToken $! Text.decodeUtf8 token)
+              (apiModelUUIDPerson $ personUuid person)
 
 -- | bcrypt digest of a plaintext password. Returns Nothing only if bcrypt's
 -- own policy is malformed.
@@ -164,4 +170,61 @@ verifyPassword candidate (Just hashed) =
   BCrypt.validatePassword
     (Text.encodeUtf8 $! API.unHashedPassword hashed)
     (Text.encodeUtf8 $! API.unPassword candidate)
+
+-- | see OpEnergy.Account.API.V2.AccountV2API for reference of 'register' API
+-- call.
+-- Registration itself is V1's: this call exists to also return the display
+-- name that was assigned, which the frontend displays as soon as a visitor
+-- arrives and would otherwise have to ask for in a second call.
+register :: AppM RegisterResultV2
+register = do
+  result <- V1.register
+  let token = V1API.accountToken (result :: V1API.RegisterResult)
+  mperson <- V1.mgetPersonByAccountToken token
+  case mperson of
+    Nothing -> do
+      -- unreachable: the token was just minted for a row that was just
+      -- inserted, so failing to find it means the two disagree
+      let err = "ERROR: register: freshly registered account cannot be found"
+      runLogging $ $(logError) err
+      throwJSON err400 err
+    Just (Entity _ person) -> return $! RegisterResultV2
+      (V1API.accountSecret (result :: V1API.RegisterResult))
+      token
+      (V1API.personUUID (result :: V1API.RegisterResult))
+      (personDisplayName person)
+
+-- | see OpEnergy.Account.API.V2.AccountV2API for reference of 'me' API call.
+-- Answers "who is this token", which is what a client needs in order to
+-- restore a session from the token it has stored.
+getMe :: API.AccountToken-> AppM AccountInfo
+getMe token = do
+  mperson <- V1.mgetPersonByAccountToken token
+  case mperson of
+    Nothing -> do
+      let err = "ERROR: getMe: failed to find user account with given token"
+      runLogging $ $(logError) err
+      throwJSON err401 err
+    Just (Entity _ person) -> return $! AccountInfo
+      (personDisplayName person)
+      (isJust $! personHashedPassword person)
+
+-- | see OpEnergy.Account.API.V2.AccountV2API for reference of 'displayname'
+-- API call.
+-- The rename itself is V1's, including its uniqueness check; this call returns
+-- the resulting account state rather than nothing, so a client does not have
+-- to assume the value it just sent is now in effect.
+postDisplayName :: API.AccountToken-> API.DisplayName-> AppM AccountInfo
+postDisplayName token displayName = do
+  _ <- V1.postDisplayName $! V1API.PostUserDisplayNameRequest token displayName
+  getMe token
+
+-- | see OpEnergy.Account.API.V2.AccountV2API for reference of
+-- 'displayname/exists' API call.
+-- Deliberately returns only whether the name is taken: it is unauthenticated,
+-- so it must not become a way to read anything else about an account.
+displayNameExists :: API.DisplayName-> AppM DisplayNameExistsResult
+displayNameExists displayName = do
+  mperson <- V1.mgetPersonByDisplayName displayName
+  return $! DisplayNameExistsResult (isJust mperson)
 

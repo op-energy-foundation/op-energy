@@ -163,6 +163,14 @@ instance ToSchema DisplayName where
   declareNamedSchema _ = return $ NamedSchema (Just "DisplayName") $ mempty
     & type_ ?~ SwaggerString
     & example ?~ toJSON defaultDisplayName
+-- | needed to accept a display name as a path segment, as
+-- V2's 'displayname/exists' does
+instance ToParamSchema DisplayName where
+  toParamSchema _ = mempty
+    & type_ ?~ SwaggerString
+instance FromHttpApiData DisplayName where
+  parseUrlPiece = everifyDisplayName
+  parseQueryParam = everifyDisplayName
 
 defaultDisplayName :: DisplayName
 defaultDisplayName = DisplayName "user1234"
