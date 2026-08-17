@@ -182,7 +182,12 @@ everifyDisplayName raw =
     _ -> Prelude.Right (DisplayName limitedSize)
   where
     limitedSize = T.copy $! T.take 255 raw
-    isDisplayName ch = isAlphaNum ch || ch == '.' || ch == '-' || isSpace ch
+    -- '_' is accepted alongside '.' and '-' because it is the conventional
+    -- separator in a username, and because generated names use it (see
+    -- AccountService.generateDisplayName). Widening only: every name that was
+    -- valid before still is.
+    isDisplayName ch =
+      isAlphaNum ch || ch == '.' || ch == '-' || ch == '_' || isSpace ch
 
 mverifyDisplayName:: Text-> Maybe DisplayName
 mverifyDisplayName raw =
