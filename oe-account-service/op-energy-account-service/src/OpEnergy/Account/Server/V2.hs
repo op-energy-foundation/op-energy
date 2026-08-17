@@ -25,4 +25,6 @@ import           OpEnergy.Account.Server.V2.AccountService
 accountServer :: ServerT AccountV2API (AppT Handler)
 accountServer
   = OpEnergy.Account.Server.V2.AccountService.login
+  :<|> OpEnergy.Account.Server.V2.AccountService.setPassword
+  :<|> OpEnergy.Account.Server.V2.AccountService.loginByPassword
 

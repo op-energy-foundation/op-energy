@@ -18,6 +18,7 @@ module OpEnergy.Account.Server.V1.AccountService
   , loadDBState
   , mgetPersonByAccountToken -- supposed that another services will use this function to authenticate user
   , mgetPersonByHashedSecret
+  , mgetPersonByDisplayName -- used by V2's login-by-password
   ) where
 
 import           Servant (err400)
