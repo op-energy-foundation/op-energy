@@ -25,6 +25,7 @@ let
     op-energy-backend = pkgs.op-energy-backend;
     op-energy-account-api = pkgs.op-energy-account-api;
     op-energy-account-service = pkgs.op-energy-account-service;
+    op-energy-account-service-nginx-vhost-config = pkgs.op-energy-account-service-nginx-vhost-config;
   };
 in
 op-energy // {
