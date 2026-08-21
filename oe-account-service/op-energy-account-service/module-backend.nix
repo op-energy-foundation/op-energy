@@ -132,7 +132,7 @@ in
         path = with pkgs; [
           postgresql sudo
         ];
-        script = ''
+        preStart = ''
           # create database if not exist. we can't use services.mysql.ensureDatabase/initialDatase here the latter
           # will not use schema and the former will only affects the very first start of mariadb service, which is not idemponent
           if [ ! "$(sudo -u postgres psql -l -x --csv | grep 'Name,${cfg.db_name}' --count)" == "1" ]; then
@@ -142,6 +142,7 @@ in
           fi
           cat "${initial_script cfg}" | sudo -u postgres psql
         '';
+        script = "exit 0";
       };
       op-energy-account-service =
       let
@@ -151,10 +152,12 @@ in
         after = [
           "network-online.target"
           "postgresql.service"
+          "postgresql-op-energy-account-users.service"
         ];
         requires = [
           "postgresql.service"
           "network-online.target"
+          "postgresql-op-energy-account-users.service"
           ];
         serviceConfig = {
           Type = "simple";
