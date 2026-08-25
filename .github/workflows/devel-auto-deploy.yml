@@ -1,0 +1,23 @@
+name: "automatic deploy of devel branch to dev instance"
+on:
+  push:
+    branches:
+      - devel
+jobs:
+  devel-auto-deploy:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: dev0-deploy-group
+      cancel-in-progress: true
+    steps:
+    - uses: actions/checkout@v3
+    - uses: webfactory/ssh-agent@v0.8.0
+      with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+    - uses: cachix/install-nix-action@v31.11.0
+      with:
+        nix_path: nixpkgs=channel:nixos-26.05
+        extra_nix_config: "system-features = nixos-test benchmark big-parallel kvm"
+    - run: git status
+    - run: ssh -oStrictHostKeyChecking=no root@${{ vars.DEV_INSTANCE }} "set -x; cd /etc/nixos; git pull --rebase; git submodule update --init --remote --recursive; systemctl stop op-energy-backend-mainnet.service op-energy-account-service.service && nixos-rebuild switch && nix-collect-garbage -d; systemctl start op-energy-backend-mainnet.service op-energy-account-service.service"
+
