@@ -12,9 +12,9 @@ jobs:
     - uses: webfactory/ssh-agent@v0.8.0
       with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-    - uses: cachix/install-nix-action@v25
+    - uses: cachix/install-nix-action@v31.11.0
       with:
-        nix_path: nixpkgs=channel:nixos-23.11
+        nix_path: nixpkgs=channel:nixos-26.05
         extra_nix_config: "system-features = nixos-test benchmark big-parallel kvm"
     - run: git clone ssh://git@github.com/op-energy-foundation/op-energy-dev-instance.git ../op-energy-dev-instance --recursive --remote -b devel
     # current repo's use case is to be submodule in 80% of cases, so we need to copy content of op-energy repo into a proper submodule location
