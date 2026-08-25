@@ -19,7 +19,6 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuessService
   , getBlockTimeStrikeGuessPerson
   ) where
 
-import           Servant ( err500, err400, ServerError)
 import           Control.Monad.Trans.Reader (asks, ReaderT(..))
 import           Control.Monad.Logger( logError, NoLoggingT)
 import           Data.Time.Clock( getCurrentTime)
@@ -27,7 +26,6 @@ import           Data.Time.Clock.POSIX(POSIXTime, utcTimeToPOSIXSeconds)
 import qualified Control.Concurrent.STM.TVar as TVar
 import           Control.Monad(void, when)
 import qualified Data.List as List
-import           Data.Text(Text)
 import           Control.Monad.Trans.Resource( ResourceT)
 import           Control.Monad.Trans.Except( ExceptT(..), throwE)
 import           Data.Maybe(fromMaybe)
@@ -56,10 +54,14 @@ import qualified Data.OpEnergy.Account.API.V1.PagingResult as API
 import qualified Data.OpEnergy.Account.API.V1.FilterRequest as API
 import           Data.OpEnergy.Account.API.V1.UUID
 import           Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass
-import           Data.OpEnergy.API.V1.Error (throwJSON)
 
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
-import           OpEnergy.Error( eitherThrowJSON, runExceptPrefixT)
+import           OpEnergy.Error
+                   ( eitherThrowJSON, runExceptPrefixT
+                   , CallstackError, latestConfirmedBlockMissing
+                   , dbQueryError, authenticationFailure, strikeNotFound
+                   , strikeMediantimeShouldBeInFuture, blockHeightShouldBeInFuture
+                   )
 import           OpEnergy.PagingResult( pagingResult)
 import           OpEnergy.Account.Server.V1.Config (Config(..))
 import           OpEnergy.Account.Server.V1.Class
@@ -101,12 +103,7 @@ createBlockTimeStrikeFutureGuessHandler
     let name = "BlockTimeStrikeGuessService.createBlockTimeStrikeFutureGuessHandler"
     in profile name $
   eitherThrowJSON
-    (\reason-> do
-      callstack <- asks callStack
-      let msg = callstack <> ": " <> reason
-      runLogging $ $(logError) msg
-      return msg
-    )
+    ( runLogging . $(logError) )
     $ createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess
 
 createBlockTimeStrikeFutureGuess
@@ -114,7 +111,7 @@ createBlockTimeStrikeFutureGuess
   -> BlockHeight
   -> Natural Int
   -> API.SlowFast
-  -> AppM (Either (ServerError, Text) API.BlockTimeStrikeGuess)
+  -> AppM (Either CallstackError API.BlockTimeStrikeGuess)
 createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess =
     let name = "BlockTimeStrikeGuessService.createBlockTimeStrikeFutureGuess"
     in profile name $ runExceptPrefixT name $ do
@@ -122,25 +119,22 @@ createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess =
     $ asks (configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip . config)
   latestConfirmedBlockV <- lift
     $ asks (BlockTime.latestConfirmedBlock . blockTimeState)
-  tip <- exceptTMaybeT (err500, "there is no current tip yet")
+  tip <- exceptTMaybeT latestConfirmedBlockMissing
     $ liftIO $ TVar.readTVarIO latestConfirmedBlockV
   when (blockHeaderMediantime tip > fromIntegral strikeMediantime)
-    $ throwE (err400, "strikeMediantime is in the past, which is not expected")
+    $ throwE strikeMediantimeShouldBeInFuture
   when ( blockHeaderHeight tip
        + naturalFromPositive configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
        > blockHeight)
-    $ throwE (err400,"block height for new block time strike should be in the \
-              \future + minimum \
-              \configBlockTimeStrikeFutureGuessMinimumBlockAheadCurrentTip"
-             )
+    $ throwE blockHeightShouldBeInFuture
   Entity personKey person <- exceptTMaybeT
-    (err400, "person was not able to authenticate itself")
+    authenticationFailure
     $ mgetPersonByAccountToken token
   Entity strikeKey strike <- exceptTMaybeT
-    (err400, "future strike was not able to authenticate itself")
+    strikeNotFound
     $ mgetBlockTimeStrikeFuture blockHeight strikeMediantime
   v <- exceptTMaybeT
-    (err500, "something went wrong")
+    dbQueryError
     $ createBlockTimeStrikeFutureGuess personKey strikeKey guess
   return $ API.BlockTimeStrikeGuess
     { API.person = apiModelUUIDPerson $ personUuid person
@@ -204,49 +198,43 @@ createBlockTimeStrikeFutureGuess token blockHeight strikeMediantime guess =
 getBlockTimeStrikeGuessResultsPage
   :: Maybe (Natural Int)
   -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessFilter)
-  -> AppM (API.PagingResult API.BlockTimeStrikeGuess)
-getBlockTimeStrikeGuessResultsPage mpage mfilterAPI = profile "getBlockTimeStrikeGuessResultsPage" $ do
-  mconfirmedBlockV <- asks ( BlockTime.latestConfirmedBlock . blockTimeState)
-  mconfirmedBlock <- liftIO $ TVar.readTVarIO mconfirmedBlockV
-  case mconfirmedBlock of
-    Nothing -> do
-      let err = "ERROR: getBlockTimeStrikeGuessResultsPage: no confirmed block found yet"
-      runLogging $ $(logError) err
-      throwJSON err500 err
-    Just confirmedBlock -> do
-      let
-          page = fromMaybe 0 mpage
-      recordsPerReply <- asks (configRecordsPerReply . config)
-      let
-          linesPerPage = maybe
-            recordsPerReply
-            ( fromMaybe recordsPerReply
-            . API.blockTimeStrikeGuessFilterLinesPerPage
-            . fst
-            . API.unFilterRequest
-            )
-            mfilter
-      mret <- withDBTransaction "" $ C.runConduit
-        $ filters linesPerPage confirmedBlock
-        .| (C.drop (fromNatural page * fromPositive linesPerPage) >> C.awaitForever C.yield) -- navigate to page
-        .| C.map renderBlockTimeStrikeGuessResult
-        .| C.take (fromPositive linesPerPage + 1) -- we take +1 to understand if there is a next page available
-      case mret of
-          Nothing -> do
-            throwJSON err500 ("something went wrong, check logs for details"::Text)
-          Just guessesTail -> do
-            let newPage =
-                  if List.length guessesTail > fromPositive linesPerPage
-                  then Just (fromIntegral (fromNatural page + 1))
-                  else Nothing
-                results = List.take (fromPositive linesPerPage) guessesTail
-            return $ API.PagingResult
-              { API.pagingResultNextPage = newPage
-              , API.pagingResultResults = results
-              }
+  -> AppM (Either CallstackError (API.PagingResult API.BlockTimeStrikeGuess))
+getBlockTimeStrikeGuessResultsPage mpage mfilterAPI =
+    let name = "getBlockTimeStrikeGuessResultsPage"
+    in profile name $ runExceptPrefixT name $ do
+  (_, confirmedBlock) <- ExceptT getCurrentHeaderTip
+  let
+      page = fromMaybe 0 mpage
+  recordsPerReply <- lift $! asks (configRecordsPerReply . config)
+  let
+      linesPerPage = maybe
+        recordsPerReply
+        ( fromMaybe recordsPerReply
+        . API.blockTimeStrikeGuessFilterLinesPerPage
+        . fst
+        . API.unFilterRequest
+        )
+        mfilter
+  guessesTail <- exceptTMaybeT dbQueryError
+    $ withDBTransaction "" $ C.runConduit
+      $ filters linesPerPage confirmedBlock
+      .| ( C.drop (fromNatural page * fromPositive linesPerPage)
+         >> C.awaitForever C.yield
+         ) -- navigate to page
+      .| C.map renderBlockTimeStrikeGuessResult
+      .| C.take (fromPositive linesPerPage + 1) -- we take +1 to understand if there is a next page available
+  let newPage =
+        if List.length guessesTail > fromPositive linesPerPage
+        then Just (fromIntegral (fromNatural page + 1))
+        else Nothing
+      results = List.take (fromPositive linesPerPage) guessesTail
+  return $! API.PagingResult
+    { API.pagingResultNextPage = newPage
+    , API.pagingResultResults = results
+    }
   where
     mfilter = fmap coerceFilterRequestBlockTimeStrikeGuess mfilterAPI
-    sort = maybe Descend (API.sortOrder . API.unFilterRequest . id1 . API.mapFilter) mfilter
+    sort = maybe Descend (API.sortOrder . API.unFilterRequest . id1 . API.coerceFilter) mfilter
       where
         id1
           :: API.FilterRequest BlockTimeStrike API.BlockTimeStrikeGuessFilter
@@ -270,7 +258,7 @@ getBlockTimeStrikeGuessResultsPage mpage mfilterAPI = profile "getBlockTimeStrik
          ()
     fetchConfirmedStrikes recordsPerReply confirmedBlock = streamEntities
       ((BlockTimeStrikeBlock <=. blockHeaderHeight confirmedBlock)
-      : maybe [] (API.buildFilter . API.unFilterRequest . API.mapFilter) mfilter
+      : maybe [] (API.buildFilter . API.unFilterRequest . API.coerceFilter) mfilter
       )
       BlockTimeStrikeId
       (PageSize (fromPositive recordsPerReply + 1))
@@ -288,19 +276,14 @@ getBlockTimeStrikesGuessesPageHandler mpage mfilterAPI =
     let name = "getBlockTimeStrikesGuessesPageHandler"
     in profile name $ do
   eitherThrowJSON
-    (\reason-> do
-      callstack <- asks callStack
-      let msg = callstack <> ": " <> reason
-      runLogging $ $(logError) msg
-      return msg
-    )
+    ( runLogging . $(logError) )
     $ getBlockTimeStrikesGuessesPage mpage mfilterAPI
 
 -- | returns list BlockTimeStrikeGuess records
 getBlockTimeStrikesGuessesPage
   :: Maybe (Natural Int)
   -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessFilter)
-  -> AppM (Either (ServerError, Text) (API.PagingResult API.BlockTimeStrikeGuess))
+  -> AppM (Either CallstackError (API.PagingResult API.BlockTimeStrikeGuess))
 getBlockTimeStrikesGuessesPage mpage mfilterAPI =
     let name = "getBlockTimeStrikesGuessesPage"
     in profile name $ runExceptPrefixT name $ do
@@ -327,7 +310,7 @@ getBlockTimeStrikesGuessesPage mpage mfilterAPI =
           latestConfirmedBlock
           configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
         ++ strikeFilter
-  exceptTMaybeT (err500, "db query failed")
+  exceptTMaybeT dbQueryError
     $ pagingResult
       mpage
       linesPerPage
@@ -338,10 +321,10 @@ getBlockTimeStrikesGuessesPage mpage mfilterAPI =
   where
     mfilter = fmap coerceFilterRequestBlockTimeStrikeGuess mfilterAPI
     strikeFilter :: [Filter BlockTimeStrike]
-    strikeFilter = maybe [] (API.buildFilter . API.unFilterRequest . API.mapFilter) mfilter
+    strikeFilter = maybe [] (API.buildFilter . API.unFilterRequest . API.coerceFilter) mfilter
     guessFilter :: [ Filter BlockTimeStrikeGuess]
-    guessFilter = maybe [] (API.buildFilter . API.unFilterRequest . API.mapFilter) mfilter
-    sort = maybe Descend (API.sortOrder . API.unFilterRequest . id1 . API.mapFilter) mfilter
+    guessFilter = maybe [] (API.buildFilter . API.unFilterRequest . API.coerceFilter) mfilter
+    sort = maybe Descend (API.sortOrder . API.unFilterRequest . id1 . API.coerceFilter) mfilter
       where
         id1
           :: API.FilterRequest BlockTimeStrike API.BlockTimeStrikeGuessFilter
@@ -425,7 +408,7 @@ getBlockTimeStrikesGuessesPage mpage mfilterAPI =
             (Entity _ guess, _, _) =
           streamEntities
             (( PersonId ==. blockTimeStrikeGuessPerson guess )
-            : maybe [] (API.buildFilter . API.unFilterRequest . API.mapFilter) mfilter
+            : maybe [] (API.buildFilter . API.unFilterRequest . API.coerceFilter) mfilter
             )
             PersonId
             (PageSize (fromPositive linesPerPage + 1))
@@ -460,12 +443,7 @@ getBlockTimeStrikeGuessesPageHandler
     let name = "V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessesPageHandler"
     in profile name $
   eitherThrowJSON
-    (\reason-> do
-      callstack <- asks callStack
-      let msg = callstack <> ": " <> reason
-      runLogging $ $(logError) msg
-      return msg
-    )
+    ( runLogging . $(logError) )
     $ getBlockTimeStrikeGuessesPage strikeBlockHeight strikeMediantime mpage
       mfilterAPI
 
@@ -475,7 +453,7 @@ getBlockTimeStrikeGuessesPage
   -> Natural Int
   -> Maybe (Natural Int)
   -> Maybe (API.FilterRequest API.BlockTimeStrikeGuess API.BlockTimeStrikeGuessFilter)
-  -> AppM (Either (ServerError, Text) (API.PagingResult API.BlockTimeStrikeGuess))
+  -> AppM (Either CallstackError (API.PagingResult API.BlockTimeStrikeGuess))
 getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilterAPI =
     let name = "getBlockTimeStrikeGuessesPage"
     in profile name $ runExceptPrefixT name $ do
@@ -490,7 +468,7 @@ getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilterAPI =
                        )
                        mfilter
   guessesTail <- exceptTMaybeT
-    (err500, "something went wrong, check logs for details")
+    dbQueryError
     $ withDBTransaction "" $ do
       C.runConduit
         $ filters linesPerPage
@@ -509,7 +487,7 @@ getBlockTimeStrikeGuessesPage blockHeight strikeMediantime mpage mfilterAPI =
   where
     page = fromMaybe 0 mpage
     mfilter = fmap coerceFilterRequestBlockTimeStrikeGuess mfilterAPI
-    sort = maybe Descend (API.sortOrder . API.unFilterRequest . id1 . API.mapFilter) mfilter
+    sort = maybe Descend (API.sortOrder . API.unFilterRequest . id1 . API.coerceFilter) mfilter
       where
         id1
           :: API.FilterRequest BlockTimeStrike API.BlockTimeStrikeGuessFilter
@@ -535,12 +513,7 @@ getBlockTimeStrikeGuessHandler
 getBlockTimeStrikeGuessHandler token blockHeight strikeMediantime =
     let name = "V1.BlockTimeStrikeGuessService.getBlockTimeStrikeGuessHandler"
     in profile name $ eitherThrowJSON
-      (\reason-> do
-        callstack <- asks callStack
-        let msg = callstack <> ": " <> reason
-        runLogging $ $(logError) msg
-        return msg
-      )
+      ( runLogging . $(logError) )
       $ runExceptPrefixT name $ do
   ExceptT $ getBlockTimeStrikeGuess token blockHeight strikeMediantime
 
@@ -548,15 +521,15 @@ getBlockTimeStrikeGuess
   :: API.AccountToken
   -> BlockHeight
   -> Natural Int
-  -> AppM (Either (ServerError, Text) API.BlockTimeStrikeGuess)
+  -> AppM (Either CallstackError API.BlockTimeStrikeGuess)
 getBlockTimeStrikeGuess token blockHeight strikeMediantime =
     let name = "getBlockTimeStrikeGuess"
     in profile "getBlockTimeStrikeGuess" $ runExceptPrefixT name $ do
-  personE <- exceptTMaybeT (err400, "person was not able to authenticate itself")
+  personE <- exceptTMaybeT authenticationFailure
     $ mgetPersonByAccountToken token
-  mGuess <- exceptTMaybeT (err500, "something went wrong, see logs for details")
+  mGuess <- exceptTMaybeT dbQueryError
     $ actualGetStrikeGuess personE blockHeight (fromIntegral strikeMediantime)
-  exceptTMaybeT (err400, "no strike or guess found")
+  exceptTMaybeT strikeNotFound
     $ return mGuess
   where
     actualGetStrikeGuess (Entity personKey person) blockHeight strikeMediantime = do
@@ -597,12 +570,7 @@ getBlockTimeStrikeGuessPersonHandler uuid blockHeight strikeMediantime =
     let name = "BlockTimeStrikeGuessService.getBlockTimeStrikeGuessPersonHandler"
     in profile name $ do
   eitherThrowJSON
-    (\reason-> do
-      callstack <- asks callStack
-      let msg = callstack <> ": " <> reason
-      runLogging $ $(logError) msg
-      return msg
-    )
+    ( runLogging . $(logError))
     $ getBlockTimeStrikeGuessPerson uuid blockHeight strikeMediantime
 
 getBlockTimeStrikeGuessPerson
@@ -610,17 +578,17 @@ getBlockTimeStrikeGuessPerson
   => UUID API.Person
   -> BlockHeight
   -> Natural Int
-  -> AppT m (Either (ServerError, Text) API.BlockTimeStrikeGuess)
+  -> AppT m (Either CallstackError API.BlockTimeStrikeGuess)
 getBlockTimeStrikeGuessPerson uuid blockHeight strikeMediantime =
     let name = "getBlockTimeStrikeGuessPerson"
     in profile name $ runExceptPrefixT name $ do
-  mpersonE <- exceptTMaybeT (err500, "DB query errors, check logs")
+  mpersonE <- exceptTMaybeT dbQueryError
     $ mgetPersonByUUID uuid
-  personE <- exceptTMaybeT (err400, "person was not able to authenticate itself")
+  personE <- exceptTMaybeT authenticationFailure
     $ return mpersonE
-  mstrike <- exceptTMaybeT (err500, "DB query errors, see logs for details")
+  mstrike <- exceptTMaybeT dbQueryError
     $ actualGetStrikeGuess personE blockHeight (fromIntegral strikeMediantime)
-  exceptTMaybeT (err400, "no strike or guess found")
+  exceptTMaybeT strikeNotFound
     $ return mstrike
   where
     mgetPersonByUUID uuid = do
@@ -728,7 +696,7 @@ fetchBlockTimeStrikeGuessByStrike
 fetchBlockTimeStrikeGuessByStrike recordsPerReply sort mfilter (Entity strikeId _) = do
   streamEntities
     ( ( BlockTimeStrikeGuessStrike ==. strikeId )
-    : maybe [] (API.buildFilter . API.unFilterRequest . API.mapFilter) mfilter
+    : maybe [] (API.buildFilter . API.unFilterRequest . API.coerceFilter) mfilter
     )
     BlockTimeStrikeGuessId
     (PageSize (fromPositive recordsPerReply + 1))
@@ -749,7 +717,7 @@ fetchGuessPersonByBlockTimeStrikeGuess
     recordsPerReply sort mfilter (_, Entity _ guess ) = do
   streamEntities
     ( ( PersonId ==. blockTimeStrikeGuessPerson guess )
-    : maybe [] (API.buildFilter . API.unFilterRequest . API.mapFilter) mfilter
+    : maybe [] (API.buildFilter . API.unFilterRequest . API.coerceFilter) mfilter
     )
     PersonId
     (PageSize (fromPositive recordsPerReply + 1))

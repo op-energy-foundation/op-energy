@@ -216,9 +216,9 @@ in
           if [ ! "$(sudo -u postgres psql -l -x --csv | grep 'Name,${cfg.db_name}' --count)" == "1" ]; then
             ( echo 'CREATE DATABASE ${cfg.db_name};'
               echo '\c ${cfg.db_name};'
-            ) | sudo -u postgres psql
+            ) | sudo -u postgres psql || true # blockspans service can be running in parallel
           fi
-          cat "${initial_script cfg}" | sudo -u postgres psql
+          cat "${initial_script cfg}" | sudo -u postgres psql || true # blockspans service can be running in parallel
         '';
         script = "exit 0";
       };
@@ -235,7 +235,6 @@ in
         requires = [
           "postgresql.service"
           "network-online.target"
-          "postgresql-op-energy-account-users.service"
           ];
         serviceConfig = {
           Type = "simple";

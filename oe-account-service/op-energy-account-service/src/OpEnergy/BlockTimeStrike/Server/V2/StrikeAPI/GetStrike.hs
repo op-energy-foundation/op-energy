@@ -5,16 +5,11 @@ module OpEnergy.BlockTimeStrike.Server.V2.StrikeAPI.GetStrike
   , getStrikeHandler
   ) where
 
-import           Data.Text(Text)
 import           Control.Monad.Trans.Reader ( asks)
 import           Control.Monad.Logger( logError)
 import           Control.Monad.Trans
 import           Control.Monad.Trans.Except( ExceptT (..))
 import           Data.Maybe(fromMaybe)
-import qualified Control.Concurrent.STM as STM
-import qualified Control.Concurrent.STM.TVar as TVar
-
-import           Servant ( err500, err400, ServerError)
 
 import           Database.Persist
 
@@ -28,18 +23,21 @@ import qualified Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrike
 
 import           OpEnergy.Account.Server.V1.Class
                  ( AppM, State(..), runLogging, profile
-                 , withDBTransaction
+                 , withDBTransaction, getCurrentHeaderTip
                  )
 
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
-import           OpEnergy.Error( eitherThrowJSON, runExceptPrefixT)
+import           OpEnergy.Error
+                   ( eitherThrowJSON, runExceptPrefixT
+                   , CallstackError, dbQueryError, strikeNotFound
+                   , calculatedGuessesCountNotFound
+                   )
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
                  as V1
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
                  as V1
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
                  as V1
-import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import qualified OpEnergy.BlockTimeStrike.Server.V2.BlockSpanTimeStrike
                  as BlockSpanTimeStrike
 import qualified OpEnergy.Account.Server.V1.Config as Config
@@ -52,12 +50,7 @@ getStrikeHandler
 getStrikeHandler strikeBlock strikeMediantime mspanSize =
     let name = "V2.strikeAPI.GetStrike.getStrikeHandler"
     in profile name $ eitherThrowJSON
-      (\ reason-> do
-        callstack <- asks callStack
-        let msg = callstack <> ":" <> reason
-        runLogging $ $(logError) msg
-        return msg
-      )
+      ( runLogging . $(logError) )
       $ runExceptPrefixT name $ do
   ExceptT $ getStrike strikeBlock strikeMediantime mspanSize
 
@@ -65,29 +58,24 @@ getStrike
   :: BlockV1.BlockHeight
   -> Natural Int
   -> Maybe (Positive Int)
-  -> AppM (Either (ServerError, Text) API.BlockSpanTimeStrike)
+  -> AppM (Either CallstackError API.BlockSpanTimeStrike)
 getStrike strikeBlock strikeMediantime mspanSize =
     let name = "getStrike"
     in profile name $ runExceptPrefixT name $ do
-  latestConfirmedBlockV <- lift
-    $ asks (BlockTime.latestConfirmedBlock . blockTimeState)
-  latestConfirmedBlock <-
-    ExceptT $ liftIO $ STM.atomically $ runExceptPrefixT "STM" $ do
-      exceptTMaybeT ( err500, "latest confirmed block hasn't been received yet")
-        $ TVar.readTVar latestConfirmedBlockV
+  (_, latestConfirmedBlock) <- ExceptT getCurrentHeaderTip
   strikeV1 <- ExceptT $ V1.getBlockTimeStrike strikeBlock strikeMediantime
   eguessesCount <- exceptTMaybeT
-    ( err500, "db query failed")
+    dbQueryError
     $ withDBTransaction "" $ runExceptPrefixT "DB" $ do
       Entity strikeId _ <- exceptTMaybeT
-        (err400, "block time strike not found")
+        strikeNotFound
         $ selectFirst
           [ V1.BlockTimeStrikeBlock ==. strikeBlock
           , V1.BlockTimeStrikeStrikeMediantime ==. fromIntegral strikeMediantime
           ]
           []
       exceptTMaybeT
-        ( err400, "calculated guesses count not found")
+        calculatedGuessesCountNotFound
         $ selectFirst
           [ V1.CalculatedBlockTimeStrikeGuessesCountStrike ==. strikeId ]
           []

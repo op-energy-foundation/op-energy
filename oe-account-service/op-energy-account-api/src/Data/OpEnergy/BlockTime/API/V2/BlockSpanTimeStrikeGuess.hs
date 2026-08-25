@@ -30,8 +30,7 @@ import           Data.OpEnergy.Account.API.V1.Account
 import           Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrike
 
 
--- | this data type defines data structure, that will be used in API to
--- represent BlockSpanTimeStrikeGuess with possible observed result, judgement
+-- | API-side BlockSpanTimeStrikeGuess with possible observed result, judgement
 -- block's data, span size and possible blockspan headers with nbdr and hashrate
 data BlockSpanTimeStrikeGuess = BlockSpanTimeStrikeGuess
   { strike ::  BlockSpanTimeStrike
