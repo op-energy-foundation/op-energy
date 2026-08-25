@@ -1,4 +1,4 @@
-name: "automatic deploy of devel branch to dev instance"
+name: "automatic deploy of devel branch to dev instance1"
 on:
   push:
     branches:
