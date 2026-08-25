@@ -8,8 +8,6 @@ module OpEnergy.BlockTimeStrike.Server.V2.StrikesAPI.GetStrikes
   , getStrikesHandler
   ) where
 
-import           Data.Text(Text)
-import           Servant ( err500, ServerError)
 import           Control.Monad.Trans.Reader ( asks)
 import           Control.Monad.Logger( logError)
 import           Control.Monad(forM)
@@ -33,7 +31,10 @@ import qualified Data.OpEnergy.Account.API.V1.FilterRequest
 
 import           Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrike
 
-import           OpEnergy.Error( eitherThrowJSON, runExceptPrefixT)
+import           OpEnergy.Error
+                   ( eitherThrowJSON, runExceptPrefixT
+                   , CallstackError, dbQueryError
+                   )
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.GetBlockTimeStrikesPage
                  as V1
@@ -64,12 +65,7 @@ getStrikesHandler
 getStrikesHandler mspanSize mpage mfilter =
     let name = "V2.getStrikesHandler"
     in profile name $ eitherThrowJSON
-      (\reason-> do
-        callstack <- asks callStack
-        let msg = callstack <> ":" <> reason
-        runLogging $ $(logError) msg
-        return msg
-      )
+      ( runLogging . $(logError))
       $ getStrikes mspanSize mpage mfilter
 
 data IsSortByGuessesCountNeeded
@@ -83,7 +79,7 @@ getStrikes
              APIV1.BlockTimeStrike
              APIV1.BlockTimeStrikeFilter
            )
-  -> AppM (Either (ServerError, Text) (APIV1.PagingResult BlockSpanTimeStrike))
+  -> AppM (Either CallstackError (APIV1.PagingResult BlockSpanTimeStrike))
 getStrikes mspanSize mpage mfilterAPI =
     let name = "V2.getStrikes"
     in profile name $ runExceptPrefixT name $ do
@@ -106,7 +102,7 @@ getStrikes mspanSize mpage mfilterAPI =
                            []
                            ( APIV1.buildFilter
                            . APIV1.unFilterRequest
-                           . APIV1.mapFilter
+                           . APIV1.coerceFilter
                            )
                            mfilter
       strikeFilter =
@@ -140,7 +136,7 @@ getStrikes mspanSize mpage mfilterAPI =
         APIV1.StrikeSortOrderDescend -> SortByGuessesCountNotNeeded
         APIV1.StrikeSortOrderAscendGuessesCount ->  SortByGuessesCountNeeded
         APIV1.StrikeSortOrderDescendGuessesCount -> SortByGuessesCountNeeded
-  blockTimeStrikesGuesses <- exceptTMaybeT (err500, "DB query failed")
+  blockTimeStrikesGuesses <- exceptTMaybeT dbQueryError
     $ case eSortGuessesCount of
       SortByGuessesCountNotNeeded-> PagingResult.pagingResult
         mpage

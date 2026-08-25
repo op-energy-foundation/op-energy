@@ -4,9 +4,6 @@ module OpEnergy.BlockTimeStrike.Server.V2.StrikeGuessesAPI.Summary
   ( get
   ) where
 
-import           Servant
-
-import           Control.Monad.Trans.Reader ( asks)
 import           Control.Monad.Logger( logError, logInfo)
 import           Control.Monad.Trans(lift)
 import           Control.Monad.Trans.Maybe
@@ -23,7 +20,7 @@ import qualified Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrikeGuessesSummar
                  as API
 
 import           OpEnergy.Account.Server.V1.Class
-                   ( AppM, runLogging, profile, State(..)
+                   ( AppM, runLogging, profile
                    , withDBTransaction
                    )
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
@@ -41,14 +38,11 @@ get strikeBlock strikeMediantime =
     let name = "V2.StrikeGuessesAPI.Summary.get"
     in profile name $ eitherThrowJSON
       (\reason-> do
-        callstack <- asks callStack
-        let msg = callstack <> ":" <> reason
-        runLogging $ $(logError) msg
-        return msg
+        runLogging $ $(logError) reason
       )
       $ runExceptPrefixT name  $ do
   lift $ runLogging $ $(logInfo) $! name <> ": " <> tshow (strikeBlock, strikeMediantime)
-  mGuessesCount <- exceptTMaybeT (err500, "DB query failed")
+  mGuessesCount <- exceptTMaybeT dbQueryError
     $ withDBTransaction "CalculatedBlockTimeStrikeGuessesCount" $ runMaybeT $ do
       Persist.Entity strikeId _ <- MaybeT $ Persist.selectFirst
         [ V1.BlockTimeStrikeBlock ==. strikeBlock
@@ -59,7 +53,7 @@ get strikeBlock strikeMediantime =
         [ V1.CalculatedBlockTimeStrikeGuessesCountStrike ==. strikeId
         ]
         []
-  Persist.Entity _ guessesCount <- exceptTMaybeT(err400, "strike not found")
+  Persist.Entity _ guessesCount <- exceptTMaybeT strikeNotFound
     $ return mGuessesCount
   return $! API.BlockSpanTimeStrikeGuessesSummary
     { API.slowCount =

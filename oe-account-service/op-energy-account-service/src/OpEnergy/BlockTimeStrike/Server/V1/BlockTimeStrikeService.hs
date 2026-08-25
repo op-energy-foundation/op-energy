@@ -14,14 +14,12 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService
   , module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.GetBlockTimeStrikesPage
   ) where
 
-import           Servant ( err500, err400, ServerError)
 import           Control.Monad.Trans.Reader ( ask, asks, ReaderT)
 import           Control.Monad.Logger( logError, logInfo, NoLoggingT)
 import           Control.Monad(forever, when, void)
 import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
 import qualified Control.Concurrent.MVar as MVar
-import           Data.Text (Text)
 import           Data.Conduit( (.|) )
 import qualified Data.Conduit as C
 import qualified Data.Conduit.List as C
@@ -44,7 +42,12 @@ import           Data.OpEnergy.API.V1.Positive( naturalFromPositive, fromPositiv
 import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrike            as API
 
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
-import           OpEnergy.Error( eitherThrowJSON, runExceptPrefixT)
+import           OpEnergy.Error
+                   ( eitherThrowJSON, runExceptPrefixT
+                   , CallstackError, strikeMediantimeShouldBeInFuture
+                   , blockHeightShouldBeInFuture, authenticationFailure
+                   , dbQueryError, strikeNotFound
+                   )
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeScheduledStrikeCreation
                  as BlockTimeScheduledStrikeCreation
@@ -74,13 +77,7 @@ createBlockTimeStrikeFutureHandler token blockHeight strikeMediantime =
     let name = "createBlockTimeStrikeFuture"
     in profile name $ do
   eitherThrowJSON
-    (\reason-> do
-      callstack <- asks callStack
-      let msg = callstack <> ": " <> reason
-      runLogging $ $(logError) msg
-      return msg
-    )
-    $ runExceptPrefixT name $ do
+    ( runLogging . $(logError)) $ runExceptPrefixT name $ do
     void $ ExceptT $ createBlockTimeStrikeFuture token blockHeight
       strikeMediantime
 
@@ -88,7 +85,7 @@ createBlockTimeStrikeFuture
   :: API.AccountToken
   -> BlockHeight
   -> Natural Int
-  -> AppM (Either (ServerError, Text) BlockTimeStrike)
+  -> AppM (Either CallstackError BlockTimeStrike)
 createBlockTimeStrikeFuture token blockHeight strikeMediantime =
     let name = "createBlockTimeStrikeFuture"
     in profile name $ runExceptPrefixT name $ do
@@ -97,14 +94,13 @@ createBlockTimeStrikeFuture token blockHeight strikeMediantime =
   (tip, latestConfirmedBlock) <-
     ExceptT getCurrentHeaderTip
   when (blockHeaderMediantime latestConfirmedBlock >= fromIntegral strikeMediantime) $
-    throwE ( err400, "strikeMediantime is in the past, which is not expected")
+    throwE strikeMediantimeShouldBeInFuture
   when ( tip + naturalFromPositive configBlockTimeStrikeMinimumBlockAheadCurrentTip
          > blockHeight
-       ) $ throwE (err400, "block height for new block time strike should be in the \
-           \future + minimum configBlockTimeStrikeMinimumBlockAheadCurrentTip")
-  person <- exceptTMaybeT (err400, "person was not able to authenticate itself")
+       ) $ throwE blockHeightShouldBeInFuture
+  person <- exceptTMaybeT authenticationFailure
     $ mgetPersonByAccountToken token
-  exceptTMaybeT (err500, "something went wrong")
+  exceptTMaybeT dbQueryError
     $ createBlockTimeStrikeEnsuredConditions person
   where
     createBlockTimeStrikeEnsuredConditions
@@ -159,24 +155,19 @@ getBlockTimeStrikeHandler
 getBlockTimeStrikeHandler blockHeight strikeMediantime =
     let name = "V1.BlockTimeStrikeService.getBlockTimeStrikeHandler"
     in profile name $ eitherThrowJSON
-  (\reason-> do
-    callstack <- asks callStack
-    let msg = callstack <> ": " <> reason
-    runLogging $ $(logError) msg
-    return msg
-  )
+  ( runLogging . $(logError))
   $ getBlockTimeStrike blockHeight strikeMediantime
 
 -- | returns BlockTimeStrike records
 getBlockTimeStrike
   :: BlockHeight
   -> Natural Int
-  -> AppM (Either (ServerError, Text) API.BlockTimeStrikeWithGuessesCount)
+  -> AppM (Either CallstackError API.BlockTimeStrikeWithGuessesCount)
 getBlockTimeStrike blockHeight strikeMediantime =
     let name = "getBlockTimeStrike"
     in profile name $ runExceptPrefixT name $ do
   recordsPerReply <- lift $ asks (configRecordsPerReply . config)
-  mStrike <- exceptTMaybeT (err500, "something went wrong")
+  mStrike <- exceptTMaybeT dbQueryError
     $ withDBTransaction "" $ do
         C.runConduit
           $ streamEntities
@@ -189,7 +180,7 @@ getBlockTimeStrike blockHeight strikeMediantime =
           .| C.mapM maybeFetchObserved
           .| C.map renderBlockTimeStrikeWithGuessesCount
           .| C.head
-  exceptTMaybeT (err400, "strike not found") $ return mStrike
+  exceptTMaybeT strikeNotFound $ return mStrike
   where
     getGuessesCountByBlockTimeStrike
       :: Entity BlockTimeStrike

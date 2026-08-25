@@ -15,7 +15,7 @@ import           Control.Monad.Trans.Reader (runReaderT, ReaderT, ask, asks, loc
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Trans(lift)
 import           Control.Monad.Logger (runLoggingT, filterLogger, LoggingT, MonadLoggerIO, Loc, LogSource, LogLevel, LogStr, logError, NoLoggingT)
-import           Servant (Handler, err500, ServerError)
+import           Servant (Handler )
 import           Data.Pool(Pool)
 import           Database.Persist.Postgresql (SqlBackend, runSqlPersistMPool)
 import           Control.Monad.Trans.Resource
@@ -27,7 +27,7 @@ import qualified Control.Exception.Safe as E
 
 import           Data.OpEnergy.Account.API.V1.Account
 import           Data.OpEnergy.API.V1.Block(BlockHeight, BlockHeader)
-import           OpEnergy.Error( runExceptPrefixT)
+import           OpEnergy.Error
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
 import           OpEnergy.Account.Server.V1.Config
@@ -148,16 +148,17 @@ withDBTransaction name next = profile name $ do
 
 getCurrentHeaderTip
   :: MonadIO m
-  => AppT m (Either (ServerError, Text) (BlockHeight, BlockHeader))
+  => AppT m (Either CallstackError (BlockHeight, BlockHeader))
 getCurrentHeaderTip =
     let name = "getCurrentHeaderTip"
     in runExceptPrefixT name $ do
   latestUnconfirmedBlockHeightV <- lift $ asks (BlockTime.latestUnconfirmedBlockHeight . blockTimeState)
   latestConfirmedBlockV <- lift $ asks (BlockTime.latestConfirmedBlock . blockTimeState)
   ExceptT $ liftIO $ STM.atomically $ runExceptT $ (,)
-    <$> (exceptTMaybeT ( err500, "latest unconfirmed block hasn't been received yet")
-        $ TVar.readTVar latestUnconfirmedBlockHeightV
-        )
-    <*> (exceptTMaybeT (err500, "latest confirmed block hasn't been received yet")
-        $ TVar.readTVar latestConfirmedBlockV
-        )
+    <$> exceptTMaybeT
+        latestUnconfirmedBlockHeightMissing
+        (TVar.readTVar latestUnconfirmedBlockHeightV)
+    <*> exceptTMaybeT
+        latestConfirmedBlockMissing
+        (TVar.readTVar latestConfirmedBlockV)
+

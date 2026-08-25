@@ -9,8 +9,6 @@ module OpEnergy.BlockTimeStrike.Server.V2.StrikesAPI.GetStrikesGuesses
   , getStrikesGuessesHandler
   ) where
 
-import           Data.Text(Text)
-import           Servant ( err400, err500, ServerError)
 import           Control.Monad.Trans.Reader ( asks)
 import           Control.Monad.Logger( NoLoggingT, logError)
 import           Control.Monad(forM)
@@ -40,7 +38,10 @@ import           Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrikeGuess
 import           Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrikeGuessFilter
                  as BlockSpanTimeStrikeGuessFilter
 
-import           OpEnergy.Error( eitherThrowJSON, runExceptPrefixT)
+import           OpEnergy.Error
+                   ( eitherThrowJSON, runExceptPrefixT
+                   , CallstackError, authenticationFailure, dbQueryError
+                   )
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 import qualified OpEnergy.Account.Server.V1.Config as Config
 import           OpEnergy.Account.Server.V1.Class
@@ -73,12 +74,7 @@ getStrikesGuessesHandler
 getStrikesGuessesHandler token mspanSize mpage mfilter =
     let name = "V2.getStrikesGuessesHandler"
     in profile name $ eitherThrowJSON
-      (\reason-> do
-        callstack <- asks callStack
-        let msg = callstack <> ":" <> reason
-        runLogging $ $(logError) msg
-        return msg
-      )
+      ( runLogging . $(logError))
       $ getStrikesGuesses token mspanSize mpage mfilter
 
 getStrikesGuesses
@@ -89,12 +85,12 @@ getStrikesGuesses
              BlockSpanTimeStrikeGuess
              BlockSpanTimeStrikeGuessFilter
            )
-  -> AppM (Either (ServerError, Text) (APIV1.PagingResult BlockSpanTimeStrikeGuess))
+  -> AppM (Either CallstackError (APIV1.PagingResult BlockSpanTimeStrikeGuess))
 getStrikesGuesses token mspanSize mpage mfilterAPI =
     let name = "V2.getStrikesGuesses"
     in profile name $ runExceptPrefixT name $ do
   Entity personKey _ <- exceptTMaybeT
-    (err400, "person was not able to authenticate itself")
+    authenticationFailure
     $ V1.mgetPersonByAccountToken token
   recordsPerReply <- lift $ asks (Config.configRecordsPerReply . config)
   let
@@ -130,7 +126,7 @@ getStrikesGuesses token mspanSize mpage mfilterAPI =
     (asks $ Config.configBlockSpanDefaultSize . config)
     pure
     mspanSize
-  blockTimeStrikesGuesses <- exceptTMaybeT (err500, "DB query failed")
+  blockTimeStrikesGuesses <- exceptTMaybeT dbQueryError
     $ PagingResult.pagingResult
         mpage
         linesPerPage
@@ -241,21 +237,21 @@ getStrikesGuesses token mspanSize mpage mfilterAPI =
       []
       ( APIV1.buildFilter
       . APIV1.unFilterRequest
-      . APIV1.mapFilter
+      . APIV1.coerceFilter
       )
       mfilterObserved
     strikeStaticPartFilter = maybe
       []
       ( APIV1.buildFilter
       . APIV1.unFilterRequest
-      . APIV1.mapFilter
+      . APIV1.coerceFilter
       )
       mfilter
     guessStaticPartFilter = maybe
       []
       ( APIV1.buildFilter
       . APIV1.unFilterRequest
-      . APIV1.mapFilter
+      . APIV1.coerceFilter
       )
       mfilterGuess
     sort = maybe
