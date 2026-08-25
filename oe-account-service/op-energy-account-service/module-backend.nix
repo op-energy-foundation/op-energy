@@ -235,7 +235,6 @@ in
         requires = [
           "postgresql.service"
           "network-online.target"
-          "postgresql-op-energy-account-users.service"
           ];
         serviceConfig = {
           Type = "simple";
