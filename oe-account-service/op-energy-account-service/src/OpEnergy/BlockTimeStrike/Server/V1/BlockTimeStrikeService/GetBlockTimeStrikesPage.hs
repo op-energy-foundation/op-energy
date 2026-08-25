@@ -13,10 +13,8 @@ module OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeService.GetBlockTimeStr
   , maybeFetchGuessesCount
   ) where
 
-import           Servant ( err500, ServerError)
 import           Control.Monad.Trans.Reader ( asks, ReaderT)
 import           Control.Monad.Logger( logError,  NoLoggingT)
-import           Data.Text (Text)
 import           Data.Conduit( (.|) )
 import qualified Data.Conduit.List as C
 import           Control.Monad.Trans
@@ -38,7 +36,10 @@ import qualified Data.OpEnergy.Account.API.V1.FilterRequest              as API
 import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikeFilterClass as API
 
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
-import           OpEnergy.Error( eitherThrowJSON, runExceptPrefixT)
+import           OpEnergy.Error
+                   ( eitherThrowJSON, runExceptPrefixT
+                   , CallstackError, unspecified
+                   )
 import           OpEnergy.PagingResult
 import qualified OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeFilter as BlockTimeStrikeFilter
 import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
@@ -65,12 +66,7 @@ getBlockTimeStrikesPageHandler mpage mfilterAPI =
     let name = "V1.getBlockTimeStrikesPageHandler"
     in profile name $ do
   eitherThrowJSON
-    (\reason-> do
-      callstack <- asks callStack
-      let msg = callstack <> ": " <> reason
-      runLogging $ $(logError) msg
-      return msg
-    )
+    (runLogging . $(logError) )
     $ runExceptPrefixT name $ ExceptT $ getBlockTimeStrikesPage mpage mfilterAPI
 
 getBlockTimeStrikesPage
@@ -79,7 +75,7 @@ getBlockTimeStrikesPage
      )
   => Maybe (Natural Int)
   -> Maybe (API.FilterRequest API.BlockTimeStrike API.BlockTimeStrikeFilter)
-  -> AppT m (Either (ServerError, Text) (API.PagingResult API.BlockTimeStrikeWithGuessesCount))
+  -> AppT m (Either CallstackError (API.PagingResult API.BlockTimeStrikeWithGuessesCount))
 getBlockTimeStrikesPage mpage mfilterAPI =
     let name = "getBlockTimeStrikesPage"
     in profile name $ runExceptPrefixT name $ do
@@ -91,7 +87,7 @@ getBlockTimeStrikesPage mpage mfilterAPI =
                            []
                            ( API.buildFilter
                            . API.unFilterRequest
-                           . API.mapFilter
+                           . API.coerceFilter
                            )
                            mfilter
       strikeFilter =
@@ -107,7 +103,7 @@ getBlockTimeStrikesPage mpage mfilterAPI =
           latestConfirmedBlock
           configBlockTimeStrikeGuessMinimumBlockAheadCurrentTip
         ++ staticPartFilter
-  exceptTMaybeT (err500, "getBlockTimeStrikePast failed")
+  exceptTMaybeT (unspecified "getBlockTimeStrikePast failed")
     $ getBlockTimeStrikePast strikeFilter
   where
     mfilter = fmap coerceFilterRequestBlockTimeStrike mfilterAPI
@@ -231,7 +227,7 @@ maybeFetchObservedStrike mfilter (guessesCount, strikeE@(Entity strikeId _)) = d
             observedStrikeFilter = maybe
               [] ( API.buildFilter
                  . API.unFilterRequest
-                 . API.mapFilter
+                 . API.coerceFilter
                  ) mfilter
         anyObservedStrike <- selectFirst
           ( ( BlockTimeStrikeObservedStrike ==. strikeId
@@ -255,7 +251,7 @@ maybeFetchObservedStrike mfilter (guessesCount, strikeE@(Entity strikeId _)) = d
           ( (BlockTimeStrikeObservedStrike ==. strikeId)
           : maybe [] ( API.buildFilter
                       . API.unFilterRequest
-                      . API.mapFilter
+                      . API.coerceFilter
                       ) mfilter
           )
           []

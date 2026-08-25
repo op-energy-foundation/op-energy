@@ -31,8 +31,7 @@ import           Data.OpEnergy.Account.API.V1.SlowFast
 import qualified Data.OpEnergy.API.V1 as BlockSpan
 
 
--- | this data type defines data structure, that will be used in API to
--- represent BlockSpanTimeStrike with possible observed result, judgement
+-- | API-side BlockSpanTimeStrike with possible observed result, judgement
 -- block's data, span size and possible blockspan headers with nbdr and hashrate
 data BlockSpanTimeStrike = BlockSpanTimeStrike
   { block :: BlockHeight
@@ -57,16 +56,16 @@ instance ToSchema BlockSpanTimeStrike where
         , "- block - block height"
         , "- strikeMediantime - mediantime of a given strike"
         , "- creationTime - time when strike had been created"
-        , "- observedResult - if exist, then contains observed result of the strike"
-        , "- observedBlockMediantime - contains mediantime of the 'judgement' block"
-        , "- observedBlockHash - contains hash of the 'judgement' block"
-        , "- observedBlockHeight - contains height of the 'judgement' block."
+        , "- observedResult - observed result of the strike, if any"
+        , "- observedBlockMediantime - mediantime of the 'judgement' block"
+        , "- observedBlockHash - hash of the 'judgement' block"
+        , "- observedBlockHeight - height of the 'judgement' block."
         , "where:"
         , "- judgement block is the block, that used to calculate result against."
         , "  judgement block is used accordingly to the following rules:"
         , "  assume:"
-        , "      1. CONFIRMED_MEDIANTIME(n) - is a mediantime of the confirmed block with height n;"
-        , "      2. CONFIRMED_BLOCKHASH(n) - is a hash of the confirmed block with height n;"
+        , "      1. CONFIRMED_MEDIANTIME(n) - mediantime of the confirmed block with height n;"
+        , "      2. CONFIRMED_BLOCKHASH(n) - hash of the confirmed block with height n;"
         , "      3. latestConfirmedHeight - height of the latest confirmed height we have"
         , "      4. strikeBlockHeight - block height of the strike, ie 'block' field's value"
         , ""
