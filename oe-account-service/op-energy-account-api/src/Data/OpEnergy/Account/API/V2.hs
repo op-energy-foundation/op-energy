@@ -73,6 +73,27 @@ type AccountV2API
     :> Capture "displayName" DisplayName
     :> Description "Reports whether the given display name is already taken. Unauthenticated, and deliberately says nothing else about the account: it exists so a person choosing a name can be told it is unavailable before they submit."
     :> Get '[JSON] DisplayNameExistsResult
+  :<|> "secret"
+    :> Header'
+       '[ Required
+        , Strict
+        , Description "Account token gotten from /login or /register"
+        ]
+        "Authorization"
+        AccountToken -- require authentication
+    :> Description "Returns the account secret of the account identified by the given account token, so that the frontend can display the secret link back to its owner. Fails for an account registered before secrets were stored recoverably, whose secret exists only as a hash: such an account has to regenerate to obtain a displayable one."
+    :> Get '[JSON] AccountSecretResult
+  :<|> "secret"
+    :> "regenerate"
+    :> Header'
+       '[ Required
+        , Strict
+        , Description "Account token gotten from /login or /register"
+        ]
+        "Authorization"
+        AccountToken -- require authentication
+    :> Description "Replaces the account secret of the account identified by the given account token with a freshly generated one, and returns it. The previous secret stops working immediately, which is the point of the call: it is how a person revokes a secret link they have shared or lost. The account token is left alone, so the caller's own session survives the rotation."
+    :> Post '[JSON] AccountSecretResult
 
 -- | result of the V2 'register' API call. Same as V1's RegisterResult plus
 -- the assigned display name
@@ -164,6 +185,22 @@ instance ToSchema PasswordLoginRequest where
   declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
     & mapped.schema.description ?~ "PasswordLoginRequest schema"
     & mapped.schema.example ?~ toJSON defaultPasswordLoginRequest
+
+-- | result of the 'secret' and 'secret/regenerate' API calls
+data AccountSecretResult = AccountSecretResult
+  { accountSecret :: AccountSecret
+  }
+  deriving (Show, Generic, Typeable)
+
+defaultAccountSecretResult :: AccountSecretResult
+defaultAccountSecretResult = AccountSecretResult defaultAccountSecret
+
+instance ToJSON AccountSecretResult
+instance FromJSON AccountSecretResult
+instance ToSchema AccountSecretResult where
+  declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
+    & mapped.schema.description ?~ "AccountSecretResult schema"
+    & mapped.schema.example ?~ toJSON defaultAccountSecretResult
 
 data LoginResult = LoginResult
   { accountToken  :: AccountToken

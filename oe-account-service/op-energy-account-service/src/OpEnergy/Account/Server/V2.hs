@@ -31,3 +31,5 @@ accountServer
   :<|> OpEnergy.Account.Server.V2.AccountService.getMe
   :<|> OpEnergy.Account.Server.V2.AccountService.postDisplayName
   :<|> OpEnergy.Account.Server.V2.AccountService.displayNameExists
+  :<|> OpEnergy.Account.Server.V2.AccountService.getSecret
+  :<|> OpEnergy.Account.Server.V2.AccountService.regenerateSecret

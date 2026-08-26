@@ -63,6 +63,39 @@ instance ToParamSchema AccountSecret where
 defaultAccountSecret :: AccountSecret
 defaultAccountSecret = AccountSecret "a86c139a32e7dac42afe4265a955a0fd9d8c2885e26c7e92d4270b3813faa356"
 
+-- | an 'AccountSecret' encrypted with the service's
+-- configAccountTokenEncryptionPrivateKey, as stored in the DB alongside the
+-- hash of the same secret.
+--
+-- Encrypted rather than hashed because, unlike a password, a secret link has
+-- to be shown back to the person it belongs to: hashing is one-way, so a
+-- hashed secret could never be displayed again after registration. The hash
+-- is still what the secret is looked up by -- encryption is not
+-- deterministic, so the same secret encrypts differently every time and
+-- cannot be used as a search key. Same base64-encoded ciphertext
+-- representation as 'AccountToken', which uses the same key.
+newtype EncryptedAccountSecret = EncryptedAccountSecret
+  { unEncryptedAccountSecret :: Text -- base64 encoded encrypted data
+  }
+  deriving (Eq, Show, Generic, Typeable)
+instance ToJSON EncryptedAccountSecret where
+  toJSON (EncryptedAccountSecret s) = toJSON s
+instance FromJSON EncryptedAccountSecret where
+  parseJSON = withText "EncryptedAccountSecret" $ \v->
+    return $! EncryptedAccountSecret v
+instance ToSchema EncryptedAccountSecret where
+  declareNamedSchema _ = pure $ NamedSchema (Just "EncryptedAccountSecret")
+    $ mempty
+    & type_ ?~ SwaggerString
+
+instance PersistField EncryptedAccountSecret where
+  toPersistValue (EncryptedAccountSecret s) = toPersistValue s
+  fromPersistValue (PersistText s) = Right $! EncryptedAccountSecret s
+  fromPersistValue _ =
+    Left "Account.hs fromPersistValue EncryptedAccountSecret, expected Text"
+instance PersistFieldSql EncryptedAccountSecret where
+  sqlType _ = SqlString
+
 -- | you can think of this value as a JWT token, but we explicitely require it as part of API calls in order to be able to explicitely describe it with swagger spec
 newtype AccountToken = AccountToken
   { unAccountToken:: Text -- base64 encoded encrypted data
