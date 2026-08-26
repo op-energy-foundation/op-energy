@@ -23,6 +23,7 @@
 , prometheus-proc
 , wai-middleware-prometheus
 , clientsession
+, bcrypt
 , GIT_COMMIT_HASH
 , ...
 }:
@@ -56,7 +57,7 @@ mkDerivation {
     prometheus-metrics-ghc
     prometheus-proc
     wai-middleware-prometheus
-    clientsession
+    clientsession bcrypt
   ];
   preBuild = ''
     sed -i 's/GIT_COMMIT_HASH/${GIT_COMMIT_HASH}/' src/OpEnergy/Account/Server/GitCommitHash.hs

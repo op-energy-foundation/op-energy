@@ -56,6 +56,7 @@ library
                    , OpEnergy.Account.Server.V1.WebSocketService
                    , OpEnergy.Account.Server.V1.WebSocketService.Message
                    , OpEnergy.Account.Server.V1.AccountService
+                   , OpEnergy.Account.Server.V1.BIP39Words
                    , OpEnergy.Account.Server.V1.Person
                    , OpEnergy.Account.Server.V2
                    , OpEnergy.Account.Server.V2.AccountService
@@ -145,6 +146,7 @@ library
                     , vector
                     , ghc-compact
                     , clientsession, base64-bytestring
+                    , bcrypt
     ghc-options:    -O2 -Wall -Werror -Wno-unticked-promoted-constructors -fno-warn-name-shadowing -Wno-orphans
     default-extensions:       OverloadedStrings
                             , ScopedTypeVariables

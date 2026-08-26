@@ -37,6 +37,8 @@ data MetricsState = MetricsState
   , accountMgetPersonByHashedSecretUpdatingTokenCookie :: P.Histogram
   , accountMgetPersonByHashedSecretTokenCookie :: P.Histogram
   , accountMgetPersonByAccountToken :: P.Histogram
+  , accountGetSecret :: P.Histogram
+  , accountRegenerateSecret :: P.Histogram
   , dynamicHistograms :: TVar (Map Text P.Histogram)
   }
 
@@ -55,6 +57,8 @@ initMetrics _config = do
   accountMgetPersonByHashedSecretUpdatingTokenCookie <- P.register $ P.histogram (P.Info "accountMgetPersonByHashedSecretUpdatingTokenCookie" "") microBuckets
   accountMgetPersonByHashedSecretTokenCookie <- P.register $ P.histogram (P.Info "accountMgetPersonByHashedSecretTokenCookie" "") microBuckets
   accountMgetPersonByAccountToken <- P.register $ P.histogram (P.Info "accountMgetPersonByAccountToken" "") microBuckets
+  accountGetSecret <- P.register $ P.histogram (P.Info "accountGetSecret" "") microBuckets
+  accountRegenerateSecret <- P.register $ P.histogram (P.Info "accountRegenerateSecret" "") microBuckets
   _ <- P.register P.ghcMetrics
   _ <- P.register P.procMetrics
   tmap <- liftIO $ STM.newTVarIO (Map.empty)
@@ -71,6 +75,8 @@ initMetrics _config = do
     , accountMgetPersonByHashedSecretUpdatingTokenCookie = accountMgetPersonByHashedSecretUpdatingTokenCookie
     , accountMgetPersonByHashedSecretTokenCookie = accountMgetPersonByHashedSecretTokenCookie
     , accountMgetPersonByAccountToken = accountMgetPersonByAccountToken
+    , accountGetSecret = accountGetSecret
+    , accountRegenerateSecret = accountRegenerateSecret
     , dynamicHistograms = tmap
     }
 
