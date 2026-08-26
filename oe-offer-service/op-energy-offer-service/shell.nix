@@ -1,0 +1,18 @@
+let
+  stable = import ../../nixpkgs.nix;
+  overlay = import ../../overlay.nix { GIT_COMMIT_HASH = "";};
+  pkgs = (import stable {
+    overlays = [ overlay ];
+  }); # first, load the nixpkgs with system-wide overlays
+  shell = pkgs.stdenv.mkDerivation {
+    name = "shell";
+    buildInputs
+      = pkgs.op-energy-offer-service.env.nativeBuildInputs
+      ++ pkgs.op-energy-offer-service.buildInputs
+      ++ [ pkgs.haskellPackages.swagger2 pkgs.haskellPackages.servant pkgs.haskellPackages.servant-swagger
+           pkgs.haskell-language-server
+         ]
+      ++ [ pkgs.haskellPackages.ghci pkgs.haskellPackages.ghcid pkgs.haskellPackages.cabal-install ];
+  };
+
+in shell
