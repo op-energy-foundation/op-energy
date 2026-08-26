@@ -163,6 +163,14 @@ instance ToSchema DisplayName where
   declareNamedSchema _ = return $ NamedSchema (Just "DisplayName") $ mempty
     & type_ ?~ SwaggerString
     & example ?~ toJSON defaultDisplayName
+-- | needed to accept a display name as a path segment, as
+-- V2's 'displayname/exists' does
+instance ToParamSchema DisplayName where
+  toParamSchema _ = mempty
+    & type_ ?~ SwaggerString
+instance FromHttpApiData DisplayName where
+  parseUrlPiece = everifyDisplayName
+  parseQueryParam = everifyDisplayName
 
 defaultDisplayName :: DisplayName
 defaultDisplayName = DisplayName "user1234"
@@ -174,7 +182,12 @@ everifyDisplayName raw =
     _ -> Prelude.Right (DisplayName limitedSize)
   where
     limitedSize = T.copy $! T.take 255 raw
-    isDisplayName ch = isAlphaNum ch || ch == '.' || ch == '-' || isSpace ch
+    -- '_' is accepted alongside '.' and '-' because it is the conventional
+    -- separator in a username, and because generated names use it (see
+    -- AccountService.generateDisplayName). Widening only: every name that was
+    -- valid before still is.
+    isDisplayName ch =
+      isAlphaNum ch || ch == '.' || ch == '-' || ch == '_' || isSpace ch
 
 mverifyDisplayName:: Text-> Maybe DisplayName
 mverifyDisplayName raw =
