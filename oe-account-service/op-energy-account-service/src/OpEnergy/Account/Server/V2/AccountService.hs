@@ -265,9 +265,7 @@ getSecret token = do
               let err = "ERROR: getSecret: failed to decrypt stored secret"
               runLogging $ $(logError) err
               throwJSON err500 err
-            Just secret -> return $! AccountSecretResult
-              { accountSecret = secret
-              }
+            Just secret -> return $! AccountSecretResult secret
 
 
 -- | see OpEnergy.Account.API.V2.AccountV2API for reference of
@@ -305,5 +303,5 @@ regenerateSecret token = do
             [ PersonHashedSecret =. hashedSecret
             , PersonEncryptedSecret =. Just encryptedSecret
             ]
-        return $! AccountSecretResult { accountSecret = secret }
+        return $! AccountSecretResult secret
 
