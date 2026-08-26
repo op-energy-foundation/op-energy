@@ -25,4 +25,7 @@ import           OpEnergy.Account.Server.V2.AccountService
 accountServer :: ServerT AccountV2API (AppT Handler)
 accountServer
   = OpEnergy.Account.Server.V2.AccountService.login
+  :<|> OpEnergy.Account.Server.V2.AccountService.whoami
+  :<|> OpEnergy.Account.Server.V2.AccountService.deductBalance
+  :<|> OpEnergy.Account.Server.V2.AccountService.creditBalance
 

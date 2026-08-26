@@ -74,7 +74,8 @@ in
           "API_HTTP_PORT": 8899,
           "PROMETHEUS_PORT": 7899,
           "LOG_LEVEL_MIN": "Info",
-          "SCHEDULER_POLL_RATE_SECS": 10
+          "SCHEDULER_POLL_RATE_SECS": 10,
+          "INTERNAL_SERVICE_SHARED_SECRET": "your-secret-from-out-of-git-store -- must match any caller's own value (currently oe-offer-service's)"
         }
       '';
     };

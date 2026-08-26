@@ -69,6 +69,12 @@ data Config = Config
     -- ^ defines how much seconds takes to discover in average
   , configBlockSpanDefaultSize :: Positive Int
     -- ^ default block span size to use when user does not provide one
+  , configInternalServiceSharedSecret :: Text
+    -- ^ shared secret checked against the X-Internal-Service-Secret header
+    -- on the internal/balance/{deduct,credit} calls (see
+    -- Data.OpEnergy.Account.API.V2) -- must match the same value configured
+    -- into any caller (currently only oe-offer-service). Not used for
+    -- anything a browser client calls.
   }
   deriving Show
 instance FromJSON Config where
@@ -94,6 +100,7 @@ instance FromJSON Config where
     <*> ( v .:? "BLOCKTIME_RECORDS_PER_REPLY" .!= (configRecordsPerReply defaultConfig))
     <*> ( v .:? "AVERAGE_BLOCK_DISCOVER_SECS" .!= (configAverageBlockDiscoverSecs defaultConfig))
     <*> ( v .:? "BLOCKSPAN_DEFAULT_SIZE" .!= (configBlockSpanDefaultSize defaultConfig))
+    <*> ( v .:? "INTERNAL_SERVICE_SHARED_SECRET" .!= (configInternalServiceSharedSecret defaultConfig))
 
 -- need to get Key from json, which represented as base64-encoded string
 instance FromJSON Key where
@@ -126,6 +133,7 @@ defaultConfig = Config
   , configRecordsPerReply = 100
   , configAverageBlockDiscoverSecs = 600
   , configBlockSpanDefaultSize = verifyPositive 24
+  , configInternalServiceSharedSecret = error "defaultConfig: you are missing INTERNAL_SERVICE_SHARED_SECRET from config. Please generate it with \"dd if=/dev/urandom bs=1 count=32 2>/dev/null | base64 -w 0\" command"
   }
 
 getConfigFromEnvironment :: IO Config

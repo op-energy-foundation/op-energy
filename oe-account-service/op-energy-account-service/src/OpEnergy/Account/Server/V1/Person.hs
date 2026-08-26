@@ -47,6 +47,12 @@ Person
   loginsCount Word64 -- this field contains an integer value of how many times person had performed login. Default is 0
   email AccountAPI.EMailString Maybe -- can be empty (initially)
   displayName AccountAPI.DisplayName
+  balance Int -- sandbox wallet balance, in sats. Starts at startingBalanceSats
+    -- (below) on registration. Other services (e.g. oe-offer-service) never
+    -- touch this column directly -- they adjust it only via
+    -- OpEnergy.Account.Server.V2.AccountService.deductBalance/creditBalance,
+    -- the "internal/balance/{deduct,credit}" routes in
+    -- Data.OpEnergy.Account.API.V2.
   -- metadata
   creationTime POSIXTime
   lastSeenTime POSIXTime -- timestamp of the last seen time. By default the same as creationTime
@@ -57,6 +63,11 @@ Person
   UniqueDisplayName displayName -- it will be confusing if we will allow persons with identical names
   deriving Eq Show Generic
 |]
+
+-- | Sandbox wallet starting balance, in sats -- every new Person row is
+-- inserted with this as its initial 'balance'.
+startingBalanceSats :: Int
+startingBalanceSats = 300000
 
 instance API.BuildFilter Person API.BlockTimeStrikeGuessFilter where
   sortOrder (filter, _) = maybe Descend id (API.blockTimeStrikeGuessFilterSort filter)
@@ -108,6 +119,10 @@ modelApiPerson v = Person
   , personLoginsCount = AccountAPI.loginsCount v
   , personEmail = AccountAPI.email v
   , personDisplayName = AccountAPI.displayName v
+  , personBalance = startingBalanceSats -- the API-level Person deliberately
+    -- does not carry balance (it isn't part of the generic wire type -- see
+    -- WhoAmIResult for the one place it does cross the API boundary), so it
+    -- cannot round-trip through here
   , personCreationTime = AccountAPI.creationTime v
   , personLastSeenTime = AccountAPI.lastSeenTime v
   , personLastUpdated = AccountAPI.lastUpdated v
