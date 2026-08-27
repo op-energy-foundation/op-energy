@@ -34,6 +34,7 @@ import qualified Control.Concurrent.STM.TVar as TVar
 import           Control.Exception.Safe(SomeException)
 import qualified Control.Exception.Safe as E
 import           Data.Time.Clock(getCurrentTime)
+import           Data.Word(Word64)
 
 import           Database.Persist.Postgresql
 
@@ -54,11 +55,11 @@ import           OpEnergy.Error
 
 -- | server-side re-validation of what the frontend's steppers/slider already
 -- enforce client-side -- never trust client-side bounds alone.
-minOffers, maxOffers :: Int
+minOffers, maxOffers :: Word64
 minOffers = 1
 maxOffers = 20
 
-minStakeSats, maxStakeSats :: Int
+minStakeSats, maxStakeSats :: Word64
 minStakeSats = 1
 maxStakeSats = 100000000 -- 1 BTC in sats -- generous upper bound, not a real product limit
 
@@ -76,7 +77,7 @@ post token PostOfferRequest{..} =
   when (makerStakeSats < minStakeSats || makerStakeSats > maxStakeSats) $
     throwE $ invalidRequest ("makerStakeSats must be between " <> tshow minStakeSats <> " and " <> tshow maxStakeSats)
 
-  AccountV2.WhoAmIResult{ personUUID = personUUIDV, displayName = displayNameV } <-
+  (AccountV2.WhoAmIResult personUUIDV displayNameV _balance) <-
     ExceptT $ AccountClient.verifyAccountToken token
 
   State{ currentTip = currentTipV } <- lift ask

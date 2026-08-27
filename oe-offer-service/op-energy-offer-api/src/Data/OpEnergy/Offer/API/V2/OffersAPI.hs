@@ -27,6 +27,7 @@ import           Data.Typeable              (Typeable)
 import           Data.Aeson
 import           Data.Text                  (Text)
 import           Data.Time.Clock            (UTCTime)
+import           Data.Word                  (Word64)
 import           Servant.API
 
 import           Data.OpEnergy.API.V1.Block (BlockHeight, defaultBlockHeight)
@@ -93,7 +94,7 @@ data OfferInfo = OfferInfo
     -- "known gaps" section for the tradeoff this accepts.
   , targetBlock :: BlockHeight
   , validTillBlock :: BlockHeight
-  , makerStakeSats :: Int
+  , makerStakeSats :: Word64
   , status :: OfferStatus
   , expiresAt :: Maybe UTCTime
   , refundedAt :: Maybe UTCTime
@@ -127,9 +128,9 @@ defaultOfferInfo = OfferInfo
 -- page+limit+totalCount shape.
 data PaginatedOffers = PaginatedOffers
   { items :: [OfferInfo]
-  , page :: Int
-  , limit :: Int
-  , totalCount :: Int
+  , page :: Word64
+  , limit :: Word64
+  , totalCount :: Word64
   }
   deriving (Show, Generic, Typeable)
 instance ToJSON   PaginatedOffers

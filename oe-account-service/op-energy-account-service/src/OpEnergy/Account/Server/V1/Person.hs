@@ -47,7 +47,7 @@ Person
   loginsCount Word64 -- this field contains an integer value of how many times person had performed login. Default is 0
   email AccountAPI.EMailString Maybe -- can be empty (initially)
   displayName AccountAPI.DisplayName
-  balance Int -- sandbox wallet balance, in sats. Starts at startingBalanceSats
+  balance Word64 -- sandbox wallet balance, in sats. Starts at startingBalanceSats
     -- (below) on registration. Other services (e.g. oe-offer-service) never
     -- touch this column directly -- they adjust it only via
     -- OpEnergy.Account.Server.V2.AccountService.deductBalance/creditBalance,
@@ -66,7 +66,7 @@ Person
 
 -- | Sandbox wallet starting balance, in sats -- every new Person row is
 -- inserted with this as its initial 'balance'.
-startingBalanceSats :: Int
+startingBalanceSats :: Word64
 startingBalanceSats = 300000
 
 instance API.BuildFilter Person API.BlockTimeStrikeGuessFilter where

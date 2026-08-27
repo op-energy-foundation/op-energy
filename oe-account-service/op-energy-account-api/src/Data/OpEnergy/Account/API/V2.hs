@@ -16,6 +16,7 @@ import           GHC.Generics
 import           Data.Typeable              (Typeable)
 import           Data.Aeson
 import           Data.Text                  (Text)
+import           Data.Word                  (Word64)
 
 import           Servant.API
 
@@ -67,7 +68,7 @@ type AccountV2API
 data WhoAmIResult = WhoAmIResult
   { personUUID :: UUID Person
   , displayName :: DisplayName
-  , balance :: Int
+  , balance :: Word64
   }
   deriving (Show, Generic, Typeable)
 
@@ -85,7 +86,7 @@ instance ToSchema WhoAmIResult where
 -- calls -- see those routes for what each does with it.
 data BalanceAdjustRequest = BalanceAdjustRequest
   { personUUID :: UUID Person
-  , amountSats :: Int
+  , amountSats :: Word64
     -- ^ always given as a positive magnitude -- deduct subtracts it
     -- (failing rather than going negative), credit adds it. Which one
     -- happens is which route was called, not a sign on this field.
@@ -105,7 +106,7 @@ instance ToSchema BalanceAdjustRequest where
 -- | result of the 'internal/balance/deduct' and 'internal/balance/credit'
 -- API calls: the account's balance after the adjustment.
 data BalanceAdjustResult = BalanceAdjustResult
-  { balance :: Int
+  { balance :: Word64
   }
   deriving (Show, Generic, Typeable)
 

@@ -90,11 +90,11 @@ whoami token = do
       let err = "ERROR: whoami: failed to find user account with given token"
       runLogging $ $(logError) err
       throwJSON err401 err
-    Just (Entity _ person) -> return $! WhoAmIResult
-      { personUUID = apiModelUUIDPerson $ personUuid person
-      , displayName = personDisplayName person
-      , balance = personBalance person
-      }
+    Just (Entity _ person) -> return $!
+      WhoAmIResult
+        (apiModelUUIDPerson $ personUuid person)
+        (personDisplayName person)
+        (personBalance person)
 
 -- | shared first step of 'deductBalance'/'creditBalance': rejects the call
 -- outright if the caller didn't present the configured shared secret.
@@ -138,7 +138,7 @@ deductBalance secret (BalanceAdjustRequest personUUIDV amountSats) = do
     Left err -> do
       runLogging $ $(logError) err
       throwJSON err400 err
-    Right newBalance -> return $! BalanceAdjustResult { balance = newBalance }
+    Right newBalance -> return $! BalanceAdjustResult newBalance
 
 -- | see OpEnergy.Account.API.V2.AccountV2API for reference of the
 -- 'internal/balance/credit' API call.
@@ -160,5 +160,5 @@ creditBalance secret (BalanceAdjustRequest personUUIDV amountSats) = do
     Left err -> do
       runLogging $ $(logError) err
       throwJSON err400 err
-    Right newBalance -> return $! BalanceAdjustResult { balance = newBalance }
+    Right newBalance -> return $! BalanceAdjustResult newBalance
 
