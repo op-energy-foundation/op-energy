@@ -1,4 +1,6 @@
-{-- | This module implements BlockTime strike service.
+{-- | This module defines the Person persistent entity and related
+ - utility functions (UUID conversion, API/model mapping, secret
+ - encryption/decryption).
  -}
 {-# LANGUAGE RecordWildCards            #-}
 {-# LANGUAGE DataKinds                  #-}
@@ -27,6 +29,11 @@ import qualified Data.List as List
 import           Data.Word(Word64)
 import           GHC.Generics
 
+import qualified Data.Text.Encoding as Text
+import qualified Data.ByteString.Lazy as LBS
+import qualified Data.Aeson as Aeson
+import qualified Web.ClientSession as ClientSession
+
 import           Database.Persist
 import           Database.Persist.Sql
 import           Database.Persist.Pagination
@@ -40,12 +47,25 @@ import qualified Data.OpEnergy.Account.API.V1.FilterRequest as API
 import qualified Data.OpEnergy.Account.API.V1.Hash as API
 import qualified Data.OpEnergy.Account.API.V1.UUID as API
 
+-- PersistField instances for EncryptedAccountSecret live here in the
+-- service layer, not in the API module, per the API/Model separation
+-- guideline (see PR #87 / WellTyped follow-up).
+instance PersistField AccountAPI.EncryptedAccountSecret where
+  toPersistValue (AccountAPI.EncryptedAccountSecret s) = toPersistValue s
+  fromPersistValue (PersistText s) =
+    Prelude.Right $! AccountAPI.EncryptedAccountSecret s
+  fromPersistValue _ =
+    Left "fromPersistValue EncryptedAccountSecret, expected Text"
+instance PersistFieldSql AccountAPI.EncryptedAccountSecret where
+  sqlType _ = SqlString
+
 share [mkPersist sqlSettings, mkMigrate "migrateAccount"] [persistLowerCase|
 Person
   -- data
   uuid (API.UUID Person) -- will be used by other services as foreign key. local relations should use PersonId instead. If you in doubt why not use only Key, then think if you will be able to ensure that Key won't be changed in case of archieving persons, that haven't been seen for a long time.
   hashedSecret (API.Hashed AccountAPI.AccountSecret) -- hash of the secret in order to not to store plain secrets
   hashedPassword PasswordAPI.HashedPassword Maybe -- bcrypt digest of the password, when the person has set one. Nothing means this person can only log in with their AccountSecret
+  encryptedSecret AccountAPI.EncryptedAccountSecret Maybe -- encrypted copy of the secret, so that it can be decrypted and shown back to its owner
   loginsCount Word64 -- this field contains an integer value of how many times person had performed login. Default is 0
   email AccountAPI.EMailString Maybe -- can be empty (initially)
   displayName AccountAPI.DisplayName
@@ -117,6 +137,7 @@ modelApiPerson v = Person
   { personUuid = modelApiUUIDPerson $ AccountAPI.uuid v
   , personHashedSecret = AccountAPI.hashedSecret v
   , personHashedPassword = Nothing -- API-level Person does not carry password
+  , personEncryptedSecret = Nothing -- API-level Person does not carry recoverable secret
   , personLoginsCount = AccountAPI.loginsCount v
   , personEmail = AccountAPI.email v
   , personDisplayName = AccountAPI.displayName v
@@ -139,3 +160,25 @@ apiModelPerson v = AccountAPI.Person
   , AccountAPI.lastUpdated = personLastUpdated v
   }
 
+-- | encrypts an AccountSecret with the given key so it can be stored
+-- recoverably (the hash is one-way and cannot be shown back).
+encryptSecret
+  :: ClientSession.Key
+  -> AccountAPI.AccountSecret
+  -> IO AccountAPI.EncryptedAccountSecret
+encryptSecret key secret = do
+  ct <- ClientSession.encryptIO key
+    $! LBS.toStrict $! Aeson.encode secret
+  return $! AccountAPI.EncryptedAccountSecret $! Text.decodeUtf8 ct
+
+-- | decrypts an EncryptedAccountSecret back to the original AccountSecret.
+-- Returns Nothing if the ciphertext does not decrypt with this key.
+decryptSecret
+  :: ClientSession.Key
+  -> AccountAPI.EncryptedAccountSecret
+  -> Maybe AccountAPI.AccountSecret
+decryptSecret key es =
+  case ClientSession.decrypt key
+    $! Text.encodeUtf8 $! AccountAPI.unEncryptedAccountSecret es of
+    Nothing -> Nothing
+    Just bs -> Aeson.decodeStrict' bs
