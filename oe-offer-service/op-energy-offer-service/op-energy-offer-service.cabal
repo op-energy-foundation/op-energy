@@ -1,0 +1,83 @@
+cabal-version:      2.4
+name:               op-energy-offer-service
+version:            0.1.0.0
+
+executable op-energy-offer-service
+    main-is:          Main.hs
+    build-depends:    base ^>=4.15.1.0
+                    , op-energy-offer-service
+                    , servant
+                    , servant-server
+                    , warp
+                    , async
+                    , text
+                    , op-energy-offer-api
+                    , monad-logger
+                    , prometheus-client
+                    , wai-middleware-prometheus
+    hs-source-dirs:   app
+    default-language: Haskell2010
+    default-extensions:       OverloadedStrings
+    ghc-options:    -O2 -threaded -rtsopts "-with-rtsopts=-T -N"
+
+library
+    hs-source-dirs: src
+    exposed-modules: OpEnergy.Offer.Server
+                   , OpEnergy.Offer.Server.GitCommitHash
+                   , OpEnergy.Offer.Server.V1.Config
+                   , OpEnergy.Offer.Server.V1.Class
+                   , OpEnergy.Offer.Server.V1.Metrics
+                   , OpEnergy.Offer.Server.V1.Offer
+                   , OpEnergy.Offer.Server.V1.DB
+                   , OpEnergy.Offer.Server.V1.DB.Migrations
+                   , OpEnergy.Offer.Server.V1.AccountClient
+                   , OpEnergy.Offer.Server.V1.OfferService
+                   , OpEnergy.Offer.Server.V2
+                   , OpEnergy.Offer.Server.V2.PostOfferAPI
+                   , OpEnergy.Offer.Server.V2.PostOfferAPI.Post
+                   , OpEnergy.Offer.Server.V2.OffersAPI
+                   , OpEnergy.Offer.Server.V2.OffersAPI.GetMine
+                   , OpEnergy.Offer.Server.V2.OffersAPI.GetList
+                   , OpEnergy.Offer.Server.V2.OffersAPI.GetById
+                   , OpEnergy.Offer.Server.V2.CancelAPI
+                   , OpEnergy.Offer.Server.V2.CancelAPI.Cancel
+                   , OpEnergy.Offer.Server.V2.Expiry
+
+                   , Data.Text.Show
+                   , OpEnergy.Error
+
+    build-depends:    base ^>=4.15.1.0
+                    , aeson
+                    , text
+                    , bytestring
+                    , containers
+                    , servant
+                    , servant-server, servant-client, servant-client-core
+                    , http-client, http-types
+                    , servant-swagger
+                    , swagger2
+                    , time
+                    , lens
+                    , persistent, persistent-template, persistent-postgresql, monad-logger
+                    , resource-pool
+                    , op-energy-api
+                    , op-energy-account-api
+                    , op-energy-offer-api
+                    , exceptions
+                    , safe-exceptions
+                    , mtl
+                    , stm
+                    , transformers
+                    , warp
+                    , monad-logger
+                    , prometheus-client
+                    , wai-middleware-prometheus
+                    , prometheus-metrics-ghc
+                    , prometheus-proc
+                    , async
+                    , unliftio-core
+                    , resourcet
+    ghc-options:    -O2 -Wall -Werror -Wno-unticked-promoted-constructors -fno-warn-name-shadowing -Wno-orphans
+    default-extensions:       OverloadedStrings
+                            , ScopedTypeVariables
+                            , BangPatterns
