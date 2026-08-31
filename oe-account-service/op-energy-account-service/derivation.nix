@@ -11,6 +11,7 @@
 , persistent-pagination
 , resource-pool
 , cryptohash-sha256, base16-bytestring
+, bcrypt
 , random
 , async
 , exceptions
@@ -46,6 +47,7 @@ mkDerivation {
     persistent-pagination
     resource-pool
     cryptohash-sha256 base16-bytestring
+    bcrypt
     random
     exceptions
     stm stm-chans

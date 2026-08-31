@@ -58,7 +58,16 @@ library
                    , OpEnergy.Account.Server.V1.AccountService
                    , OpEnergy.Account.Server.V1.Person
                    , OpEnergy.Account.Server.V2
-                   , OpEnergy.Account.Server.V2.AccountService
+                   , OpEnergy.Account.Server.V2.AccountService.Login
+                   , OpEnergy.Account.Server.V2.AccountService.SetPassword
+                   , OpEnergy.Account.Server.V2.AccountService.LoginByPassword
+                   , OpEnergy.Account.Server.V2.AccountService.Register
+                   , OpEnergy.Account.Server.V2.AccountService.GetMe
+                   , OpEnergy.Account.Server.V2.AccountService.PostDisplayName
+                   , OpEnergy.Account.Server.V2.AccountService.DisplayNameExists
+                   , OpEnergy.Account.Server.V2.PasswordAPI
+                   , OpEnergy.Account.Server.V2.RegisterAPI
+                   , OpEnergy.Account.Server.V2.ProfileAPI
 
                    , OpEnergy.BlockTimeStrike.Server
                    , OpEnergy.BlockTimeStrike.Server.V1
@@ -145,6 +154,7 @@ library
                     , vector
                     , ghc-compact
                     , clientsession, base64-bytestring
+                    , bcrypt
     ghc-options:    -O2 -Wall -Werror -Wno-unticked-promoted-constructors -fno-warn-name-shadowing -Wno-orphans
     default-extensions:       OverloadedStrings
                             , ScopedTypeVariables

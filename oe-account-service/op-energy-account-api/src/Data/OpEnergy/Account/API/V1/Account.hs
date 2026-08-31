@@ -164,6 +164,13 @@ instance ToSchema DisplayName where
     & type_ ?~ SwaggerString
     & example ?~ toJSON defaultDisplayName
 
+instance FromHttpApiData DisplayName where
+  parseUrlPiece t = case everifyDisplayName t of
+    Left err  -> Left err
+    Right dn  -> Prelude.Right dn
+instance ToParamSchema DisplayName where
+  toParamSchema _ = mempty & type_ ?~ SwaggerString
+
 defaultDisplayName :: DisplayName
 defaultDisplayName = DisplayName "user1234"
 
@@ -174,7 +181,7 @@ everifyDisplayName raw =
     _ -> Prelude.Right (DisplayName limitedSize)
   where
     limitedSize = T.copy $! T.take 255 raw
-    isDisplayName ch = isAlphaNum ch || ch == '.' || ch == '-' || isSpace ch
+    isDisplayName ch = isAlphaNum ch || ch == '.' || ch == '-' || ch == '_' || isSpace ch
 
 mverifyDisplayName:: Text-> Maybe DisplayName
 mverifyDisplayName raw =
