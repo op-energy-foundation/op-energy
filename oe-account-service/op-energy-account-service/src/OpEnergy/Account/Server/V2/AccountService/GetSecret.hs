@@ -22,7 +22,7 @@ import           Data.OpEnergy.Account.API.V2.AccountSecretResult
 
 import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.Account.Server.V1.Class
-                 ( AppM, runLogging, profile)
+                 ( AppM, State(..), runLogging, profile)
 import           OpEnergy.Account.Server.V1.AccountService
                  ( mgetPersonByAccountToken)
 import           OpEnergy.Account.Server.V1.Person
