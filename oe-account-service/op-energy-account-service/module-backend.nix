@@ -252,10 +252,5 @@ in
         '';
       };
     };
-    networking.firewall = {
-      allowedTCPPorts = [
-        cfg.api_port
-      ];
-    };
   };
 }

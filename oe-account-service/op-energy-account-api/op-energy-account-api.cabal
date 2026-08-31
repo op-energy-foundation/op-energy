@@ -32,7 +32,7 @@ executable op-energy-account-api
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
-    build-depends:    base ^>=4.15.1.0
+    build-depends:    base >=4.15.1.0
                     , servant, servant-swagger
                     , swagger2
                     , op-energy-account-api
@@ -67,7 +67,7 @@ library
                    , Data.OpEnergy.BlockTime.API.V2.StrikeGuessesAPI
                    , Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrikeGuessesSummary
 
-    build-depends:    base ^>=4.15.1.0
+    build-depends:    base >=4.15.1.0
                     , aeson
                     , text
                     , bytestring
