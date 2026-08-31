@@ -45,13 +45,7 @@ import           Data.OpEnergy.Account.API.V2 (WhoAmIResult, BalanceAdjustReques
 
 type WhoAmIAPI
   = "api" :> "v2" :> "account" :> "whoami"
-    :> Header'
-       '[ Required
-        , Strict
-        , Description "Account token gotten from /login or /register"
-        ]
-       "Authorization"
-       AccountToken
+    :> Header' '[Required, Strict] "Authorization" AccountToken
     :> Get '[JSON] WhoAmIResult
 
 getWhoAmI :: AccountToken -> ClientM WhoAmIResult
@@ -59,13 +53,7 @@ getWhoAmI = client (Proxy :: Proxy WhoAmIAPI)
 
 type DeductBalanceAPI
   = "api" :> "v2" :> "account" :> "internal" :> "balance" :> "deduct"
-    :> Header'
-       '[ Required
-        , Strict
-        , Description "shared secret identifying an internal, service-to-service caller"
-        ]
-       "X-Internal-Service-Secret"
-       Text
+    :> Header' '[Required, Strict] "X-Internal-Service-Secret" Text
     :> ReqBody '[JSON] BalanceAdjustRequest
     :> Post '[JSON] BalanceAdjustResult
 
@@ -74,13 +62,7 @@ deductBalance = client (Proxy :: Proxy DeductBalanceAPI)
 
 type CreditBalanceAPI
   = "api" :> "v2" :> "account" :> "internal" :> "balance" :> "credit"
-    :> Header'
-       '[ Required
-        , Strict
-        , Description "shared secret identifying an internal, service-to-service caller"
-        ]
-       "X-Internal-Service-Secret"
-       Text
+    :> Header' '[Required, Strict] "X-Internal-Service-Secret" Text
     :> ReqBody '[JSON] BalanceAdjustRequest
     :> Post '[JSON] BalanceAdjustResult
 

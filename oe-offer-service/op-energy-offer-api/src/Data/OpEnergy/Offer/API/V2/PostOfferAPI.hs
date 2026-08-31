@@ -22,6 +22,7 @@ import           Control.Lens
 import           GHC.Generics
 import           Data.Typeable              (Typeable)
 import           Data.Aeson
+import           Data.Word                  (Word64)
 import           Servant.API
 
 import           Data.OpEnergy.API.V1.Block (BlockHeight, defaultBlockHeight)
@@ -44,8 +45,8 @@ type PostOfferAPI
 data PostOfferRequest = PostOfferRequest
   { targetBlock :: BlockHeight
   , validTillBlock :: BlockHeight
-  , numberOfOffers :: Int
-  , makerStakeSats :: Int
+  , numberOfOffers :: Word64
+  , makerStakeSats :: Word64
     -- ^ numberOfOffers/makerStakeSats bounds are re-validated server-side
     -- (OpEnergy.Offer.Server.V2.PostOfferAPI.Post) since they are plain
     -- Ints here, not their own bounded wire types.

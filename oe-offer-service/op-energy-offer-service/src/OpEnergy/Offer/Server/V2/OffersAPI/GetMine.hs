@@ -34,7 +34,7 @@ getMine :: AccountAPI.AccountToken -> AppM (Either CallstackError [OfferInfo])
 getMine token =
   let name = "getMine"
   in profile name $ runExceptPrefixT name $ do
-  AccountV2.WhoAmIResult{ personUUID = personUUIDV } <- ExceptT $ AccountClient.verifyAccountToken token
+  (AccountV2.WhoAmIResult personUUIDV _displayName _balance) <- ExceptT $ AccountClient.verifyAccountToken token
   State{ offerDBPool = pool } <- lift ask
   rows <- liftIO $ flip runSqlPersistMPool pool
     $ selectList [ OfferPersonUUID ==. personUUIDV ] [ Desc OfferCreated ]

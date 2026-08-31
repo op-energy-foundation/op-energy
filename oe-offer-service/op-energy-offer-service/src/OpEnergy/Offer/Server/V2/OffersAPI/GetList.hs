@@ -14,6 +14,7 @@ import           Control.Monad.Trans.Reader(ask)
 import           Control.Monad.Trans(lift)
 import           Control.Monad.IO.Class(liftIO)
 import           Control.Monad.Logger(logError)
+import           Data.Word(Word64)
 
 import           Database.Persist.Postgresql
 
@@ -27,7 +28,7 @@ import           OpEnergy.Offer.Server.V1.Offer(Offer(..), offerInfoFromEntity)
 
 import           OpEnergy.Error(eitherThrowJSON, runExceptPrefixT, CallstackError)
 
-defaultLimit, maxLimit :: Int
+defaultLimit, maxLimit :: Word64
 defaultLimit = 20
 maxLimit = 100
 

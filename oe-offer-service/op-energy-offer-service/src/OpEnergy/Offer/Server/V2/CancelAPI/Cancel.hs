@@ -52,7 +52,7 @@ cancel idText token =
     Right (n, rest) | T.null rest -> return (toSqlKey n :: OfferId)
     _ -> throwE $ invalidRequest "invalid offer id"
 
-  AccountV2.WhoAmIResult{ personUUID = personUUIDV } <- ExceptT $ AccountClient.verifyAccountToken token
+  (AccountV2.WhoAmIResult personUUIDV _displayName _balance) <- ExceptT $ AccountClient.verifyAccountToken token
 
   State{ offerDBPool = pool } <- lift ask
   mOffer <- liftIO $ flip runSqlPersistMPool pool $ get key

@@ -41,6 +41,7 @@ module OpEnergy.Offer.Server.V1.Offer
   where
 
 import           Data.Text(Text)
+import           Data.Word(Word64)
 import           Data.Time.Clock(UTCTime)
 
 import           Database.Persist
@@ -67,7 +68,7 @@ Offer
   validTillBlock (Natural Int)
   -- ^ block height after which this offer is no longer acceptable
   -- (Phase 1: informational only, not enforced by a sweep job)
-  makerStakeSats Int
+  makerStakeSats Word64
   -- ^ sats staked per offer, deducted from the creator's balance (held by
   -- oe-account-service) before this row's insert -- see
   -- OpEnergy.Offer.Server.V2.PostOfferAPI.Post
