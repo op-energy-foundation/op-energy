@@ -67,10 +67,16 @@ library
                    , OpEnergy.Account.Server.V2.AccountService.DisplayNameExists
                    , OpEnergy.Account.Server.V2.AccountService.GetSecret
                    , OpEnergy.Account.Server.V2.AccountService.RegenerateSecret
+                   , OpEnergy.Account.Server.V2.AccountService.Whoami
+                   , OpEnergy.Account.Server.V2.AccountService.DeductBalance
+                   , OpEnergy.Account.Server.V2.AccountService.CreditBalance
+                   , OpEnergy.Account.Server.V2.AccountService.CheckInternalSecret
                    , OpEnergy.Account.Server.V2.PasswordAPI
                    , OpEnergy.Account.Server.V2.RegisterAPI
                    , OpEnergy.Account.Server.V2.ProfileAPI
                    , OpEnergy.Account.Server.V2.SecretAPI
+                   , OpEnergy.Account.Server.V2.WhoAmIAPI
+                   , OpEnergy.Account.Server.V2.InternalBalanceAPI
 
                    , OpEnergy.BlockTimeStrike.Server
                    , OpEnergy.BlockTimeStrike.Server.V1

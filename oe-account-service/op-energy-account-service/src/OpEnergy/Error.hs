@@ -23,6 +23,8 @@ module OpEnergy.Error
   , blockHeightShouldBeInFuture
   , calculatedGuessesCountNotFound
   , secretNotRecoverable
+  , insufficientBalance
+  , invalidServiceSecret
   ) where
 
 import           Data.Text(Text)
@@ -33,7 +35,7 @@ import           Control.Monad.Trans.Except(ExceptT, runExceptT)
 import           Control.Exception.Safe (SomeException)
 import qualified Control.Exception.Safe as E
 
-import           Servant(ServerError, err400, err500)
+import           Servant(ServerError, err400, err401, err500)
 import           Data.Text.Show( tshow)
 import           Data.OpEnergy.API.V1.Error(throwJSON)
 
@@ -48,6 +50,8 @@ data BadRequestError
   | BlockHeightShouldBeInFuture
   | CalculatedGuessesCountNotFound
   | SecretNotRecoverable
+  | InsufficientBalance
+  | InvalidServiceSecret
 instance Show BadRequestError where
   show CalculatedGuessesCountNotFound = "calculated guesses count not found"
   show SecretNotRecoverable = "account was registered before recoverable secrets; use regenerate"
@@ -59,6 +63,8 @@ instance Show BadRequestError where
   show PasswordNotSet = "account has no password set"
   show InvalidCredentials = "invalid credentials"
   show DisplayNameAlreadyTaken = "display name already taken"
+  show InsufficientBalance = "insufficient balance"
+  show InvalidServiceSecret = "invalid service secret"
 
 data InternalError
   = Unspecified Text
@@ -110,9 +116,14 @@ calculatedGuessesCountNotFound :: CallstackError
 calculatedGuessesCountNotFound = CallstackError "" $! BadRequest CalculatedGuessesCountNotFound
 secretNotRecoverable :: CallstackError
 secretNotRecoverable = CallstackError "" $! BadRequest SecretNotRecoverable
+insufficientBalance :: CallstackError
+insufficientBalance = CallstackError "" $! BadRequest InsufficientBalance
+invalidServiceSecret :: CallstackError
+invalidServiceSecret = CallstackError "" $! BadRequest InvalidServiceSecret
 
 -- | converts Error into printable version
 errorToServerError :: Error -> (ServerError, Text)
+errorToServerError (BadRequest InvalidServiceSecret) = (err401, tshow InvalidServiceSecret)
 errorToServerError (BadRequest specificError) = (err400, tshow specificError)
 errorToServerError (Internal specificError) = (err500, tshow specificError)
 errorToServerError (BlockspanAPI specificError) = (err500, tshow specificError)

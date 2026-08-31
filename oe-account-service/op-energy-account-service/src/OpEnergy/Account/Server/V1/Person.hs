@@ -69,6 +69,7 @@ Person
   loginsCount Word64 -- this field contains an integer value of how many times person had performed login. Default is 0
   email AccountAPI.EMailString Maybe -- can be empty (initially)
   displayName AccountAPI.DisplayName
+  balance Word64 -- sandbox wallet balance, in sats
   -- metadata
   creationTime POSIXTime
   lastSeenTime POSIXTime -- timestamp of the last seen time. By default the same as creationTime
@@ -88,6 +89,10 @@ instance PersistField PasswordAPI.HashedPassword where
   fromPersistValue _ = Left "fromPersistValue HashedPassword: expected Text"
 instance PersistFieldSql PasswordAPI.HashedPassword where
   sqlType _ = SqlString
+
+-- | Sandbox wallet starting balance, in sats
+startingBalanceSats :: Word64
+startingBalanceSats = 300000
 
 instance API.BuildFilter Person API.BlockTimeStrikeGuessFilter where
   sortOrder (filter, _) = maybe Descend id (API.blockTimeStrikeGuessFilterSort filter)
@@ -141,6 +146,7 @@ modelApiPerson v = Person
   , personLoginsCount = AccountAPI.loginsCount v
   , personEmail = AccountAPI.email v
   , personDisplayName = AccountAPI.displayName v
+  , personBalance = startingBalanceSats
   , personCreationTime = AccountAPI.creationTime v
   , personLastSeenTime = AccountAPI.lastSeenTime v
   , personLastUpdated = AccountAPI.lastUpdated v

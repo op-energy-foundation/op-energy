@@ -88,6 +88,7 @@ register = do
           , personHashedPassword = Nothing
           , personEncryptedSecret = Just encryptedSecret
           , personLoginsCount = 0
+          , personBalance = startingBalanceSats
           }
     -- insert record into DB
     _ <- liftIO $! P.observeDuration accountInsert $ flip runSqlPersistMPool pool $ insert person

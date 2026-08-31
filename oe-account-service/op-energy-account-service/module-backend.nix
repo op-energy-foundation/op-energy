@@ -163,6 +163,10 @@ in
       '';
       virtualHosts.op-energy = {
         extraConfig = ''
+          location /api/v2/account/internal/ {
+                  deny all;
+                  return 403;
+          }
           location /api/v2/account {
                   limit_req zone=api burst=10 nodelay;
                   proxy_pass http://127.0.0.1:${toString cfg.api_port}/api/v2/account;

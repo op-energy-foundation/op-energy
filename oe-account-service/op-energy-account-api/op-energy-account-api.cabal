@@ -57,6 +57,7 @@ library
                    , Data.OpEnergy.Account.API.V1.Common
                    , Data.OpEnergy.Account.API.V1.Password
                    , Data.OpEnergy.Account.API.V2
+                   , Data.OpEnergy.Account.API.V1.Sats
                    , Data.OpEnergy.Account.API.V2.LoginAPI
                    , Data.OpEnergy.Account.API.V2.LoginResult
                    , Data.OpEnergy.Account.API.V2.PasswordAPI
@@ -69,6 +70,12 @@ library
                    , Data.OpEnergy.Account.API.V2.PasswordLoginRequest
                    , Data.OpEnergy.Account.API.V2.AccountSecretResult
                    , Data.OpEnergy.Account.API.V2.SecretAPI
+                   , Data.OpEnergy.Account.API.V2.WhoAmIResult
+                   , Data.OpEnergy.Account.API.V2.WhoAmIAPI
+                   , Data.OpEnergy.Account.API.V2.BalanceAdjustRequest
+                   , Data.OpEnergy.Account.API.V2.BalanceAdjustResult
+                   , Data.OpEnergy.Account.API.V2.InternalBalanceAPI
+                   , Data.OpEnergy.Account.Client
                    , Data.OpEnergy.BlockTime.API.V2
                    , Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrike
                    , Data.OpEnergy.BlockTime.API.V2.StrikesAPI
@@ -83,8 +90,9 @@ library
                     , aeson
                     , text
                     , bytestring
-                    , servant, servant-swagger
+                    , servant, servant-swagger, servant-client
                     , servant-websockets
+                    , http-client, http-client-tls
                     , swagger2
                     , time
                     , lens
