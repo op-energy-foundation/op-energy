@@ -23,12 +23,8 @@ type SecretAPI
         ]
        "Authorization"
        AccountToken
-    :> Description "Returns the account secret of the account identified \
-                   \by the given account token, so that the frontend can \
-                   \display the secret link back to its owner. Fails for \
-                   \an account registered before secrets were stored \
-                   \recoverably, whose secret exists only as a hash: such \
-                   \an account has to regenerate to obtain a displayable one."
+    :> Description "Returns the account secret for the authenticated account. \
+                   \Fails if the secret was not stored recoverably."
     :> Get '[JSON] AccountSecretResult
 
   :<|> "regenerate"
@@ -39,11 +35,7 @@ type SecretAPI
         ]
        "Authorization"
        AccountToken
-    :> Description "Replaces the account secret of the account identified \
-                   \by the given account token with a freshly generated \
-                   \one, and returns it. The previous secret stops working \
-                   \immediately, which is the point of the call: it is how \
-                   \a person revokes a secret link they have shared or \
-                   \lost. The account token is left alone, so the caller's \
-                   \own session survives the rotation."
+    :> Description "Generates a new account secret, replacing the previous one. \
+                   \The previous secret stops working immediately. \
+                   \The account token is unchanged."
     :> Post '[JSON] AccountSecretResult

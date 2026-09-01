@@ -11,7 +11,6 @@ module OpEnergy.Account.Server.V2.AccountService.GetSecret
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.Logger(logError)
 import           Control.Monad.Trans (lift)
-import           Control.Monad.Trans.Except (throwE)
 
 import           Database.Persist (Entity(..))
 
@@ -57,9 +56,8 @@ getSecret token =
        } <- lift ask
   (Entity _ person) <- exceptTMaybeT accountNotFound
     $ mgetPersonByAccountToken token
-  case personEncryptedSecret person of
-    Nothing -> throwE secretNotRecoverable
-    Just encryptedSecret ->
-      case decryptSecret configAccountTokenEncryptionPrivateKey encryptedSecret of
-        Nothing -> throwE $! accountNotFound -- decryption failed
-        Just secret -> return $! AccountSecretResult secret
+  encryptedSecret <- exceptTMaybeT secretNotRecoverable
+    $! return (personEncryptedSecret person)
+  secret <- exceptTMaybeT accountNotFound
+    $! return $! decryptSecret configAccountTokenEncryptionPrivateKey encryptedSecret
+  return $! AccountSecretResult secret

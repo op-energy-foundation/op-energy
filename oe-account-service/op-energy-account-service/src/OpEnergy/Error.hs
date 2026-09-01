@@ -22,7 +22,6 @@ module OpEnergy.Error
   , strikeMediantimeShouldBeInFuture
   , blockHeightShouldBeInFuture
   , calculatedGuessesCountNotFound
-  , accountNotFound
   , secretNotRecoverable
   ) where
 
@@ -48,11 +47,9 @@ data BadRequestError
   | StrikeMediantimeShouldBeInFuture
   | BlockHeightShouldBeInFuture
   | CalculatedGuessesCountNotFound
-  | AccountNotFound
   | SecretNotRecoverable
 instance Show BadRequestError where
   show CalculatedGuessesCountNotFound = "calculated guesses count not found"
-  show AccountNotFound = "account not found with given token"
   show SecretNotRecoverable = "account was registered before recoverable secrets; use regenerate"
   show BlockHeightShouldBeInFuture = "strike's block height should be in the future"
   show StrikeMediantimeShouldBeInFuture = "strikeMediantime should be in the future"
@@ -111,8 +108,6 @@ blockHeightShouldBeInFuture :: CallstackError
 blockHeightShouldBeInFuture = CallstackError "" $! BadRequest BlockHeightShouldBeInFuture
 calculatedGuessesCountNotFound :: CallstackError
 calculatedGuessesCountNotFound = CallstackError "" $! BadRequest CalculatedGuessesCountNotFound
-accountNotFound :: CallstackError
-accountNotFound = CallstackError "" $! BadRequest AccountNotFound
 secretNotRecoverable :: CallstackError
 secretNotRecoverable = CallstackError "" $! BadRequest SecretNotRecoverable
 

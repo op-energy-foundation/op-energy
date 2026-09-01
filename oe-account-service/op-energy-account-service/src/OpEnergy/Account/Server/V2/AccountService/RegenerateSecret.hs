@@ -13,6 +13,8 @@ import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Logger(logError)
 import           Control.Monad.Trans (lift)
+import           Data.Time.Clock(getCurrentTime)
+import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
 
 import           Database.Persist.Postgresql
 
@@ -66,9 +68,12 @@ regenerateSecret token =
   encryptedSecret <- liftIO
     $! encryptSecret configAccountTokenEncryptionPrivateKey secret
   let hashedSecret = API.hashSBS configSalt API.unAccountSecret secret
-  liftIO $! flip runSqlPersistMPool pool $
+  liftIO $! flip runSqlPersistMPool pool $ do
+    nowUTC <- liftIO getCurrentTime
+    let now = utcTimeToPOSIXSeconds nowUTC
     update personKey
       [ PersonHashedSecret =. hashedSecret
       , PersonEncryptedSecret =. Just encryptedSecret
+      , PersonLastUpdated =. now
       ]
   return $! AccountSecretResult secret

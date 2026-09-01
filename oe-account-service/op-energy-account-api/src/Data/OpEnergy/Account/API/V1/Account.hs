@@ -63,11 +63,8 @@ instance ToParamSchema AccountSecret where
 defaultAccountSecret :: AccountSecret
 defaultAccountSecret = AccountSecret "a86c139a32e7dac42afe4265a955a0fd9d8c2885e26c7e92d4270b3813faa356"
 
--- | the same secret, encrypted with configAccountTokenEncryptionPrivateKey
--- rather than hashed, so that it can be decrypted and shown back to its
--- owner. hashedSecret stays the lookup key: encryption is not deterministic,
--- so it cannot be searched by. PersistField instances live in the service
--- layer (Person.hs), not here.
+-- | the same secret, encrypted rather than hashed, so that it can be
+-- decrypted and shown back to its owner
 newtype EncryptedAccountSecret = EncryptedAccountSecret
   { unEncryptedAccountSecret :: Text
   }
