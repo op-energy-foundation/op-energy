@@ -34,6 +34,7 @@ import           Database.Persist.TH
 
 
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountAPI
+import qualified Data.OpEnergy.Account.API.V1.Password as PasswordAPI
 import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess as API
 import qualified Data.OpEnergy.Account.API.V1.FilterRequest as API
 import qualified Data.OpEnergy.Account.API.V1.Hash as API
@@ -44,6 +45,7 @@ Person
   -- data
   uuid (API.UUID Person) -- will be used by other services as foreign key. local relations should use PersonId instead. If you in doubt why not use only Key, then think if you will be able to ensure that Key won't be changed in case of archieving persons, that haven't been seen for a long time.
   hashedSecret (API.Hashed AccountAPI.AccountSecret) -- hash of the secret in order to not to store plain secrets
+  hashedPassword PasswordAPI.HashedPassword Maybe -- bcrypt digest of the password, when the person has set one. Nothing means this person can only log in with their AccountSecret
   loginsCount Word64 -- this field contains an integer value of how many times person had performed login. Default is 0
   email AccountAPI.EMailString Maybe -- can be empty (initially)
   displayName AccountAPI.DisplayName
@@ -57,6 +59,15 @@ Person
   UniqueDisplayName displayName -- it will be confusing if we will allow persons with identical names
   deriving Eq Show Generic
 |]
+
+-- HashedPassword PersistField instances -- in service layer per Alex's
+-- review (API types should not carry Persist instances)
+instance PersistField PasswordAPI.HashedPassword where
+  toPersistValue (PasswordAPI.HashedPassword s) = toPersistValue s
+  fromPersistValue (PersistText s) = Right $! PasswordAPI.HashedPassword s
+  fromPersistValue _ = Left "fromPersistValue HashedPassword: expected Text"
+instance PersistFieldSql PasswordAPI.HashedPassword where
+  sqlType _ = SqlString
 
 instance API.BuildFilter Person API.BlockTimeStrikeGuessFilter where
   sortOrder (filter, _) = maybe Descend id (API.blockTimeStrikeGuessFilterSort filter)
@@ -105,6 +116,7 @@ modelApiPerson
 modelApiPerson v = Person
   { personUuid = modelApiUUIDPerson $ AccountAPI.uuid v
   , personHashedSecret = AccountAPI.hashedSecret v
+  , personHashedPassword = Nothing -- API-level Person does not carry password
   , personLoginsCount = AccountAPI.loginsCount v
   , personEmail = AccountAPI.email v
   , personDisplayName = AccountAPI.displayName v

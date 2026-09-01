@@ -1,47 +1,31 @@
 {-# LANGUAGE DataKinds                  #-}
-{-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE TypeOperators              #-}
-{-# LANGUAGE DeriveDataTypeable         #-}
-{-# LANGUAGE DeriveGeneric              #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings          #-}
-{-# LANGUAGE EmptyDataDecls             #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE DuplicateRecordFields      #-}
 module Data.OpEnergy.Account.API.V2 where
 
-import           Data.Swagger
-import           Control.Lens
-import           GHC.Generics
-import           Data.Typeable              (Typeable)
-import           Data.Aeson
-
 import           Servant.API
 
-import           Data.OpEnergy.Account.API.V1.Account
-import           Data.OpEnergy.Account.API.V1.UUID
+import           Data.OpEnergy.API.Tags
 
--- | API specifications of a backend service for Swagger
+import qualified Data.OpEnergy.Account.API.V2.LoginAPI as LoginAPI
+import qualified Data.OpEnergy.Account.API.V2.PasswordAPI as PasswordAPI
+import qualified Data.OpEnergy.Account.API.V2.RegisterAPI as RegisterAPI
+import qualified Data.OpEnergy.Account.API.V2.ProfileAPI as ProfileAPI
+
+-- | Account V2 API. Each endpoint subset is organized as a separate
+-- Tag, imported from its own module.
 type AccountV2API
-  = "login"
-    :> ReqBody '[JSON] AccountSecret
-    :> Description "Performs login with given account secret. Returns LoginResult(token and person UUID) value for being used with the rest API calls. See 'register' API call description for the reference of expected frontend's behavior related to secrets and tokens"
-    :> Post '[JSON] LoginResult
+  = Tags "Login API"
+    :> "login"
+    :> LoginAPI.LoginAPI
 
-data LoginResult = LoginResult
-  { accountToken  :: AccountToken
-  , personUUID :: UUID Person
-  }
-  deriving (Show, Generic, Typeable)
+  :<|> Tags "Password API"
+    :> PasswordAPI.PasswordAPI
 
-defaultLoginResult :: LoginResult
-defaultLoginResult = LoginResult defaultAccountToken defaultUUID
+  :<|> Tags "Register API"
+    :> "register"
+    :> RegisterAPI.RegisterAPI
 
-instance ToJSON LoginResult
-instance FromJSON LoginResult
-instance ToSchema LoginResult where
-  declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
-    & mapped.schema.description ?~ "LoginResult schema"
-    & mapped.schema.example ?~ toJSON defaultLoginResult
-
-
+  :<|> Tags "Profile API"
+    :> ProfileAPI.ProfileAPI

@@ -14,6 +14,10 @@ module OpEnergy.Error
   , blockspanAPIError
 
   , authenticationFailure
+  , accountNotFound
+  , passwordNotSet
+  , invalidCredentials
+  , displayNameAlreadyTaken
   , strikeNotFound
   , strikeMediantimeShouldBeInFuture
   , blockHeightShouldBeInFuture
@@ -34,6 +38,10 @@ import           Data.OpEnergy.API.V1.Error(throwJSON)
 
 data BadRequestError
   = AuthenticationFailure
+  | AccountNotFound
+  | PasswordNotSet
+  | InvalidCredentials
+  | DisplayNameAlreadyTaken
   | StrikeNotFound
   | StrikeMediantimeShouldBeInFuture
   | BlockHeightShouldBeInFuture
@@ -44,6 +52,10 @@ instance Show BadRequestError where
   show StrikeMediantimeShouldBeInFuture = "strikeMediantime should be in the future"
   show StrikeNotFound = "strike not found"
   show AuthenticationFailure = "authentication failure"
+  show AccountNotFound = "account not found with given token"
+  show PasswordNotSet = "account has no password set"
+  show InvalidCredentials = "invalid credentials"
+  show DisplayNameAlreadyTaken = "display name already taken"
 
 data InternalError
   = Unspecified Text
@@ -77,6 +89,14 @@ blockspanAPIError = CallstackError "" . BlockspanAPI
 
 authenticationFailure :: CallstackError
 authenticationFailure = CallstackError "" $! BadRequest AuthenticationFailure
+accountNotFound :: CallstackError
+accountNotFound = CallstackError "" $! BadRequest AccountNotFound
+passwordNotSet :: CallstackError
+passwordNotSet = CallstackError "" $! BadRequest PasswordNotSet
+invalidCredentials :: CallstackError
+invalidCredentials = CallstackError "" $! BadRequest InvalidCredentials
+displayNameAlreadyTaken :: CallstackError
+displayNameAlreadyTaken = CallstackError "" $! BadRequest DisplayNameAlreadyTaken
 strikeNotFound :: CallstackError
 strikeNotFound = CallstackError "" $! BadRequest StrikeNotFound
 strikeMediantimeShouldBeInFuture :: CallstackError

@@ -18,6 +18,7 @@ module OpEnergy.Account.Server.V1.AccountService
   , loadDBState
   , mgetPersonByAccountToken -- supposed that another services will use this function to authenticate user
   , mgetPersonByHashedSecret
+  , mgetPersonByDisplayName
   ) where
 
 import           Servant (err400)
@@ -80,6 +81,7 @@ register = do
           , personEmail = Nothing
           , personDisplayName = userNameHash
           , personHashedSecret = hashedSecret
+          , personHashedPassword = Nothing
           , personLoginsCount = 0
           }
     -- insert record into DB
@@ -90,6 +92,7 @@ register = do
       { accountSecret = secret
       , accountToken = API.verifyAccountToken $! Text.decodeUtf8 token
       , personUUID = uuid
+      , displayName = userNameHash
       }
 
 -- | see OpEnergy.Account.API.V1.AccountV1API for reference of 'login' API call

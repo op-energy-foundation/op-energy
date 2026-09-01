@@ -55,7 +55,18 @@ library
                    , Data.OpEnergy.Account.API.V1.PagingResult
                    , Data.OpEnergy.Account.API.V1.FilterRequest
                    , Data.OpEnergy.Account.API.V1.Common
+                   , Data.OpEnergy.Account.API.V1.Password
                    , Data.OpEnergy.Account.API.V2
+                   , Data.OpEnergy.Account.API.V2.LoginAPI
+                   , Data.OpEnergy.Account.API.V2.LoginResult
+                   , Data.OpEnergy.Account.API.V2.PasswordAPI
+                   , Data.OpEnergy.Account.API.V2.RegisterAPI
+                   , Data.OpEnergy.Account.API.V2.RegisterResultV2
+                   , Data.OpEnergy.Account.API.V2.ProfileAPI
+                   , Data.OpEnergy.Account.API.V2.AccountInfo
+                   , Data.OpEnergy.Account.API.V2.DisplayNameExistsResult
+                   , Data.OpEnergy.Account.API.V2.SetPasswordRequest
+                   , Data.OpEnergy.Account.API.V2.PasswordLoginRequest
                    , Data.OpEnergy.BlockTime.API.V2
                    , Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrike
                    , Data.OpEnergy.BlockTime.API.V2.StrikesAPI

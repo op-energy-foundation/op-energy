@@ -1,14 +1,12 @@
 {-- |
- - This module is the top module of backend V1
+ - This module is the top module of Account V2 API.
+ - Each API subset is wired with an explicit ServerT annotation
+ - referencing the sub-API type, so the typechecker can localize
+ - errors to the specific subset rather than the whole AccountV2API.
  -}
 {-# LANGUAGE DataKinds                  #-}
-{-# LANGUAGE DeriveDataTypeable         #-}
-{-# LANGUAGE DeriveGeneric              #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE TypeOperators              #-}
-{-# LANGUAGE ScopedTypeVariables        #-}
-{-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE DuplicateRecordFields      #-}
 module OpEnergy.Account.Server.V2
   ( accountServer
@@ -17,12 +15,48 @@ module OpEnergy.Account.Server.V2
 import           Servant
 
 import           Data.OpEnergy.Account.API.V2
-import           OpEnergy.Account.Server.V1.Class (AppT)
-import           OpEnergy.Account.Server.V2.AccountService
+                 ( AccountV2API
+                 )
+import           Data.OpEnergy.Account.API.V2.LoginAPI
+                 ( LoginAPI
+                 )
+import           Data.OpEnergy.Account.API.V2.PasswordAPI
+                 ( PasswordAPI
+                 )
+import           Data.OpEnergy.Account.API.V2.RegisterAPI
+                 ( RegisterAPI
+                 )
+import           Data.OpEnergy.Account.API.V2.ProfileAPI
+                 ( ProfileAPI
+                 )
+import           OpEnergy.Account.Server.V1.Class
+                 ( AppT
+                 )
 
--- | this is the implementation of OpEnergy.Account.API.V1.AccountV1API. Check this type for the reference and API
--- documentation
+import qualified OpEnergy.Account.Server.V2.AccountService.Login
+                 as LoginHandlers
+import qualified OpEnergy.Account.Server.V2.PasswordAPI
+                 as PasswordAPIHandlers
+import qualified OpEnergy.Account.Server.V2.RegisterAPI
+                 as RegisterAPIHandlers
+import qualified OpEnergy.Account.Server.V2.ProfileAPI
+                 as ProfileAPIHandlers
+
+-- | V2 account server wiring
 accountServer :: ServerT AccountV2API (AppT Handler)
 accountServer
-  = OpEnergy.Account.Server.V2.AccountService.login
+  = ( LoginHandlers.loginHandler
+      :: ServerT LoginAPI (AppT Handler)
+    )
 
+  :<|> ( PasswordAPIHandlers.handlers
+         :: ServerT PasswordAPI (AppT Handler)
+       )
+
+  :<|> ( RegisterAPIHandlers.handlers
+         :: ServerT RegisterAPI (AppT Handler)
+       )
+
+  :<|> ( ProfileAPIHandlers.handlers
+         :: ServerT ProfileAPI (AppT Handler)
+       )
