@@ -11,6 +11,7 @@ import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Logger(logError)
 import           Control.Monad.Trans (lift)
+import           Data.Maybe (isJust)
 import qualified Data.Text.Encoding as Text
 import qualified Data.ByteString.Lazy as LBS
 
@@ -79,3 +80,5 @@ login secret =
   return $! LoginResult
     (API.verifyAccountToken $! Text.decodeUtf8 token)
     (apiModelUUIDPerson $ personUuid person)
+    (personDisplayName person)
+    (isJust (personHashedPassword person))

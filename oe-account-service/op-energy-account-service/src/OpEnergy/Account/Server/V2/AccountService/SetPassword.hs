@@ -12,6 +12,8 @@ import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Logger(logError)
 import           Control.Monad.Trans (lift)
 import qualified Data.Text.Encoding as Text
+import           Data.Time.Clock(getCurrentTime)
+import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
 
 import           Database.Persist.Postgresql
 import qualified Crypto.BCrypt as BCrypt
@@ -61,14 +63,15 @@ setPassword token (SetPasswordRequest (Password rawPw)) =
        } <- lift ask
   (Entity personKey _) <- exceptTMaybeT accountNotFound
     $ mgetPersonByAccountToken token
-  mhashed <- liftIO $! BCrypt.hashPasswordUsingPolicy
-    BCrypt.fastBcryptHashingPolicy
-    (Text.encodeUtf8 rawPw)
-  case mhashed of
-    Nothing -> return NoContent -- bcrypt failure; should not happen
-    Just hashed -> do
-      liftIO $! flip runSqlPersistMPool pool $
-        update personKey
-          [ PersonHashedPassword =. Just (HashedPassword (Text.decodeUtf8 hashed))
-          ]
-      return NoContent
+  hashed <- exceptTMaybeT accountNotFound
+    $ liftIO $! BCrypt.hashPasswordUsingPolicy
+      BCrypt.fastBcryptHashingPolicy
+      (Text.encodeUtf8 rawPw)
+  liftIO $! flip runSqlPersistMPool pool $ do
+    nowUTC <- liftIO getCurrentTime
+    let now = utcTimeToPOSIXSeconds nowUTC
+    update personKey
+      [ PersonHashedPassword =. Just (HashedPassword (Text.decodeUtf8 hashed))
+      , PersonLastUpdated =. now
+      ]
+  return NoContent

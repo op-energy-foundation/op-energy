@@ -7,6 +7,7 @@ module OpEnergy.Account.Server.V2.AccountService.LoginByPassword
   , loginByPassword
   ) where
 
+import           Control.Monad (when)
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Logger(logError)
@@ -74,22 +75,21 @@ loginByPassword (PasswordLoginRequest dn pw) =
   -- use invalidCredentials for both unknown user and wrong password
   (Entity personKey person) <- exceptTMaybeT invalidCredentials
     $ mgetPersonByDisplayName dn
-  case personHashedPassword person of
-    Nothing -> throwE passwordNotSet
-    Just (HashedPassword storedHash) -> do
-      let valid = BCrypt.validatePassword
-            (Text.encodeUtf8 storedHash)
-            (Text.encodeUtf8 (unPassword pw))
-      if not valid
-        then throwE invalidCredentials
-        else do
-          loginsCount <- liftIO $! P.observeDuration accountUpdateLoginsCount
-            $ flip runSqlPersistMPool pool $ do
-              update personKey [ PersonLoginsCount =. (personLoginsCount person + 1) ]
-              return (personLoginsCount person + 1)
-          token <- liftIO $ P.observeDuration accountTokenEncrypt
-            $! ClientSession.encryptIO configAccountTokenEncryptionPrivateKey
-            $! LBS.toStrict $! Aeson.encode (personUuid person, loginsCount)
-          return $! LoginResult
-            (API.verifyAccountToken $! Text.decodeUtf8 token)
-            (apiModelUUIDPerson $ personUuid person)
+  (HashedPassword storedHash) <- exceptTMaybeT passwordNotSet
+    $! return (personHashedPassword person)
+  let valid = BCrypt.validatePassword
+        (Text.encodeUtf8 storedHash)
+        (Text.encodeUtf8 (unPassword pw))
+  when (not valid) $ throwE invalidCredentials
+  loginsCount <- liftIO $! P.observeDuration accountUpdateLoginsCount
+    $ flip runSqlPersistMPool pool $ do
+      update personKey [ PersonLoginsCount =. (personLoginsCount person + 1) ]
+      return (personLoginsCount person + 1)
+  token <- liftIO $ P.observeDuration accountTokenEncrypt
+    $! ClientSession.encryptIO configAccountTokenEncryptionPrivateKey
+    $! LBS.toStrict $! Aeson.encode (personUuid person, loginsCount)
+  return $! LoginResult
+    (API.verifyAccountToken $! Text.decodeUtf8 token)
+    (apiModelUUIDPerson $ personUuid person)
+    (personDisplayName person)
+    True -- password login implies a password is set

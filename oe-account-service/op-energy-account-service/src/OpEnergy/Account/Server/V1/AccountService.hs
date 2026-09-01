@@ -92,6 +92,7 @@ register = do
       { accountSecret = secret
       , accountToken = API.verifyAccountToken $! Text.decodeUtf8 token
       , personUUID = uuid
+      , displayName = userNameHash
       }
 
 -- | see OpEnergy.Account.API.V1.AccountV1API for reference of 'login' API call

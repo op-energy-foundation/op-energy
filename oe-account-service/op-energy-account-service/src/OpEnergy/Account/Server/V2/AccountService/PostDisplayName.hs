@@ -7,6 +7,7 @@ module OpEnergy.Account.Server.V2.AccountService.PostDisplayName
   , postDisplayName
   ) where
 
+import           Control.Monad (when)
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Logger(logError)
@@ -61,14 +62,12 @@ postDisplayName token newName =
     $ mgetPersonByAccountToken token
   -- check uniqueness
   mexists <- lift $ mgetPersonByDisplayName newName
-  case mexists of
-    Just _ -> throwE displayNameAlreadyTaken
-    Nothing -> do
-      liftIO $ flip runSqlPersistMPool pool $ do
-        nowUTC <- liftIO getCurrentTime
-        let now = utcTimeToPOSIXSeconds nowUTC
-        update personKey
-          [ PersonDisplayName =. newName
-          , PersonLastUpdated =. now
-          ]
-      return $! AccountInfo newName (isJust (personHashedPassword person))
+  when (isJust mexists) $ throwE displayNameAlreadyTaken
+  liftIO $ flip runSqlPersistMPool pool $ do
+    nowUTC <- liftIO getCurrentTime
+    let now = utcTimeToPOSIXSeconds nowUTC
+    update personKey
+      [ PersonDisplayName =. newName
+      , PersonLastUpdated =. now
+      ]
+  return $! AccountInfo newName (isJust (personHashedPassword person))

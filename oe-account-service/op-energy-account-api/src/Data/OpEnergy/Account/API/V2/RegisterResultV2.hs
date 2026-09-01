@@ -28,18 +28,19 @@ import           Data.OpEnergy.Account.API.V1.UUID
                  )
 
 -- | result of the V2 'register' API call. Same as V1's RegisterResult
--- plus the assigned display name
+-- plus the assigned display name and password status
 data RegisterResultV2 = RegisterResultV2
   { accountSecret :: AccountSecret
-  , accountToken :: AccountToken
-  , personUUID :: UUID Person
-  , displayName :: DisplayName
+  , accountToken  :: AccountToken
+  , personUUID    :: UUID Person
+  , displayName   :: DisplayName
+  , hasPassword   :: Bool
   }
   deriving (Show, Generic, Typeable)
 
 defaultRegisterResultV2 :: RegisterResultV2
 defaultRegisterResultV2 = RegisterResultV2
-  defaultAccountSecret defaultAccountToken defaultUUID defaultDisplayName
+  defaultAccountSecret defaultAccountToken defaultUUID defaultDisplayName False
 
 instance ToJSON RegisterResultV2
 instance FromJSON RegisterResultV2
