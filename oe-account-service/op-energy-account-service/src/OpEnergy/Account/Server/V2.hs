@@ -29,6 +29,9 @@ import           Data.OpEnergy.Account.API.V2.RegisterAPI
 import           Data.OpEnergy.Account.API.V2.ProfileAPI
                  ( ProfileAPI
                  )
+import           Data.OpEnergy.Account.API.V2.SecretAPI
+                 ( SecretAPI
+                 )
 import           OpEnergy.Account.Server.V1.Class
                  ( AppT
                  )
@@ -41,6 +44,8 @@ import qualified OpEnergy.Account.Server.V2.RegisterAPI
                  as RegisterAPIHandlers
 import qualified OpEnergy.Account.Server.V2.ProfileAPI
                  as ProfileAPIHandlers
+import qualified OpEnergy.Account.Server.V2.SecretAPI
+                 as SecretAPIHandlers
 
 -- | V2 account server wiring
 accountServer :: ServerT AccountV2API (AppT Handler)
@@ -59,4 +64,8 @@ accountServer
 
   :<|> ( ProfileAPIHandlers.handlers
          :: ServerT ProfileAPI (AppT Handler)
+       )
+
+  :<|> ( SecretAPIHandlers.handlers
+         :: ServerT SecretAPI (AppT Handler)
        )

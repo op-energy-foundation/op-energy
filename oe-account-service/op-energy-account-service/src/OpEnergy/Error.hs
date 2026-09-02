@@ -22,6 +22,7 @@ module OpEnergy.Error
   , strikeMediantimeShouldBeInFuture
   , blockHeightShouldBeInFuture
   , calculatedGuessesCountNotFound
+  , secretNotRecoverable
   ) where
 
 import           Data.Text(Text)
@@ -46,8 +47,10 @@ data BadRequestError
   | StrikeMediantimeShouldBeInFuture
   | BlockHeightShouldBeInFuture
   | CalculatedGuessesCountNotFound
+  | SecretNotRecoverable
 instance Show BadRequestError where
   show CalculatedGuessesCountNotFound = "calculated guesses count not found"
+  show SecretNotRecoverable = "account was registered before recoverable secrets; use regenerate"
   show BlockHeightShouldBeInFuture = "strike's block height should be in the future"
   show StrikeMediantimeShouldBeInFuture = "strikeMediantime should be in the future"
   show StrikeNotFound = "strike not found"
@@ -105,6 +108,8 @@ blockHeightShouldBeInFuture :: CallstackError
 blockHeightShouldBeInFuture = CallstackError "" $! BadRequest BlockHeightShouldBeInFuture
 calculatedGuessesCountNotFound :: CallstackError
 calculatedGuessesCountNotFound = CallstackError "" $! BadRequest CalculatedGuessesCountNotFound
+secretNotRecoverable :: CallstackError
+secretNotRecoverable = CallstackError "" $! BadRequest SecretNotRecoverable
 
 -- | converts Error into printable version
 errorToServerError :: Error -> (ServerError, Text)

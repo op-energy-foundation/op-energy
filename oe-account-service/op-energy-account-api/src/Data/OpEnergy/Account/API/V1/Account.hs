@@ -63,6 +63,13 @@ instance ToParamSchema AccountSecret where
 defaultAccountSecret :: AccountSecret
 defaultAccountSecret = AccountSecret "a86c139a32e7dac42afe4265a955a0fd9d8c2885e26c7e92d4270b3813faa356"
 
+-- | the same secret, encrypted rather than hashed, so that it can be
+-- decrypted and shown back to its owner
+newtype EncryptedAccountSecret = EncryptedAccountSecret
+  { unEncryptedAccountSecret :: Text
+  }
+  deriving (Eq, Show)
+
 -- | you can think of this value as a JWT token, but we explicitely require it as part of API calls in order to be able to explicitely describe it with swagger spec
 newtype AccountToken = AccountToken
   { unAccountToken:: Text -- base64 encoded encrypted data

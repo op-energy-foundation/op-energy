@@ -70,6 +70,10 @@ register = do
     let now = utcTimeToPOSIXSeconds nowUTC
     uuid <- liftIO generateRandomUUID
     secret <- liftIO $! API.generateAccountSecret configSalt
+    -- stored in addition to the hash below, so that the secret link can be
+    -- shown back to its owner later. See EncryptedAccountSecret
+    encryptedSecret <- liftIO
+      $! encryptSecret configAccountTokenEncryptionPrivateKey secret
     let hashedSecret = hashSBS configSalt API.unAccountSecret secret
         UUID rawUUID = uuid
         userNameHash = API.verifyDisplayName $! "user" <> (Text.decodeUtf8 $! BS.take 6 $! BS.fromShort rawUUID)
@@ -82,6 +86,7 @@ register = do
           , personDisplayName = userNameHash
           , personHashedSecret = hashedSecret
           , personHashedPassword = Nothing
+          , personEncryptedSecret = Just encryptedSecret
           , personLoginsCount = 0
           }
     -- insert record into DB

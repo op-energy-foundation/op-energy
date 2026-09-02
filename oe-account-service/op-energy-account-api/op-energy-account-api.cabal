@@ -67,6 +67,8 @@ library
                    , Data.OpEnergy.Account.API.V2.DisplayNameExistsResult
                    , Data.OpEnergy.Account.API.V2.SetPasswordRequest
                    , Data.OpEnergy.Account.API.V2.PasswordLoginRequest
+                   , Data.OpEnergy.Account.API.V2.AccountSecretResult
+                   , Data.OpEnergy.Account.API.V2.SecretAPI
                    , Data.OpEnergy.BlockTime.API.V2
                    , Data.OpEnergy.BlockTime.API.V2.BlockSpanTimeStrike
                    , Data.OpEnergy.BlockTime.API.V2.StrikesAPI
