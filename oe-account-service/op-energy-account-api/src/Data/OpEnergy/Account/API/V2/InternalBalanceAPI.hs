@@ -3,6 +3,8 @@
 {-# LANGUAGE TypeOperators              #-}
 module Data.OpEnergy.Account.API.V2.InternalBalanceAPI
   ( InternalBalanceAPI
+  , DeductBalanceAPI
+  , CreditBalanceAPI
   ) where
 
 import           Data.Text                  (Text)
@@ -15,12 +17,9 @@ import           Data.OpEnergy.Account.API.V2.BalanceAdjustResult
                  ( BalanceAdjustResult
                  )
 
--- | internal, shared-secret-gated endpoints for adjusting balance.
--- Never exposed to browser clients -- nginx must block
--- /api/v2/account/internal/*
-type InternalBalanceAPI
-  = "deduct"
-    :> Header'
+-- | deduct endpoint spec — the single source of truth
+type DeductBalanceAPI
+  = Header'
        '[ Required
         , Strict
         , Description "shared secret identifying an internal, \
@@ -34,8 +33,9 @@ type InternalBalanceAPI
                    \negative. Internal-only."
     :> Post '[JSON] BalanceAdjustResult
 
-  :<|> "credit"
-    :> Header'
+-- | credit endpoint spec — the single source of truth
+type CreditBalanceAPI
+  = Header'
        '[ Required
         , Strict
         , Description "shared secret identifying an internal, \
@@ -47,3 +47,10 @@ type InternalBalanceAPI
     :> Description "Unconditionally credits amountSats to the given \
                    \account's balance. Internal-only."
     :> Post '[JSON] BalanceAdjustResult
+
+-- | internal, shared-secret-gated endpoints for adjusting balance.
+-- Never exposed to browser clients -- nginx must block
+-- /api/v2/account/internal/*
+type InternalBalanceAPI
+  = "deduct" :> DeductBalanceAPI
+  :<|> "credit" :> CreditBalanceAPI

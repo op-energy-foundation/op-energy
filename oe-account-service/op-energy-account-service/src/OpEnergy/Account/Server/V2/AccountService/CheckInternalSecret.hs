@@ -8,6 +8,7 @@ module OpEnergy.Account.Server.V2.AccountService.CheckInternalSecret
   ( checkInternalServiceSecret
   ) where
 
+import           Control.Monad (when)
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Except (ExceptT, throwE)
@@ -23,7 +24,8 @@ import           OpEnergy.Error (CallstackError, invalidServiceSecret)
 
 -- | validates the X-Internal-Service-Secret header against the configured
 -- secret. Uses hash-then-compare to avoid timing side-channels on the raw
--- secret value.
+-- secret value. The expected hash is derived from config on every call;
+-- caching it in State is a mid-term optimisation.
 checkInternalServiceSecret
   :: Monad m
   => Text
@@ -32,6 +34,4 @@ checkInternalServiceSecret secret = do
   State{ config = Config{ configInternalServiceSharedSecret = expected } } <- lift ask
   let expectedHash = SHA256.hash (TE.encodeUtf8 expected)
       actualHash   = SHA256.hash (TE.encodeUtf8 secret)
-  if expectedHash /= actualHash
-    then throwE invalidServiceSecret
-    else return ()
+  when (expectedHash /= actualHash) $ throwE invalidServiceSecret

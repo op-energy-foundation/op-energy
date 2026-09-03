@@ -49,6 +49,7 @@ import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging)
 import           OpEnergy.Account.Server.V1.Metrics(MetricsState(..))
 import           OpEnergy.Account.Server.V1.Person
+import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           Data.OpEnergy.API.V1.Error
 
 
@@ -58,6 +59,7 @@ register :: (MonadIO m, MonadMonitor m) => AppT m RegisterResult
 register = do
   State{ config = Config { configSalt = configSalt
                          , configAccountTokenEncryptionPrivateKey = configAccountTokenEncryptionPrivateKey
+                         , configStartingBalanceSats = configStartingBalanceSats
                          }
        , accountDBPool = pool
        , metrics = MetricsState { accountRegister = accountRegister
@@ -88,7 +90,7 @@ register = do
           , personHashedPassword = Nothing
           , personEncryptedSecret = Just encryptedSecret
           , personLoginsCount = 0
-          , personBalance = startingBalanceSats
+          , personBalance = Sats configStartingBalanceSats
           }
     -- insert record into DB
     _ <- liftIO $! P.observeDuration accountInsert $ flip runSqlPersistMPool pool $ insert person

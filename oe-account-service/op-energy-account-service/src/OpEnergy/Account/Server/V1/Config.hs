@@ -2,6 +2,7 @@
 module OpEnergy.Account.Server.V1.Config where
 
 import           Data.Text (Text)
+import           Data.Word (Word64)
 import qualified Data.Text.Encoding as Text
 import           Data.Maybe
 import qualified Data.ByteString.Char8 as BS
@@ -73,6 +74,8 @@ data Config = Config
     -- ^ shared secret checked against the X-Internal-Service-Secret header
     -- on internal balance endpoints. Must match the value configured into
     -- any caller (e.g. oe-offer-service).
+  , configStartingBalanceSats :: Word64
+    -- ^ sandbox wallet balance assigned to newly registered accounts
   }
   deriving Show
 instance FromJSON Config where
@@ -99,6 +102,7 @@ instance FromJSON Config where
     <*> ( v .:? "AVERAGE_BLOCK_DISCOVER_SECS" .!= (configAverageBlockDiscoverSecs defaultConfig))
     <*> ( v .:? "BLOCKSPAN_DEFAULT_SIZE" .!= (configBlockSpanDefaultSize defaultConfig))
     <*> ( v .:? "INTERNAL_SERVICE_SHARED_SECRET" .!= (configInternalServiceSharedSecret defaultConfig))
+    <*> ( v .:? "STARTING_BALANCE_SATS" .!= (configStartingBalanceSats defaultConfig))
 
 -- need to get Key from json, which represented as base64-encoded string
 instance FromJSON Key where
@@ -132,6 +136,7 @@ defaultConfig = Config
   , configAverageBlockDiscoverSecs = 600
   , configBlockSpanDefaultSize = verifyPositive 24
   , configInternalServiceSharedSecret = error "defaultConfig: you are missing INTERNAL_SERVICE_SHARED_SECRET from config. Generate with \"dd if=/dev/urandom bs=1 count=32 2>/dev/null | base64 -w 0\" command"
+  , configStartingBalanceSats = 300000
   }
 
 getConfigFromEnvironment :: IO Config

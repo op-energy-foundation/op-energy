@@ -56,8 +56,8 @@ library
                    , Data.OpEnergy.Account.API.V1.FilterRequest
                    , Data.OpEnergy.Account.API.V1.Common
                    , Data.OpEnergy.Account.API.V1.Password
-                   , Data.OpEnergy.Account.API.V2
                    , Data.OpEnergy.Account.API.V1.Sats
+                   , Data.OpEnergy.Account.API.V2
                    , Data.OpEnergy.Account.API.V2.LoginAPI
                    , Data.OpEnergy.Account.API.V2.LoginResult
                    , Data.OpEnergy.Account.API.V2.PasswordAPI

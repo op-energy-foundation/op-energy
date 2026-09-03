@@ -12,13 +12,15 @@ import           Control.Lens
 import           GHC.Generics
 import           Data.Typeable              (Typeable)
 import           Data.Aeson
-import           Data.Word                  (Word64)
 
 import           Data.OpEnergy.Account.API.V1.Account
                  ( Person, DisplayName, defaultDisplayName
                  )
 import           Data.OpEnergy.Account.API.V1.UUID
                  ( UUID, defaultUUID
+                 )
+import           Data.OpEnergy.Account.API.V1.Sats
+                 ( Sats(..)
                  )
 
 -- | resolves an account token to the account's stable cross-service
@@ -27,12 +29,12 @@ import           Data.OpEnergy.Account.API.V1.UUID
 data WhoAmIResult = WhoAmIResult
   { personUUID   :: UUID Person
   , displayName  :: DisplayName
-  , balance      :: Word64
+  , balance      :: Sats
   }
   deriving (Show, Generic, Typeable)
 
 defaultWhoAmIResult :: WhoAmIResult
-defaultWhoAmIResult = WhoAmIResult defaultUUID defaultDisplayName 300000
+defaultWhoAmIResult = WhoAmIResult defaultUUID defaultDisplayName (Sats 300000)
 
 instance ToJSON WhoAmIResult
 instance FromJSON WhoAmIResult

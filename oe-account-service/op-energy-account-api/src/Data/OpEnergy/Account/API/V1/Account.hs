@@ -180,13 +180,6 @@ instance FromHttpApiData DisplayName where
 instance ToHttpApiData DisplayName where
   toQueryParam (DisplayName t) = t
 
-instance FromHttpApiData DisplayName where
-  parseUrlPiece t = case everifyDisplayName t of
-    Left err  -> Left err
-    Right dn  -> Prelude.Right dn
-instance ToParamSchema DisplayName where
-  toParamSchema _ = mempty & type_ ?~ SwaggerString
-
 defaultDisplayName :: DisplayName
 defaultDisplayName = DisplayName "user1234"
 

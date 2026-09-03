@@ -3,18 +3,15 @@
  - learn who it belongs to), and the internal/balance/{deduct,credit} pair
  - (adjust that account's sandbox balance).
  -
- - Mirrors Data.OpEnergy.Client (the blockspan-service's own op-energy-api
- - package) exactly -- same 'withClientEither'/'withClient' shape.
+ - Endpoint types are imported from their authoritative API modules so
+ - changes stay in sync automatically.
  -}
 {-# LANGUAGE DataKinds             #-}
 {-# LANGUAGE TypeOperators         #-}
 {-# LANGUAGE OverloadedStrings     #-}
 module Data.OpEnergy.Account.Client
-  ( WhoAmIClientAPI
-  , getWhoAmI
-  , DeductBalanceClientAPI
+  ( getWhoAmI
   , deductBalance
-  , CreditBalanceClientAPI
   , creditBalance
   , withClientEither
   , withClient
@@ -39,7 +36,12 @@ import           Data.OpEnergy.Account.API.V2.BalanceAdjustRequest
 import           Data.OpEnergy.Account.API.V2.BalanceAdjustResult
                  ( BalanceAdjustResult
                  )
+import           Data.OpEnergy.Account.API.V2.InternalBalanceAPI
+                 ( DeductBalanceAPI
+                 , CreditBalanceAPI
+                 )
 
+-- | full path to the whoami endpoint, used by servant-client
 type WhoAmIClientAPI
   = "api" :> "v2" :> "account" :> "whoami"
     :> Header' '[Required, Strict] "Authorization" AccountToken
@@ -48,20 +50,18 @@ type WhoAmIClientAPI
 getWhoAmI :: AccountToken -> ClientM WhoAmIResult
 getWhoAmI = client (Proxy :: Proxy WhoAmIClientAPI)
 
+-- | full path to the deduct endpoint, reusing the spec from InternalBalanceAPI
 type DeductBalanceClientAPI
   = "api" :> "v2" :> "account" :> "internal" :> "balance" :> "deduct"
-    :> Header' '[Required, Strict] "X-Internal-Service-Secret" Text
-    :> ReqBody '[JSON] BalanceAdjustRequest
-    :> Post '[JSON] BalanceAdjustResult
+    :> DeductBalanceAPI
 
 deductBalance :: Text -> BalanceAdjustRequest -> ClientM BalanceAdjustResult
 deductBalance = client (Proxy :: Proxy DeductBalanceClientAPI)
 
+-- | full path to the credit endpoint, reusing the spec from InternalBalanceAPI
 type CreditBalanceClientAPI
   = "api" :> "v2" :> "account" :> "internal" :> "balance" :> "credit"
-    :> Header' '[Required, Strict] "X-Internal-Service-Secret" Text
-    :> ReqBody '[JSON] BalanceAdjustRequest
-    :> Post '[JSON] BalanceAdjustResult
+    :> CreditBalanceAPI
 
 creditBalance :: Text -> BalanceAdjustRequest -> ClientM BalanceAdjustResult
 creditBalance = client (Proxy :: Proxy CreditBalanceClientAPI)

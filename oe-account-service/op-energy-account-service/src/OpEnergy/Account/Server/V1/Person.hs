@@ -26,6 +26,7 @@ module OpEnergy.Account.Server.V1.Person
 
 import           Data.Time.Clock.POSIX(POSIXTime)
 import qualified Data.List as List
+import           Data.Int(Int64)
 import           Data.Word(Word64)
 import           GHC.Generics
 
@@ -46,6 +47,9 @@ import qualified Data.OpEnergy.Account.API.V1.BlockTimeStrikeGuess as API
 import qualified Data.OpEnergy.Account.API.V1.FilterRequest as API
 import qualified Data.OpEnergy.Account.API.V1.Hash as API
 import qualified Data.OpEnergy.Account.API.V1.UUID as API
+import           Data.OpEnergy.Account.API.V1.Sats
+                 ( Sats(..)
+                 )
 
 -- PersistField instances for EncryptedAccountSecret live here in the
 -- service layer, not in the API module, per the API/Model separation
@@ -69,7 +73,7 @@ Person
   loginsCount Word64 -- this field contains an integer value of how many times person had performed login. Default is 0
   email AccountAPI.EMailString Maybe -- can be empty (initially)
   displayName AccountAPI.DisplayName
-  balance Word64 -- sandbox wallet balance, in sats
+  balance Sats default=300000 -- sandbox wallet balance, in sats
   -- metadata
   creationTime POSIXTime
   lastSeenTime POSIXTime -- timestamp of the last seen time. By default the same as creationTime
@@ -90,9 +94,13 @@ instance PersistField PasswordAPI.HashedPassword where
 instance PersistFieldSql PasswordAPI.HashedPassword where
   sqlType _ = SqlString
 
--- | Sandbox wallet starting balance, in sats
-startingBalanceSats :: Word64
-startingBalanceSats = 300000
+-- Sats PersistField instances -- in service layer per Alex's review
+instance PersistField Sats where
+  toPersistValue (Sats s) = toPersistValue (fromIntegral s :: Int64)
+  fromPersistValue (PersistInt64 v) = Right $! Sats (fromIntegral v)
+  fromPersistValue _ = Left "fromPersistValue Sats: expected Int64"
+instance PersistFieldSql Sats where
+  sqlType _ = SqlInt64
 
 instance API.BuildFilter Person API.BlockTimeStrikeGuessFilter where
   sortOrder (filter, _) = maybe Descend id (API.blockTimeStrikeGuessFilterSort filter)
@@ -146,7 +154,7 @@ modelApiPerson v = Person
   , personLoginsCount = AccountAPI.loginsCount v
   , personEmail = AccountAPI.email v
   , personDisplayName = AccountAPI.displayName v
-  , personBalance = startingBalanceSats
+  , personBalance = Sats 0 -- API-level Person does not carry balance
   , personCreationTime = AccountAPI.creationTime v
   , personLastSeenTime = AccountAPI.lastSeenTime v
   , personLastUpdated = AccountAPI.lastUpdated v
