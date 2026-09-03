@@ -15,7 +15,7 @@ import           Database.Persist.Postgresql
 import           Data.OpEnergy.API.V1.Positive(Positive, fromPositive)
 import           Data.OpEnergy.Account.API.V1.Account(DisplayName)
 import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus)
-import           Data.OpEnergy.Offer.API.V2.OffersAPI(PaginatedOffers(..))
+import           Data.OpEnergy.Offer.API.V1.OfferInfo(PaginatedOffers(..))
 
 import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
 import           OpEnergy.Offer.Server.V1.Offer

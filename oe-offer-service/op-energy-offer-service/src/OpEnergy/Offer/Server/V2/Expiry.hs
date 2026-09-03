@@ -14,7 +14,7 @@ import           Database.Persist.Postgresql
 import           Prometheus(MonadMonitor)
 
 import           Data.OpEnergy.API.V1.Block(BlockHeight)
-import           Data.OpEnergy.Offer.API.V1.OfferStatus(offerStatusOpen, offerStatusExpired)
+import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
 
 import           OpEnergy.Offer.Server.V1.Class(AppT, State(..), profile)
 import           OpEnergy.Offer.Server.V1.Offer
@@ -27,7 +27,7 @@ expireStaleOffers tipHeight =
   State{ offerDBPool = pool } <- ask
   now <- liftIO getCurrentTime
   staleOfferIds <- liftIO $ flip runSqlPersistMPool pool $ selectKeysList
-    [ OfferStatus ==. offerStatusOpen, OfferTargetBlock <=. tipHeight ]
+    [ OfferStatus ==. Open, OfferTargetBlock <=. tipHeight ]
     []
-  results <- forM staleOfferIds $ \offerId -> refundAndCloseOffer offerId offerStatusExpired now
+  results <- forM staleOfferIds $ \offerId -> refundAndCloseOffer offerId Expired now
   return $! length [ () | Just _ <- results ]

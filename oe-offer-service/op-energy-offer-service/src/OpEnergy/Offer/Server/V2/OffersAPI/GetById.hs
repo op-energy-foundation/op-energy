@@ -17,15 +17,15 @@ import qualified Data.Text.Read as TR
 
 import           Database.Persist.Postgresql
 
-import           Data.OpEnergy.Offer.API.V2.OffersAPI(OfferInfo)
+import           Data.OpEnergy.Offer.API.V1.OfferInfo(OfferID(..), OfferInfo)
 
 import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
 import           OpEnergy.Offer.Server.V1.Offer(OfferId, offerInfoFrom)
 
 import           OpEnergy.Error(eitherThrowJSON, runExceptPrefixT, CallstackError, invalidRequest, offerNotFound)
 
-getByIdHandler :: Text -> AppM OfferInfo
-getByIdHandler idText =
+getByIdHandler :: OfferID -> AppM OfferInfo
+getByIdHandler (OfferID idText) =
   let name = "V2.OffersAPI.GetById.getByIdHandler"
   in profile name $ eitherThrowJSON (runLogging . $(logError)) $ getById idText
 

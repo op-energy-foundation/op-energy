@@ -16,7 +16,7 @@ import           Database.Persist.Postgresql
 
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountAPI
 import qualified Data.OpEnergy.Account.API.V2.WhoAmIResult as AccountV2
-import           Data.OpEnergy.Offer.API.V2.OffersAPI(OfferInfo)
+import           Data.OpEnergy.Offer.API.V1.OfferInfo(OfferInfo)
 
 import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient

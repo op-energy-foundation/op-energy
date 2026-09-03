@@ -4,7 +4,7 @@ version:            0.1.0.0
 
 executable op-energy-offer-service
     main-is:          Main.hs
-    build-depends:    base ^>=4.15.1.0
+    build-depends:    base >=4.15.1.0
                     , op-energy-offer-service
                     , servant
                     , servant-server
@@ -46,7 +46,7 @@ library
                    , Data.Text.Show
                    , OpEnergy.Error
 
-    build-depends:    base ^>=4.15.1.0
+    build-depends:    base >=4.15.1.0
                     , aeson
                     , text
                     , bytestring
