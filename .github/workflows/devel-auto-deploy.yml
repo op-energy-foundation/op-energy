@@ -19,5 +19,9 @@ jobs:
         nix_path: nixpkgs=channel:nixos-26.05
         extra_nix_config: "system-features = nixos-test benchmark big-parallel kvm"
     - run: git status
-    - run: ssh -oStrictHostKeyChecking=no root@${{ vars.DEV_INSTANCE }} "set -x; cd /etc/nixos; git pull --rebase; git submodule update --init --remote --recursive; systemctl stop op-energy-backend-mainnet.service op-energy-account-service.service && nixos-rebuild switch && nix-collect-garbage -d; systemctl start op-energy-backend-mainnet.service op-energy-account-service.service"
-
+    - name: Pull latest config and submodules
+      run: ssh -oStrictHostKeyChecking=no root@${{ vars.DEV_INSTANCE }} "set -ex; cd /etc/nixos; git pull --rebase; git submodule update --init --remote --recursive"
+    - name: Stop services and rebuild
+      run: ssh -oStrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=40 root@${{ vars.DEV_INSTANCE }} "set -ex; cd /etc/nixos; systemctl stop op-energy-account-service.service; nixos-rebuild switch; nix-collect-garbage -d"
+    - name: Start services in order and reload nginx
+      run: ssh -oStrictHostKeyChecking=no root@${{ vars.DEV_INSTANCE }} "set -ex; systemctl start op-energy-backend-mainnet.service; sleep 5; systemctl restart op-energy-account-service.service; systemctl reload nginx; systemctl is-active op-energy-backend-mainnet.service; systemctl is-active op-energy-account-service.service; systemctl is-active nginx.service"
