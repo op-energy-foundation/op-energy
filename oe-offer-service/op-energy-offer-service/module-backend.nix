@@ -81,11 +81,6 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    services.nginx = {
-      enable = true;
-      virtualHosts.op-energy-mvp = pkgs.op-energy-offer-service-nginx-vhost-config { config = config; } "/" "http://127.0.0.1:${toString cfg.api_port}";
-    };
-
     nixpkgs.overlays = [
       op-energy-overlay
     ];
