@@ -24,13 +24,14 @@ import           Database.Persist.Postgresql
 
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountAPI
 import qualified Data.OpEnergy.Account.API.V2.WhoAmIResult as AccountV2
-import           Data.OpEnergy.Offer.API.V2.PostOfferAPI(PostOfferRequest(..), PostOfferResult(..))
+import           Data.OpEnergy.Offer.API.V1.OfferInfo(PostOfferRequest(..), PostOfferResult(..))
 import           Data.Text.Show(tshow)
 
 import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
+import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           OpEnergy.Offer.Server.V1.Offer(Offer(..), offerInfoFrom)
-import           Data.OpEnergy.Offer.API.V1.OfferStatus(offerStatusOpen)
+import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
 
 import           OpEnergy.Error
                    ( eitherThrowJSON, runExceptPrefixT, describeError
@@ -70,7 +71,7 @@ post token PostOfferRequest{..} =
     _ -> return ()
 
   let totalStake = makerStakeSats * numberOfOffers
-  _ <- ExceptT $ AccountClient.deductBalance personUUIDV totalStake
+  _ <- ExceptT $ AccountClient.deductBalance personUUIDV (Sats totalStake)
 
   now <- liftIO getCurrentTime
   State{ offerDBPool = pool } <- lift ask
@@ -80,7 +81,7 @@ post token PostOfferRequest{..} =
         , offerTargetBlock = targetBlock
         , offerValidTillBlock = validTillBlock
         , offerMakerStakeSats = makerStakeSats
-        , offerStatus = offerStatusOpen
+        , offerStatus = Open
         , offerExpiresAt = Nothing
         , offerRefundedAt = Nothing
         , offerCreated = now
@@ -91,7 +92,7 @@ post token PostOfferRequest{..} =
     Right keys -> return $! PostOfferResult
       { offers = map (\k -> offerInfoFrom (tshow (fromSqlKey k)) offerRow) keys }
     Left insertErr -> do
-      ecredited <- lift $ AccountClient.creditBalance personUUIDV totalStake
+      ecredited <- lift $ AccountClient.creditBalance personUUIDV (Sats totalStake)
       lift $ runLogging $ $(logError)
         ( "post: failed to persist offer rows after staking " <> tshow totalStake
         <> " sats for " <> tshow personUUIDV <> ": " <> insertErr

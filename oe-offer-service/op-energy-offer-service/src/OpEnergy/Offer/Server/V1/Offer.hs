@@ -35,18 +35,27 @@ import           Data.OpEnergy.API.V1.Natural(Natural)
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountAPI
 import qualified Data.OpEnergy.Account.API.V1.UUID as AccountAPI
 import           Data.OpEnergy.Offer.API.V1.OfferStatus
-                 ( OfferStatus, unOfferStatus, everifyOfferStatus
+                 ( OfferStatus(..)
                  )
-import qualified Data.OpEnergy.Offer.API.V2.OffersAPI as API
+import qualified Data.OpEnergy.Offer.API.V1.OfferInfo as API
 import           Data.Text.Show(tshow)
 
 -- PersistField instances for OfferStatus -- placed here (service layer)
 -- per the API-vs-Model separation convention, not in the API module.
 instance PersistField OfferStatus where
-  toPersistValue s = toPersistValue (unOfferStatus s)
-  fromPersistValue (PersistText t) = either (\e -> Left ("OfferStatus fromPersistValue: " <> e)) Right
-    $! everifyOfferStatus t
-  fromPersistValue _ = Left "OfferStatus fromPersistValue, expected Text"
+  toPersistValue Open = toPersistValue ("open" :: Text)
+  toPersistValue Accepted = toPersistValue ("accepted" :: Text)
+  toPersistValue Expired = toPersistValue ("expired" :: Text)
+  toPersistValue Cancelled = toPersistValue ("cancelled" :: Text)
+  toPersistValue Confirming = toPersistValue ("confirming" :: Text)
+  toPersistValue Settled = toPersistValue ("settled" :: Text)
+  fromPersistValue (PersistText "open") = Right Open
+  fromPersistValue (PersistText "accepted") = Right Accepted
+  fromPersistValue (PersistText "expired") = Right Expired
+  fromPersistValue (PersistText "cancelled") = Right Cancelled
+  fromPersistValue (PersistText "confirming") = Right Confirming
+  fromPersistValue (PersistText "settled") = Right Settled
+  fromPersistValue _ = Left "fromPersistValue OfferStatus: unknown status"
 instance PersistFieldSql OfferStatus where
   sqlType _ = SqlString
 
@@ -69,7 +78,7 @@ Offer
 -- | Model -> API glue
 offerInfoFrom :: Text -> Offer -> API.OfferInfo
 offerInfoFrom idText Offer{..} = API.OfferInfo
-  { API.offerId = idText
+  { API.offerId = API.OfferID idText
   , API.creatorDisplayName = offerCreatorDisplayName
   , API.targetBlock = offerTargetBlock
   , API.validTillBlock = offerValidTillBlock

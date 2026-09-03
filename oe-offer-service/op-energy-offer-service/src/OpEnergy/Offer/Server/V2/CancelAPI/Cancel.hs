@@ -20,8 +20,8 @@ import           Database.Persist.Postgresql
 
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountAPI
 import qualified Data.OpEnergy.Account.API.V2.WhoAmIResult as AccountV2
-import           Data.OpEnergy.Offer.API.V2.OffersAPI(OfferInfo)
-import           Data.OpEnergy.Offer.API.V1.OfferStatus(offerStatusCancelled)
+import           Data.OpEnergy.Offer.API.V1.OfferInfo(OfferID(..), OfferInfo)
+import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
 
 import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
@@ -33,8 +33,8 @@ import           OpEnergy.Error
                    , CallstackError, invalidRequest, offerNotFound, notOfferOwner, offerNotOpen
                    )
 
-cancelHandler :: Text -> AccountAPI.AccountToken -> AppM OfferInfo
-cancelHandler idText token =
+cancelHandler :: OfferID -> AccountAPI.AccountToken -> AppM OfferInfo
+cancelHandler (OfferID idText) token =
   let name = "V2.CancelAPI.Cancel.cancelHandler"
   in profile name $ eitherThrowJSON (runLogging . $(logError)) $ cancel idText token
 
@@ -56,7 +56,7 @@ cancel idText token =
     _ -> return ()
 
   now <- liftIO getCurrentTime
-  mUpdated <- lift $ refundAndCloseOffer key offerStatusCancelled now
+  mUpdated <- lift $ refundAndCloseOffer key Cancelled now
   case mUpdated of
     Nothing -> throwE offerNotOpen
     Just updatedVal -> return $! offerInfoFrom idText updatedVal

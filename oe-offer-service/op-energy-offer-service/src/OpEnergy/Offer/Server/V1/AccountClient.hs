@@ -12,7 +12,6 @@ import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Exception.Safe (SomeException)
 import qualified Control.Exception.Safe as E
 import qualified Data.Text as Text
-import           Data.Word (Word64)
 
 import           Network.HTTP.Types (statusCode)
 import           Servant.Client (ClientError(..), ClientM)
@@ -21,6 +20,7 @@ import           Servant.Client.Core (responseStatusCode)
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountAPI
 import qualified Data.OpEnergy.Account.API.V1.UUID as AccountAPI
 import           Data.OpEnergy.Account.API.V2.WhoAmIResult (WhoAmIResult)
+import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
 import           Data.OpEnergy.Account.API.V2.BalanceAdjustRequest (BalanceAdjustRequest(..))
 import           Data.OpEnergy.Account.API.V2.BalanceAdjustResult (BalanceAdjustResult(..))
 import qualified Data.OpEnergy.Account.Client as Client
@@ -47,7 +47,7 @@ verifyAccountToken token = do
     classifyWhoAmI (ConnectionError err) = Left (accountServiceUnavailable (Text.pack (show err)))
     classifyWhoAmI _clientErr = Left authenticationFailure
 
-deductBalance :: (MonadIO m) => AccountAPI.UUID AccountAPI.Person -> Word64 -> AppT m (Either CallstackError Word64)
+deductBalance :: (MonadIO m) => AccountAPI.UUID AccountAPI.Person -> Sats -> AppT m (Either CallstackError Sats)
 deductBalance personUUIDV amountSats =
   adjustBalance Client.deductBalance classifyDeduct personUUIDV amountSats
   where
@@ -57,7 +57,7 @@ deductBalance personUUIDV amountSats =
       | statusCode (responseStatusCode response) == 400 = insufficientBalance
     classifyDeduct err = accountServiceUnavailable (Text.pack (show err))
 
-creditBalance :: (MonadIO m) => AccountAPI.UUID AccountAPI.Person -> Word64 -> AppT m (Either CallstackError Word64)
+creditBalance :: (MonadIO m) => AccountAPI.UUID AccountAPI.Person -> Sats -> AppT m (Either CallstackError Sats)
 creditBalance personUUIDV amountSats =
   adjustBalance Client.creditBalance (accountServiceUnavailable . Text.pack . show) personUUIDV amountSats
 
@@ -66,8 +66,8 @@ adjustBalance
   => (Text.Text -> BalanceAdjustRequest -> ClientM BalanceAdjustResult)
   -> (ClientError -> CallstackError)
   -> AccountAPI.UUID AccountAPI.Person
-  -> Word64
-  -> AppT m (Either CallstackError Word64)
+  -> Sats
+  -> AppT m (Either CallstackError Sats)
 adjustBalance clientCall classify personUUIDV amountSats = do
   State{ config = config } <- ask
   let url = configAccountServiceURL config

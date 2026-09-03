@@ -83,14 +83,7 @@ in
   config = lib.mkIf cfg.enable {
     services.nginx = {
       enable = true;
-      virtualHosts.op-energy = {
-        extraConfig = ''
-          location /api/v2/offer {
-                  limit_req zone=api burst=10 nodelay;
-                  proxy_pass http://127.0.0.1:${toString cfg.api_port}/api/v2/offer;
-          }
-        '';
-      };
+      virtualHosts.op-energy-mvp = pkgs.op-energy-offer-service-nginx-vhost-config config "/" "http://127.0.0.1:${toString cfg.api_port}";
     };
 
     nixpkgs.overlays = [
@@ -157,11 +150,6 @@ in
           OPENERGY_OFFER_SERVICE_CONFIG_FILE="${openergy_config}" op-energy-offer-service +RTS -c -N -s
         '';
       };
-    };
-    networking.firewall = {
-      allowedTCPPorts = [
-        cfg.api_port
-      ];
     };
   };
 }

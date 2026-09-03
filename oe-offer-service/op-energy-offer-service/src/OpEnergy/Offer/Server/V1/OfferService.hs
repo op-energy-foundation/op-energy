@@ -15,10 +15,11 @@ import           Data.Time.Clock(UTCTime)
 
 import           Database.Persist.Postgresql
 
-import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus, offerStatusOpen)
+import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
 import           OpEnergy.Offer.Server.V1.Class(AppT, State(..), runLogging)
 import           OpEnergy.Offer.Server.V1.Offer
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
+import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           OpEnergy.Error(describeError)
 import           Data.Text.Show(tshow)
 
@@ -34,10 +35,10 @@ closeOfferIfOpenTx offerId newStatus now = do
   case mOffer of
     Nothing -> return Nothing
     Just offerVal
-      | offerStatus offerVal /= offerStatusOpen -> return Nothing
+      | offerStatus offerVal /= Open -> return Nothing
       | otherwise -> do
           updated <- updateWhereCount
-            [ OfferId ==. offerId, OfferStatus ==. offerStatusOpen ]
+            [ OfferId ==. offerId, OfferStatus ==. Open ]
             [ OfferStatus =. newStatus, OfferRefundedAt =. Just now ]
           if updated /= (1 :: Int64)
             then return Nothing
@@ -56,7 +57,7 @@ refundAndCloseOffer offerId newStatus now = do
   case mClosed of
     Nothing -> return Nothing
     Just offerVal -> do
-      ecredited <- AccountClient.creditBalance (offerPersonUUID offerVal) (offerMakerStakeSats offerVal)
+      ecredited <- AccountClient.creditBalance (offerPersonUUID offerVal) (Sats (offerMakerStakeSats offerVal))
       case ecredited of
         Right _ -> return ()
         Left err -> runLogging $ $(logError)

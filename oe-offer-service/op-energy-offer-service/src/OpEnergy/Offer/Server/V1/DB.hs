@@ -73,7 +73,7 @@ offerDBMigrations :: [( Config -> ReaderT
                                 )
                                ]
 offerDBMigrations =
-  [ (\_-> return ()) -- dummy, for compatibility reasons
+  [
   ]
 
 migrateOfferDBSchema
