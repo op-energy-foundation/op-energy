@@ -9,17 +9,17 @@ import           Data.Swagger
 import           Servant.API
 import           Servant.Swagger
 
-import           Data.OpEnergy.Offer.API.V2
+import           Data.OpEnergy.Offer.API.V1
 
 offerAPI :: Proxy OfferAPI
 offerAPI = Proxy
 
 type OfferAPI
-  = "api" :> "v2" :> "offer" :> OfferV2API
+  = "api" :> "v1" :> "offer" :> OfferV1API
 
 -- | API for serving @swagger.json@.
 type OfferSwaggerAPI
-  = "api" :> "v2" :> "offer" :> "swagger.json" :> Get '[JSON] Swagger
+  = "api" :> "v1" :> "offer" :> "swagger.json" :> Get '[JSON] Swagger
 
 -- | Combined API of the Offer service with Swagger documentation.
 type API

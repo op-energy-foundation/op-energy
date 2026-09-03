@@ -1,5 +1,5 @@
 { mkDerivation, lib, base
-, hspec, text
+, hspec, text, time
 , servant, servant-swagger, swagger2
 , aeson, aeson-pretty
 , bytestring
@@ -18,7 +18,7 @@ mkDerivation {
     base
     servant servant-swagger swagger2
     aeson
-    text bytestring
+    text bytestring time
     lens
     op-energy-api
     op-energy-account-api
@@ -28,7 +28,6 @@ mkDerivation {
     servant-swagger swagger2
     aeson aeson-pretty
     bytestring
-    op-energy-api
   ];
   enableLibraryProfiling = false;
   enableExecutableProfiling = false;

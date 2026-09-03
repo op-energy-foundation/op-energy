@@ -4,7 +4,7 @@ version:            0.1.0.0
 
 executable op-energy-offer-api
     main-is:          Main.hs
-    build-depends:    base ^>=4.15.1.0
+    build-depends:    base >=4.15.1.0
                     , servant, servant-swagger
                     , swagger2
                     , op-energy-offer-api
@@ -17,13 +17,12 @@ executable op-energy-offer-api
 library
     hs-source-dirs: src
     exposed-modules: Data.OpEnergy.Offer.API
+                   , Data.OpEnergy.Offer.API.V1
                    , Data.OpEnergy.Offer.API.V1.OfferStatus
-                   , Data.OpEnergy.Offer.API.V2
-                   , Data.OpEnergy.Offer.API.V2.PostOfferAPI
-                   , Data.OpEnergy.Offer.API.V2.OffersAPI
-                   , Data.OpEnergy.Offer.API.V2.CancelAPI
+                   , Data.OpEnergy.Offer.API.V1.OfferInfo
+                   , Data.OpEnergy.Offer.API.V1.OffersAPI
 
-    build-depends:    base ^>=4.15.1.0
+    build-depends:    base >=4.15.1.0
                     , aeson
                     , text
                     , bytestring

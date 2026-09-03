@@ -1,24 +1,10 @@
-{-- | This module defines 'OfferStatus': the closed set of states an Offer
- - can be in. Phase 1 only ever produces "open", "expired" and "cancelled"
- - -- there is no matching engine yet, so "accepted"/"confirming"/"settled"
- - are declared up front but currently unreachable.
- -
- - PersistField/PersistFieldSql instances live in the service layer
- - (OpEnergy.Offer.Server.V1.Offer), not here -- per the project's
- - API-vs-Model separation convention.
+{-- | Closed set of states an Offer can be in.
  -}
 {-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE DeriveDataTypeable         #-}
 {-# LANGUAGE OverloadedStrings          #-}
 module Data.OpEnergy.Offer.API.V1.OfferStatus
-  ( OfferStatus
-  , unOfferStatus
-  , everifyOfferStatus
-  , verifyOfferStatus
-  , offerStatusOpen
-  , offerStatusExpired
-  , offerStatusCancelled
-  , allOfferStatuses
+  ( OfferStatus(..)
   , defaultOfferStatus
   ) where
 
@@ -30,47 +16,51 @@ import           Control.Lens               ((&), (?~))
 import           Data.Swagger
 import           Servant.API                (FromHttpApiData(..), ToHttpApiData(..))
 
-newtype OfferStatus = OfferStatus { unOfferStatus :: Text }
-  deriving (Show, Eq, Generic, Typeable)
+-- | the closed set of states an offer can be in
+data OfferStatus
+  = Open
+  | Accepted
+  | Expired
+  | Cancelled
+  | Confirming
+  | Settled
+  deriving (Show, Eq, Ord, Generic, Typeable, Enum, Bounded)
 
--- | every status this schema has a place for
-allOfferStatuses :: [Text]
-allOfferStatuses = [ "open", "accepted", "expired", "cancelled", "confirming", "settled" ]
+-- | lowercase serialisation for JSON and query params
+offerStatusToText :: OfferStatus -> Text
+offerStatusToText Open       = "open"
+offerStatusToText Accepted   = "accepted"
+offerStatusToText Expired    = "expired"
+offerStatusToText Cancelled  = "cancelled"
+offerStatusToText Confirming = "confirming"
+offerStatusToText Settled    = "settled"
 
-instance FromJSON OfferStatus where
-  parseJSON = withText "OfferStatus" $ either (fail . show) pure . everifyOfferStatus
+offerStatusFromText :: Text -> Either Text OfferStatus
+offerStatusFromText "open"       = Right Open
+offerStatusFromText "accepted"   = Right Accepted
+offerStatusFromText "expired"    = Right Expired
+offerStatusFromText "cancelled"  = Right Cancelled
+offerStatusFromText "confirming" = Right Confirming
+offerStatusFromText "settled"    = Right Settled
+offerStatusFromText other        = Left $ "OfferStatus: unknown status: " <> other
+
 instance ToJSON OfferStatus where
-  toJSON (OfferStatus t) = toJSON t
+  toJSON = toJSON . offerStatusToText
+instance FromJSON OfferStatus where
+  parseJSON = withText "OfferStatus" $ either (fail . show) pure . offerStatusFromText
 instance ToSchema OfferStatus where
   declareNamedSchema _ = pure $ NamedSchema (Just "OfferStatus") $ mempty
     & type_ ?~ SwaggerString
-    & enum_ ?~ map toJSON allOfferStatuses
+    & enum_ ?~ map (toJSON . offerStatusToText) [minBound .. maxBound]
     & example ?~ toJSON defaultOfferStatus
 instance ToParamSchema OfferStatus where
   toParamSchema _ = mempty
     & type_ ?~ SwaggerString
-    & enum_ ?~ map toJSON allOfferStatuses
+    & enum_ ?~ map (toJSON . offerStatusToText) [minBound .. maxBound]
 instance FromHttpApiData OfferStatus where
-  parseQueryParam = everifyOfferStatus
+  parseQueryParam = offerStatusFromText
 instance ToHttpApiData OfferStatus where
-  toQueryParam (OfferStatus t) = t
-
-everifyOfferStatus :: Text -> Either Text OfferStatus
-everifyOfferStatus raw
-  | raw `elem` allOfferStatuses = Right (OfferStatus raw)
-  | otherwise = Left "OfferStatus: must be one of open/accepted/expired/cancelled/confirming/settled"
-
--- | partial version of 'everifyOfferStatus'. Only for use on values already
--- known to be well-formed.
-verifyOfferStatus :: Text -> OfferStatus
-verifyOfferStatus raw = case everifyOfferStatus raw of
-  Right ret -> ret
-  Left some -> error (show some)
-
-offerStatusOpen, offerStatusExpired, offerStatusCancelled :: OfferStatus
-offerStatusOpen = verifyOfferStatus "open"
-offerStatusExpired = verifyOfferStatus "expired"
-offerStatusCancelled = verifyOfferStatus "cancelled"
+  toQueryParam = offerStatusToText
 
 defaultOfferStatus :: OfferStatus
-defaultOfferStatus = offerStatusOpen
+defaultOfferStatus = Open
