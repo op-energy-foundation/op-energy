@@ -1,0 +1,36 @@
+cabal-version:      2.4
+name:               op-energy-offer-api
+version:            0.1.0.0
+
+executable op-energy-offer-api
+    main-is:          Main.hs
+    build-depends:    base >=4.15.1.0
+                    , servant, servant-swagger
+                    , swagger2
+                    , op-energy-offer-api
+                    , aeson
+                    , aeson-pretty
+                    , bytestring
+    hs-source-dirs:   app
+    default-language: Haskell2010
+
+library
+    hs-source-dirs: src
+    exposed-modules: Data.OpEnergy.Offer.API
+                   , Data.OpEnergy.Offer.API.V1
+                   , Data.OpEnergy.Offer.API.V1.OfferStatus
+                   , Data.OpEnergy.Offer.API.V1.OfferInfo
+                   , Data.OpEnergy.Offer.API.V1.OffersAPI
+
+    build-depends:    base >=4.15.1.0
+                    , aeson
+                    , text
+                    , bytestring
+                    , servant, servant-swagger
+                    , swagger2
+                    , time
+                    , lens
+                    , op-energy-api
+                    , op-energy-account-api
+
+    ghc-options:    -O2 -Wall -Werror -Wno-unticked-promoted-constructors -fno-warn-name-shadowing -Wno-orphans
