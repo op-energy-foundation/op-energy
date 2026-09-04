@@ -89,6 +89,8 @@ instance ToParamSchema AccountToken where
     & format ?~ unAccountToken defaultAccountToken
 instance FromHttpApiData AccountToken where
   parseUrlPiece = everifyAccountToken
+instance ToHttpApiData AccountToken where
+  toUrlPiece = unAccountToken
 
 defaultAccountToken :: AccountToken
 defaultAccountToken = verifyAccountToken "h+3b0A7XIfbmjg=="
@@ -170,13 +172,13 @@ instance ToSchema DisplayName where
   declareNamedSchema _ = return $ NamedSchema (Just "DisplayName") $ mempty
     & type_ ?~ SwaggerString
     & example ?~ toJSON defaultDisplayName
-
-instance FromHttpApiData DisplayName where
-  parseUrlPiece t = case everifyDisplayName t of
-    Left err  -> Left err
-    Right dn  -> Prelude.Right dn
 instance ToParamSchema DisplayName where
-  toParamSchema _ = mempty & type_ ?~ SwaggerString
+  toParamSchema _ = mempty
+    & type_ ?~ SwaggerString
+instance FromHttpApiData DisplayName where
+  parseQueryParam = everifyDisplayName
+instance ToHttpApiData DisplayName where
+  toQueryParam (DisplayName t) = t
 
 defaultDisplayName :: DisplayName
 defaultDisplayName = DisplayName "user1234"

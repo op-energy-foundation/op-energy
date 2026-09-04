@@ -32,6 +32,8 @@ import           Data.OpEnergy.Account.API.V2.ProfileAPI
 import           Data.OpEnergy.Account.API.V2.SecretAPI
                  ( SecretAPI
                  )
+import           Data.OpEnergy.Account.API.V2.WhoAmIAPI (WhoAmIAPI)
+import           Data.OpEnergy.Account.API.V2.InternalBalanceAPI (InternalBalanceAPI)
 import           OpEnergy.Account.Server.V1.Class
                  ( AppT
                  )
@@ -46,6 +48,10 @@ import qualified OpEnergy.Account.Server.V2.ProfileAPI
                  as ProfileAPIHandlers
 import qualified OpEnergy.Account.Server.V2.SecretAPI
                  as SecretAPIHandlers
+import qualified OpEnergy.Account.Server.V2.WhoAmIAPI
+                 as WhoAmIAPIHandlers
+import qualified OpEnergy.Account.Server.V2.InternalBalanceAPI
+                 as InternalBalanceAPIHandlers
 
 -- | V2 account server wiring
 accountServer :: ServerT AccountV2API (AppT Handler)
@@ -68,4 +74,12 @@ accountServer
 
   :<|> ( SecretAPIHandlers.handlers
          :: ServerT SecretAPI (AppT Handler)
+       )
+
+  :<|> ( WhoAmIAPIHandlers.handlers
+         :: ServerT WhoAmIAPI (AppT Handler)
+       )
+
+  :<|> ( InternalBalanceAPIHandlers.handlers
+         :: ServerT InternalBalanceAPI (AppT Handler)
        )

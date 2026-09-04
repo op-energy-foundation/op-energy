@@ -11,6 +11,8 @@ import qualified Data.OpEnergy.Account.API.V2.PasswordAPI as PasswordAPI
 import qualified Data.OpEnergy.Account.API.V2.RegisterAPI as RegisterAPI
 import qualified Data.OpEnergy.Account.API.V2.ProfileAPI as ProfileAPI
 import qualified Data.OpEnergy.Account.API.V2.SecretAPI as SecretAPI
+import           Data.OpEnergy.Account.API.V2.WhoAmIAPI (WhoAmIAPI)
+import           Data.OpEnergy.Account.API.V2.InternalBalanceAPI (InternalBalanceAPI)
 
 -- | Account V2 API. Each endpoint subset is organized as a separate
 -- Tag, imported from its own module.
@@ -32,3 +34,11 @@ type AccountV2API
   :<|> Tags "Secret API"
     :> "secret"
     :> SecretAPI.SecretAPI
+
+  :<|> Tags "WhoAmI API"
+    :> "whoami"
+    :> WhoAmIAPI
+
+  :<|> Tags "Internal Balance API"
+    :> "internal" :> "balance"
+    :> InternalBalanceAPI
