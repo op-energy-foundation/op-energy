@@ -12,6 +12,9 @@ import           Servant
 import           Data.OpEnergy.Account.API.V2.RegisterResultV2
                  ( RegisterResultV2
                  )
+import           Data.OpEnergy.Account.API.V2.RegisterRequest
+                 ( RegisterRequest
+                 )
 import           Data.OpEnergy.Account.API.V2.RegisterAPI
                  ( RegisterAPI
                  )
@@ -26,5 +29,5 @@ import qualified OpEnergy.Account.Server.V2.AccountService.Register
 handlers :: ServerT RegisterAPI (AppT Handler)
 handlers
   = ( Register.registerHandler
-      :: AppM RegisterResultV2
+      :: RegisterRequest -> AppM RegisterResultV2
     )

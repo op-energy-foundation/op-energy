@@ -65,6 +65,8 @@ library
                    , OpEnergy.Account.Server.V2.AccountService.GetMe
                    , OpEnergy.Account.Server.V2.AccountService.PostDisplayName
                    , OpEnergy.Account.Server.V2.AccountService.DisplayNameExists
+                   , OpEnergy.Account.Server.V2.AccountService.SuggestUsername
+                   , OpEnergy.Account.Server.V1.BIP39Words
                    , OpEnergy.Account.Server.V2.AccountService.GetSecret
                    , OpEnergy.Account.Server.V2.AccountService.RegenerateSecret
                    , OpEnergy.Account.Server.V2.AccountService.Whoami

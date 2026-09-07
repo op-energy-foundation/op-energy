@@ -30,7 +30,7 @@ import           Prometheus(MonadMonitor)
 -- documentation
 accountServer :: ServerT AccountV1API (AppT Handler)
 accountServer
-  = OpEnergy.Account.Server.V1.AccountService.register
+  = OpEnergy.Account.Server.V1.AccountService.register Nothing
   :<|> OpEnergy.Account.Server.V1.AccountService.login
   :<|> OpEnergy.Account.Server.V1.AccountService.postDisplayName
   :<|> oeGitHashGet
