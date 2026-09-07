@@ -8,7 +8,7 @@ module OpEnergy.Offer.Server.V2.AcceptAPI.Accept
   ) where
 
 import           Control.Monad(when)
-import           Control.Monad.Trans.Reader(ReaderT, ask)
+import           Control.Monad.Trans.Reader(ask)
 import           Control.Monad.Trans(lift)
 import           Control.Monad.Trans.Except(ExceptT(..), throwE)
 import           Control.Monad.IO.Class(liftIO)
@@ -17,7 +17,6 @@ import           Data.Text(Text)
 import qualified Data.Text as T
 import qualified Data.Text.Read as TR
 import           Data.Time.Clock(getCurrentTime)
-import           Data.Int(Int64)
 
 import           Database.Persist.Postgresql
 
@@ -112,11 +111,10 @@ accept idText token =
       [ OfferMatchedCount =. newCount ]
     cKey <- insert contractRow
     -- transition to Filled when all contracts are matched
-    when (fromNatural newCount >= fromNatural (offerTotalContracts offerVal)) $ do
-      _ <- (updateWhereCount
+    when (fromNatural newCount >= fromNatural (offerTotalContracts offerVal)) $
+      updateWhere
         [ OfferId ==. key ]
-        [ OfferStatus =. Filled ] :: ReaderT SqlBackend IO Int64)
-      return ()
+        [ OfferStatus =. Filled ]
     return (cKey, bumped)
 
   -- if the conditional update matched 0 rows, another accept won
