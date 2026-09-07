@@ -1,4 +1,7 @@
 {-- | Closed set of states an Offer can be in.
+ -
+ - Individual contract states (Live, Settled) are tracked by
+ - 'Data.OpEnergy.Offer.API.V1.ContractStatus.ContractStatus'.
  -}
 {-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE DeriveDataTypeable         #-}
@@ -19,30 +22,24 @@ import           Servant.API                (FromHttpApiData(..), ToHttpApiData(
 -- | the closed set of states an offer can be in
 data OfferStatus
   = Open
-  | Accepted
+  | Filled
   | Expired
   | Cancelled
-  | Confirming
-  | Settled
   deriving (Show, Eq, Ord, Generic, Typeable, Enum, Bounded)
 
 -- | lowercase serialisation for JSON and query params
 offerStatusToText :: OfferStatus -> Text
-offerStatusToText Open       = "open"
-offerStatusToText Accepted   = "accepted"
-offerStatusToText Expired    = "expired"
-offerStatusToText Cancelled  = "cancelled"
-offerStatusToText Confirming = "confirming"
-offerStatusToText Settled    = "settled"
+offerStatusToText Open      = "open"
+offerStatusToText Filled    = "filled"
+offerStatusToText Expired   = "expired"
+offerStatusToText Cancelled = "cancelled"
 
 offerStatusFromText :: Text -> Either Text OfferStatus
-offerStatusFromText "open"       = Right Open
-offerStatusFromText "accepted"   = Right Accepted
-offerStatusFromText "expired"    = Right Expired
-offerStatusFromText "cancelled"  = Right Cancelled
-offerStatusFromText "confirming" = Right Confirming
-offerStatusFromText "settled"    = Right Settled
-offerStatusFromText other        = Left $ "OfferStatus: unknown status: " <> other
+offerStatusFromText "open"      = Right Open
+offerStatusFromText "filled"    = Right Filled
+offerStatusFromText "expired"   = Right Expired
+offerStatusFromText "cancelled" = Right Cancelled
+offerStatusFromText other       = Left $ "OfferStatus: unknown status: " <> other
 
 instance ToJSON OfferStatus where
   toJSON = toJSON . offerStatusToText

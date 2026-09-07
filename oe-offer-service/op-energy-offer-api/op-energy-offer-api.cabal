@@ -18,8 +18,12 @@ library
     hs-source-dirs: src
     exposed-modules: Data.OpEnergy.Offer.API
                    , Data.OpEnergy.Offer.API.V1
+                   , Data.OpEnergy.Offer.API.V1.OfferSide
                    , Data.OpEnergy.Offer.API.V1.OfferStatus
+                   , Data.OpEnergy.Offer.API.V1.ContractStatus
                    , Data.OpEnergy.Offer.API.V1.OfferInfo
+                   , Data.OpEnergy.Offer.API.V1.ContractInfo
+                   , Data.OpEnergy.Offer.API.V1.Constants
                    , Data.OpEnergy.Offer.API.V1.OffersAPI
 
     build-depends:    base >=4.15.1.0
