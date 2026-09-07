@@ -33,6 +33,7 @@ import           Data.Word(Word64)
 
 import qualified Data.Aeson as Aeson
 import qualified Web.ClientSession as ClientSession
+import           Database.Persist.Postgresql
 import           Prometheus(MonadMonitor)
 import qualified Prometheus as P
 
