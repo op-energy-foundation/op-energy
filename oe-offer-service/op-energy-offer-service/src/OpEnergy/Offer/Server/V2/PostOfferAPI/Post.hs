@@ -46,7 +46,7 @@ postHandler token request =
 
 post :: AccountAPI.AccountToken -> PostOfferRequest -> AppM (Either CallstackError PostOfferResult)
 post token PostOfferRequest{..} =
-  let name = "post"
+  let name = "V2.PostOfferAPI.Post.post"
   in profile name $ runExceptPrefixT name $ do
   when (totalContracts < 1 || totalContracts > C.maxContracts) $
     throwE $ invalidRequest ("totalContracts must be between 1 and " <> tshow C.maxContracts)

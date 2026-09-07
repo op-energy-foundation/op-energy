@@ -5,6 +5,7 @@
 module OpEnergy.Error
   ( eitherThrowJSON
   , runExceptPrefixT
+  , exceptTMaybeT
   , CallstackError
   , describeError
 
@@ -27,7 +28,7 @@ import           Data.Text(Text)
 import qualified Data.Text as Text
 
 import           Control.Monad.Error.Class(MonadError)
-import           Control.Monad.Trans.Except(ExceptT, runExceptT)
+import           Control.Monad.Trans.Except(ExceptT(..), runExceptT, throwE)
 
 import           Servant(ServerError, err400, err401, err403, err404, err409, err500, err502)
 import           Data.Text.Show( tshow)
@@ -108,6 +109,19 @@ describeError :: CallstackError -> Text
 describeError (CallstackError callstack err) =
   let (_, reason) = errorToServerError err
   in callstack <> ": ERROR: " <> reason
+
+-- | Unwrap a @Maybe@ from a monadic action into @ExceptT@,
+-- throwing the given error on @Nothing@.
+exceptTMaybeT
+  :: Monad m
+  => CallstackError
+  -> m (Maybe r)
+  -> ExceptT CallstackError m r
+exceptTMaybeT err action = do
+  mval <- ExceptT $ fmap Right action
+  case mval of
+    Nothing -> throwE err
+    Just v  -> return v
 
 eitherThrowJSON
   :: ( Monad m

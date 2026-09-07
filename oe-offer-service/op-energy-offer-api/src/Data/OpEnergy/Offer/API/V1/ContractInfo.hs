@@ -29,7 +29,7 @@ import           Data.OpEnergy.API.V1.Block (BlockHeight, defaultBlockHeight)
 import           Data.OpEnergy.Account.API.V1.Account
                  ( DisplayName, defaultDisplayName
                  )
-import           Data.OpEnergy.Offer.API.V1.OfferInfo
+import           Data.OpEnergy.Offer.API.V1.OfferID
                  ( OfferID, defaultOfferID
                  )
 import           Data.OpEnergy.Offer.API.V1.OfferSide

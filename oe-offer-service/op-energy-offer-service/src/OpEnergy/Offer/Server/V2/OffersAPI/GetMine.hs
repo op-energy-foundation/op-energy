@@ -37,7 +37,7 @@ getMineHandler token =
 
 getMine :: AccountAPI.AccountToken -> AppM (Either CallstackError MyOffersResult)
 getMine token =
-  let name = "getMine"
+  let name = "V2.OffersAPI.GetMine.getMine"
   in profile name $ runExceptPrefixT name $ do
   (AccountV2.WhoAmIResult personUUIDV _displayName _balance) <-
     ExceptT $ AccountClient.verifyAccountToken token

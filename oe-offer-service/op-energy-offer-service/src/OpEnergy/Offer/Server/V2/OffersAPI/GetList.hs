@@ -48,7 +48,7 @@ getList
   -> Maybe (Positive Int)
   -> AppM (Either CallstackError PaginatedOffers)
 getList mStatus mCreator mPage mLimit =
-  let name = "getList"
+  let name = "V2.OffersAPI.GetList.getList"
   in profile name $ runExceptPrefixT name $ do
   State{ offerDBPool = pool, currentTip = currentTipV } <- lift ask
   mTip <- liftIO $ TVar.readTVarIO currentTipV
