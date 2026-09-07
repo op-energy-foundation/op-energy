@@ -15,6 +15,7 @@ import           Data.Time.Clock(UTCTime)
 
 import           Database.Persist.Postgresql
 
+import           Data.OpEnergy.API.V1.Natural(fromNatural)
 import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
 import           OpEnergy.Offer.Server.V1.Class(AppT, State(..), runLogging)
 import           OpEnergy.Offer.Server.V1.Offer
@@ -44,7 +45,9 @@ closeOfferIfOpenTx offerId newStatus now = do
             then return Nothing
             else return $! Just offerVal { offerStatus = newStatus, offerRefundedAt = Just now }
 
--- | Full refund-and-close: local flip then cross-service credit
+-- | Full refund-and-close: local flip then cross-service credit.
+-- Refunds @makerStakeSats * (totalContracts - matchedCount)@ — only
+-- the unfilled portion of the offer.
 refundAndCloseOffer
   :: (MonadIO m)
   => OfferId
@@ -57,12 +60,15 @@ refundAndCloseOffer offerId newStatus now = do
   case mClosed of
     Nothing -> return Nothing
     Just offerVal -> do
-      ecredited <- AccountClient.creditBalance (offerPersonUUID offerVal) (Sats (offerMakerStakeSats offerVal))
+      let unfilled = fromNatural (offerTotalContracts offerVal) - fromNatural (offerMatchedCount offerVal)
+          refundAmount = offerMakerStakeSats offerVal * fromIntegral unfilled
+      ecredited <- AccountClient.creditBalance (offerPersonUUID offerVal) (Sats refundAmount)
       case ecredited of
         Right _ -> return ()
         Left err -> runLogging $ $(logError)
           ( "refundAndCloseOffer: offer " <> tshow (fromSqlKey offerId)
-          <> " closed (" <> tshow newStatus <> ") but its stake was NOT refunded -- "
+          <> " closed (" <> tshow newStatus <> ") but its stake of " <> tshow refundAmount
+          <> " sats was NOT refunded -- "
           <> "creditBalance failed, needs manual reconciliation: " <> describeError err
           )
       return $! Just offerVal

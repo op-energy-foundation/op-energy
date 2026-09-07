@@ -5,6 +5,7 @@
 module OpEnergy.Error
   ( eitherThrowJSON
   , runExceptPrefixT
+  , exceptTMaybeT
   , CallstackError
   , describeError
 
@@ -19,13 +20,15 @@ module OpEnergy.Error
   , offerNotFound
   , notOfferOwner
   , offerNotOpen
+  , offerFilled
+  , cannotAcceptOwnOffer
   ) where
 
 import           Data.Text(Text)
 import qualified Data.Text as Text
 
 import           Control.Monad.Error.Class(MonadError)
-import           Control.Monad.Trans.Except(ExceptT, runExceptT)
+import           Control.Monad.Trans.Except(ExceptT(..), runExceptT, throwE)
 
 import           Servant(ServerError, err400, err401, err403, err404, err409, err500, err502)
 import           Data.Text.Show( tshow)
@@ -38,6 +41,8 @@ data BadRequestError
   | OfferNotFound
   | NotOfferOwner
   | OfferNotOpen
+  | OfferFilled
+  | CannotAcceptOwnOffer
 instance Show BadRequestError where
   show AuthenticationFailure = "authentication failure"
   show (InvalidRequest reason) = Text.unpack reason
@@ -45,6 +50,8 @@ instance Show BadRequestError where
   show OfferNotFound = "offer not found"
   show NotOfferOwner = "only the offer's creator may do this"
   show OfferNotOpen = "offer is not open"
+  show OfferFilled = "offer has no remaining contracts"
+  show CannotAcceptOwnOffer = "cannot accept your own offer"
 
 data InternalError
   = Unspecified Text
@@ -80,6 +87,10 @@ notOfferOwner :: CallstackError
 notOfferOwner = CallstackError "" $! BadRequest NotOfferOwner
 offerNotOpen :: CallstackError
 offerNotOpen = CallstackError "" $! BadRequest OfferNotOpen
+offerFilled :: CallstackError
+offerFilled = CallstackError "" $! BadRequest OfferFilled
+cannotAcceptOwnOffer :: CallstackError
+cannotAcceptOwnOffer = CallstackError "" $! BadRequest CannotAcceptOwnOffer
 
 -- | converts Error into printable version
 errorToServerError :: Error -> (ServerError, Text)
@@ -87,6 +98,8 @@ errorToServerError (BadRequest AuthenticationFailure) = (err401, tshow Authentic
 errorToServerError (BadRequest NotOfferOwner) = (err403, tshow NotOfferOwner)
 errorToServerError (BadRequest OfferNotFound) = (err404, tshow OfferNotFound)
 errorToServerError (BadRequest OfferNotOpen) = (err409, tshow OfferNotOpen)
+errorToServerError (BadRequest OfferFilled) = (err409, tshow OfferFilled)
+errorToServerError (BadRequest CannotAcceptOwnOffer) = (err403, tshow CannotAcceptOwnOffer)
 errorToServerError (BadRequest specificError) = (err400, tshow specificError)
 errorToServerError (Internal specificError) = (err500, tshow specificError)
 errorToServerError (AccountServiceUnavailable reason) = (err502, "account service unavailable: " <> reason)
@@ -96,6 +109,19 @@ describeError :: CallstackError -> Text
 describeError (CallstackError callstack err) =
   let (_, reason) = errorToServerError err
   in callstack <> ": ERROR: " <> reason
+
+-- | Unwrap a @Maybe@ from a monadic action into @ExceptT@,
+-- throwing the given error on @Nothing@.
+exceptTMaybeT
+  :: Monad m
+  => CallstackError
+  -> m (Maybe r)
+  -> ExceptT CallstackError m r
+exceptTMaybeT err action = do
+  mval <- ExceptT $ fmap Right action
+  case mval of
+    Nothing -> throwE err
+    Just v  -> return v
 
 eitherThrowJSON
   :: ( Monad m

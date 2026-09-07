@@ -3,8 +3,11 @@ module OpEnergy.Offer.Server.V2.CancelAPI
   ( cancelHandler
   ) where
 
+import           Data.OpEnergy.Offer.API.V1.OfferID
+                 ( OfferID
+                 )
 import           Data.OpEnergy.Offer.API.V1.OfferInfo
-                 ( OfferID, OfferInfo
+                 ( OfferInfo
                  )
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountV1
 import           OpEnergy.Offer.Server.V1.Class (AppM)
