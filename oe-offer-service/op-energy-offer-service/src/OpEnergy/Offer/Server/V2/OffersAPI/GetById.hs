@@ -8,6 +8,7 @@ module OpEnergy.Offer.Server.V2.OffersAPI.GetById
 
 import           Control.Monad.Trans.Reader(ask)
 import           Control.Monad.Trans(lift)
+import           Control.Monad.Trans.Except(throwE)
 import           Control.Monad.IO.Class(liftIO)
 import           Control.Monad.Logger(logError)
 import           Data.Text(Text)

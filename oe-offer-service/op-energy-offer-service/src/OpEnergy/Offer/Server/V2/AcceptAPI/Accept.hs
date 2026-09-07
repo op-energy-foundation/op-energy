@@ -8,7 +8,7 @@ module OpEnergy.Offer.Server.V2.AcceptAPI.Accept
   ) where
 
 import           Control.Monad(when)
-import           Control.Monad.Trans.Reader(ask)
+import           Control.Monad.Trans.Reader(ReaderT, ask)
 import           Control.Monad.Trans(lift)
 import           Control.Monad.Trans.Except(ExceptT(..), throwE)
 import           Control.Monad.IO.Class(liftIO)
@@ -34,9 +34,6 @@ import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLog
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           OpEnergy.Offer.Server.V1.Offer
-                 ( Offer(..), OfferId, Contract(..)
-                 , contractInfoFromEntity
-                 )
 
 import           OpEnergy.Error
                    ( eitherThrowJSON, runExceptPrefixT
