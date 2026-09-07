@@ -59,7 +59,7 @@ import           OpEnergy.Account.Server.V1.BIP39Words
 -- When @mRequestedName@ is @Just name@, uses that display name
 -- (returning 409 if taken). When @Nothing@, generates a BIP39-style
 -- name (e.g. @brave_tiger_482@).
-register :: (MonadIO m, MonadMonitor m) => Maybe API.DisplayName -> AppT m RegisterResult
+register :: Maybe API.DisplayName -> AppM RegisterResult
 register mRequestedName = do
   State{ config = Config { configSalt = configSalt
                          , configAccountTokenEncryptionPrivateKey = configAccountTokenEncryptionPrivateKey
