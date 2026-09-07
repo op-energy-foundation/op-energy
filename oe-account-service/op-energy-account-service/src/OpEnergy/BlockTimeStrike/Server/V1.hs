@@ -153,7 +153,7 @@ runBlockSpanClient = do
       receiveConfirmedTipInLoop state conn
     -- | handle new message
     handleMessage _ MessagePong = return () -- ignore pong message
-    handleMessage state (MessageNewestBlockHeader header unconfirmedBlockHeight) = -- update confirmed tip
+    handleMessage state (MessageNewestBlockHeader header unconfirmedBlockHeight _mUnconfirmedBlock) = -- update confirmed tip
       runAppT state $ do
         State{ blockTimeState =
                BlockTime.State
