@@ -37,7 +37,7 @@ import           Data.Text.Show(tshow)
 import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
-import           OpEnergy.Offer.Server.V1.Offer(Offer(..), OfferId, offerInfoFrom)
+import           OpEnergy.Offer.Server.V1.Offer
 import           Control.Monad(when)
 
 import           OpEnergy.Error

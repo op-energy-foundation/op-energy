@@ -23,10 +23,6 @@ import           Data.OpEnergy.Offer.API.V1.OfferInfo(MyOffersResult(..))
 import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           OpEnergy.Offer.Server.V1.Offer
-                 ( Contract(..)
-                 , offerInfoFromEntity
-                 , contractInfoFromEntity
-                 )
 
 import           OpEnergy.Error(eitherThrowJSON, runExceptPrefixT, CallstackError)
 

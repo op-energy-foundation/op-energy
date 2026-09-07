@@ -21,9 +21,6 @@ import           Data.OpEnergy.Offer.API.V1.OfferInfo(PaginatedOffers(..))
 
 import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
 import           OpEnergy.Offer.Server.V1.Offer
-                 ( offerInfoFromEntity
-                 , contractInfoFromEntity
-                 )
 
 import           OpEnergy.Error(eitherThrowJSON, runExceptPrefixT, CallstackError)
 
