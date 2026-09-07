@@ -6,15 +6,19 @@
  - frontend list (@src\/lib\/bip39Words.ts@).
  -}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module OpEnergy.Account.Server.V1.BIP39Words
   ( bip39Words
   , generateBIP39Username
+  , generateAvailableBIP39Username
   ) where
 
 import           Data.Text            (Text)
 import qualified Data.Text            as T
 import           Data.Vector          (Vector)
 import qualified Data.Vector          as V
+import           Data.Maybe           (isJust)
+import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           System.Random        (randomRIO)
 import           Data.OpEnergy.Account.API.V1.Account
                  ( DisplayName
@@ -46,6 +50,25 @@ generateBIP39Username = do
     pickDistinct len avoid = do
       i <- randomRIO (0, len - 1)
       if i == avoid then pickDistinct len avoid else return i
+
+-- | Generates a BIP39-style display name that is not yet taken,
+-- retrying up to @maxRetries@ times on collision.  The @lookupName@
+-- argument checks whether a candidate is already in use — pass
+-- 'mgetPersonByDisplayName' or any @DisplayName -> m (Maybe a)@.
+generateAvailableBIP39Username
+  :: MonadIO m
+  => (DisplayName -> m (Maybe a))
+  -> Int
+  -> m DisplayName
+generateAvailableBIP39Username lookupName maxRetries = go maxRetries
+  where
+    go 0 = liftIO generateBIP39Username -- last attempt, return whatever
+    go n = do
+      candidate <- liftIO generateBIP39Username
+      mexists <- lookupName candidate
+      if isJust mexists
+        then go (n - 1)
+        else return candidate
 
 -- | Raw word list — 1960 entries.
 bip39WordList :: [Text]

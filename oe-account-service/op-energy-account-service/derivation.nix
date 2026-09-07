@@ -49,6 +49,7 @@ mkDerivation {
     cryptohash-sha256 base16-bytestring
     bcrypt
     random
+    vector
     exceptions
     stm stm-chans
     transformers

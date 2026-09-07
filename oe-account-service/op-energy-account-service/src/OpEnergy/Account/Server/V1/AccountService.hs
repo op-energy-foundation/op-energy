@@ -21,7 +21,7 @@ module OpEnergy.Account.Server.V1.AccountService
   , mgetPersonByDisplayName
   ) where
 
-import           Servant (err400, err409)
+import           Servant (err400)
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.IO.Class (liftIO, MonadIO)
 import           Control.Monad.Logger(logError)
@@ -33,8 +33,6 @@ import           Data.Word(Word64)
 
 import qualified Data.Aeson as Aeson
 import qualified Web.ClientSession as ClientSession
-import           Data.Pool                    (Pool)
-import           Database.Persist.Postgresql
 import           Prometheus(MonadMonitor)
 import qualified Prometheus as P
 
@@ -51,14 +49,16 @@ import           OpEnergy.Account.Server.V1.Person
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           Data.OpEnergy.API.V1.Error
 import           OpEnergy.Account.Server.V1.BIP39Words
-                 ( generateBIP39Username)
+                 ( generateAvailableBIP39Username
+                 )
 
 
 -- | see OpEnergy.Account.API.V1.AccountV1API for reference of 'register' API call
 -- Current implementation is 2 * O(ln n)
 -- When @mRequestedName@ is @Just name@, uses that display name
--- (returning 409 if taken). When @Nothing@, generates a BIP39-style
--- name (e.g. @brave_tiger_482@).
+-- directly (caller is responsible for uniqueness checks).
+-- When @Nothing@, generates a BIP39-style name
+-- (e.g. @brave_tiger_482@), retrying on collision.
 register :: Maybe API.DisplayName -> AppM RegisterResult
 register mRequestedName = do
   State{ config = Config { configSalt = configSalt
@@ -82,19 +82,8 @@ register mRequestedName = do
       $! encryptSecret configAccountTokenEncryptionPrivateKey secret
     let hashedSecret = hashSBS configSalt API.unAccountSecret secret
     chosenName <- case mRequestedName of
-      Just requestedName -> do
-        -- caller supplied a name — check it is not taken
-        mexists <- mgetPersonByDisplayName requestedName
-        case mexists of
-          Just _  -> do
-            let err = "ERROR: register: display name already taken"
-            runLogging $ $(logError) err
-            throwJSON err409 err
-          Nothing -> return requestedName
-      Nothing -> do
-        -- no name requested — generate a BIP39-style name, retrying
-        -- up to 5 times on the unlikely event of a collision
-        liftIO $ generateAvailableBIP39UsernameIO pool 5
+      Just requestedName -> return requestedName
+      Nothing -> generateAvailableBIP39Username mgetPersonByDisplayName 5
     let person = Person
           { personCreationTime = now
           , personUuid = modelApiUUIDPerson uuid
@@ -118,25 +107,6 @@ register mRequestedName = do
       , personUUID = uuid
       , displayName = chosenName
       }
-
--- | IO-only helper: generates a BIP39-style display name that is not
--- yet taken, retrying up to @maxRetries@ times on collision.
--- Runs its own DB transactions — usable from the register path
--- where we are already inside a Prometheus observation.
-generateAvailableBIP39UsernameIO
-  :: Pool SqlBackend
-  -> Int
-  -> IO API.DisplayName
-generateAvailableBIP39UsernameIO pool' maxRetries = go maxRetries
-  where
-    go 0 = generateBIP39Username -- last attempt, return whatever
-    go n = do
-      candidate <- generateBIP39Username
-      mexists <- flip runSqlPersistMPool pool' $
-        selectFirst [ PersonDisplayName ==. candidate ] []
-      case (mexists :: Maybe (Entity Person)) of
-        Just _  -> go (n - 1)
-        Nothing -> return candidate
 
 -- | see OpEnergy.Account.API.V1.AccountV1API for reference of 'login' API call
 -- 3 * O(ln n)

@@ -23,11 +23,12 @@ import           OpEnergy.Account.Server.V1.Class
                  ( AppM, runLogging, profile)
 import           OpEnergy.Account.Server.V1.AccountService
                  ( mgetPersonByDisplayName)
-import           OpEnergy.Account.Server.V2.AccountService.SuggestUsername
+import           OpEnergy.Account.Server.V1.BIP39Words
                  ( generateAvailableBIP39Username)
 
 import           OpEnergy.Error
-                 ( eitherThrowJSON, runExceptPrefixT
+                 ( eitherThrowJSON
+                 , runExceptPrefixT
                  , CallstackError
                  )
 
@@ -53,6 +54,6 @@ displayNameExists dn =
   mperson <- lift $ mgetPersonByDisplayName dn
   let taken = isJust mperson
   suggs <- if taken
-    then lift $ replicateM 3 (generateAvailableBIP39Username 5)
+    then lift $ replicateM 3 (generateAvailableBIP39Username mgetPersonByDisplayName 5)
     else return []
   return $! DisplayNameExistsResult taken suggs
