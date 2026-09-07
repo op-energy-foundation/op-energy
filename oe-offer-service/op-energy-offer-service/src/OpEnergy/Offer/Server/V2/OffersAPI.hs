@@ -5,9 +5,11 @@ module OpEnergy.Offer.Server.V2.OffersAPI
   , getByIdHandler
   ) where
 
-import           Data.OpEnergy.Offer.API.V1.OfferInfo
+import           Data.OpEnergy.Offer.API.V1.OfferID
                  ( OfferID
-                 , OfferInfo
+                 )
+import           Data.OpEnergy.Offer.API.V1.OfferInfo
+                 ( OfferInfo
                  , PaginatedOffers
                  , MyOffersResult
                  )

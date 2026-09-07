@@ -16,7 +16,6 @@ import qualified Control.Concurrent.STM.TVar as TVar
 import           Database.Persist.Postgresql
 
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountAPI
-import qualified Data.OpEnergy.Account.API.V1.UUID as AccountAPI
 import qualified Data.OpEnergy.Account.API.V2.WhoAmIResult as AccountV2
 import           Data.OpEnergy.Offer.API.V1.OfferInfo(MyOffersResult(..))
 
