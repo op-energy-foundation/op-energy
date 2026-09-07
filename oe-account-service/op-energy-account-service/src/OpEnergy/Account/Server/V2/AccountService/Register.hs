@@ -16,8 +16,10 @@ import           Data.OpEnergy.Account.API.V2.RegisterResultV2
                  ( RegisterResultV2(..)
                  )
 import           Data.OpEnergy.Account.API.V2.RegisterRequest
-                 ( RegisterRequest(..)
+                 ( RegisterRequest
                  )
+import qualified Data.OpEnergy.Account.API.V2.RegisterRequest
+                 as RegisterRequest
 
 import           OpEnergy.Account.Server.V1.Class
                  ( AppM, runLogging, profile)
@@ -48,7 +50,7 @@ register
 register req =
     let name = "V2.register"
     in profile name $ runExceptPrefixT name $ do
-  result <- lift $ V1.register (displayName (req :: RegisterRequest))
+  result <- lift $ V1.register (RegisterRequest.displayName req)
   return $! RegisterResultV2
     (V1API.accountSecret (result :: V1API.RegisterResult))
     (V1API.accountToken (result :: V1API.RegisterResult))
