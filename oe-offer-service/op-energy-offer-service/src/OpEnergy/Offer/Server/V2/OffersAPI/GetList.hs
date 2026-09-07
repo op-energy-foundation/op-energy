@@ -1,4 +1,4 @@
-{-- | GET /api/v2/offer/list
+{-- | GET /api/v1/offer/list
  -}
 {-# LANGUAGE TemplateHaskell            #-}
 module OpEnergy.Offer.Server.V2.OffersAPI.GetList
@@ -10,6 +10,8 @@ import           Control.Monad.Trans.Reader(ask)
 import           Control.Monad.Trans(lift)
 import           Control.Monad.IO.Class(liftIO)
 import           Control.Monad.Logger(logError)
+import qualified Control.Concurrent.STM.TVar as TVar
+
 import           Database.Persist.Postgresql
 
 import           Data.OpEnergy.API.V1.Positive(Positive, fromPositive)
@@ -19,6 +21,9 @@ import           Data.OpEnergy.Offer.API.V1.OfferInfo(PaginatedOffers(..))
 
 import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
 import           OpEnergy.Offer.Server.V1.Offer
+                 ( offerInfoFromEntity
+                 , contractInfoFromEntity
+                 )
 
 import           OpEnergy.Error(eitherThrowJSON, runExceptPrefixT, CallstackError)
 
@@ -45,7 +50,8 @@ getList
 getList mStatus mCreator mPage mLimit =
   let name = "getList"
   in profile name $ runExceptPrefixT name $ do
-  State{ offerDBPool = pool } <- lift ask
+  State{ offerDBPool = pool, currentTip = currentTipV } <- lift ask
+  mTip <- liftIO $ TVar.readTVarIO currentTipV
   let page = maybe 1 fromPositive mPage
       limit = maybe defaultLimit (min maxLimit . fromPositive) mLimit
       statusFilter = maybe [] (\s -> [ OfferStatus ==. s ]) mStatus
@@ -53,9 +59,15 @@ getList mStatus mCreator mPage mLimit =
       filters = statusFilter ++ creatorFilter
   liftIO $ flip runSqlPersistMPool pool $ do
     totalCountV <- count filters
-    rows <- selectList filters [ Desc OfferCreated, LimitTo limit, OffsetBy ((page - 1) * limit) ]
+    offerRows <- selectList filters [ Desc OfferCreated, LimitTo limit, OffsetBy ((page - 1) * limit) ]
+    -- fetch contracts related to the offers on this page
+    let offerKeys = map entityKey offerRows
+    contractRows <- case offerKeys of
+      [] -> return []
+      _  -> selectList [ ContractOfferId <-. offerKeys ] [ Desc ContractMatchedAt ]
     return $! PaginatedOffers
-      { items = map offerInfoFromEntity rows
+      { offers = map offerInfoFromEntity offerRows
+      , contracts = map (contractInfoFromEntity Nothing mTip) contractRows
       , page = fromIntegral page
       , limit = fromIntegral limit
       , totalCount = fromIntegral totalCountV

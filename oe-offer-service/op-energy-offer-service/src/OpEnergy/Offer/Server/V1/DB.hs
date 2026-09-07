@@ -73,8 +73,32 @@ offerDBMigrations :: [( Config -> ReaderT
                                 )
                                ]
 offerDBMigrations =
-  [
+  [ migration0_addOfferV2ColumnsAndContractTable
   ]
+
+-- | Migration 0: add V2 columns to the offer table with defaults, and
+-- let the ORM create the contract table. Existing rows get sensible
+-- defaults (side=BEFORE, blockRate=10, totalContracts=1, matchedCount=0,
+-- takerStakeSats = 100000 - makerStakeSats). Status values that moved
+-- to ContractStatus (accepted, confirming, settled) are mapped to
+-- OfferStatus.Filled.
+migration0_addOfferV2ColumnsAndContractTable
+  :: Config
+  -> ReaderT SqlBackend (NoLoggingT (ResourceT IO)) ()
+migration0_addOfferV2ColumnsAndContractTable _config = do
+  -- add new columns with defaults so existing rows survive
+  rawExecute "ALTER TABLE offer ADD COLUMN IF NOT EXISTS mtp_cutoff_epoch INT8 NOT NULL DEFAULT 0" []
+  rawExecute "ALTER TABLE offer ADD COLUMN IF NOT EXISTS side VARCHAR NOT NULL DEFAULT 'BEFORE'" []
+  rawExecute "ALTER TABLE offer ADD COLUMN IF NOT EXISTS taker_stake_sats INT8 NOT NULL DEFAULT 50000" []
+  rawExecute "ALTER TABLE offer ADD COLUMN IF NOT EXISTS block_rate DOUBLE PRECISION NOT NULL DEFAULT 10.0" []
+  rawExecute "ALTER TABLE offer ADD COLUMN IF NOT EXISTS total_contracts INT8 NOT NULL DEFAULT 1" []
+  rawExecute "ALTER TABLE offer ADD COLUMN IF NOT EXISTS matched_count INT8 NOT NULL DEFAULT 0" []
+  rawExecute "ALTER TABLE offer ADD COLUMN IF NOT EXISTS created_at_block INT8 NOT NULL DEFAULT 0" []
+  -- set takerStakeSats = 100000 - makerStakeSats for existing rows
+  rawExecute "UPDATE offer SET taker_stake_sats = 100000 - maker_stake_sats WHERE taker_stake_sats = 50000" []
+  -- map old statuses that now belong to ContractStatus
+  rawExecute "UPDATE offer SET status = 'filled' WHERE status IN ('accepted', 'confirming', 'settled')" []
+  transactionSave
 
 migrateOfferDBSchema
   :: Config
