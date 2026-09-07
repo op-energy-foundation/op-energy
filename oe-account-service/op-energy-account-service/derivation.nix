@@ -13,6 +13,7 @@
 , cryptohash-sha256, base16-bytestring
 , bcrypt
 , random
+, vector
 , async
 , exceptions
 , op-energy-api

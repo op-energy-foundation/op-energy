@@ -19,9 +19,10 @@ import           Data.OpEnergy.Account.API.V1.Account
 -- | request body for the V2 'register' API call. The display name is
 -- optional: if omitted, the backend generates a BIP39-style name.
 --
--- Input validation (length, charset) is delegated to
--- 'DisplayName'\'s own 'FromJSON' instance, which calls
--- 'everifyDisplayName'.
+-- Charset validation is delegated to 'DisplayName'\'s own 'FromJSON'
+-- instance ('verifyDisplayName'). Note: there is currently no
+-- server-side length limit beyond a 255-char truncation; the 3-20
+-- character convention is enforced by the frontend only.
 data RegisterRequest = RegisterRequest
   { displayName :: Maybe DisplayName
   }
