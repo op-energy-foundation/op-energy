@@ -19,6 +19,8 @@ module OpEnergy.Error
   , offerNotFound
   , notOfferOwner
   , offerNotOpen
+  , offerFilled
+  , cannotAcceptOwnOffer
   ) where
 
 import           Data.Text(Text)
@@ -38,6 +40,8 @@ data BadRequestError
   | OfferNotFound
   | NotOfferOwner
   | OfferNotOpen
+  | OfferFilled
+  | CannotAcceptOwnOffer
 instance Show BadRequestError where
   show AuthenticationFailure = "authentication failure"
   show (InvalidRequest reason) = Text.unpack reason
@@ -45,6 +49,8 @@ instance Show BadRequestError where
   show OfferNotFound = "offer not found"
   show NotOfferOwner = "only the offer's creator may do this"
   show OfferNotOpen = "offer is not open"
+  show OfferFilled = "offer has no remaining contracts"
+  show CannotAcceptOwnOffer = "cannot accept your own offer"
 
 data InternalError
   = Unspecified Text
@@ -80,6 +86,10 @@ notOfferOwner :: CallstackError
 notOfferOwner = CallstackError "" $! BadRequest NotOfferOwner
 offerNotOpen :: CallstackError
 offerNotOpen = CallstackError "" $! BadRequest OfferNotOpen
+offerFilled :: CallstackError
+offerFilled = CallstackError "" $! BadRequest OfferFilled
+cannotAcceptOwnOffer :: CallstackError
+cannotAcceptOwnOffer = CallstackError "" $! BadRequest CannotAcceptOwnOffer
 
 -- | converts Error into printable version
 errorToServerError :: Error -> (ServerError, Text)
@@ -87,6 +97,8 @@ errorToServerError (BadRequest AuthenticationFailure) = (err401, tshow Authentic
 errorToServerError (BadRequest NotOfferOwner) = (err403, tshow NotOfferOwner)
 errorToServerError (BadRequest OfferNotFound) = (err404, tshow OfferNotFound)
 errorToServerError (BadRequest OfferNotOpen) = (err409, tshow OfferNotOpen)
+errorToServerError (BadRequest OfferFilled) = (err409, tshow OfferFilled)
+errorToServerError (BadRequest CannotAcceptOwnOffer) = (err403, tshow CannotAcceptOwnOffer)
 errorToServerError (BadRequest specificError) = (err400, tshow specificError)
 errorToServerError (Internal specificError) = (err500, tshow specificError)
 errorToServerError (AccountServiceUnavailable reason) = (err502, "account service unavailable: " <> reason)
