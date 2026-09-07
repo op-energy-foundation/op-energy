@@ -72,6 +72,7 @@ mkDerivation {
   enableSeparateBinOutput = false;
   testHaskellDepends = [ base hspec text ];
   doBenchmark = false;
+  doHaddock = false; # we are not using it without sources, so not useful for now, but consumes CI ram during build
   doCheck = false;
   license = lib.licenses.bsd3;
 }
