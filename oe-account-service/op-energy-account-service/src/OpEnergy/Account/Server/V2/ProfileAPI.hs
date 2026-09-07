@@ -16,6 +16,9 @@ import           Data.OpEnergy.Account.API.V2.AccountInfo
 import           Data.OpEnergy.Account.API.V2.DisplayNameExistsResult
                  ( DisplayNameExistsResult
                  )
+import           Data.OpEnergy.Account.API.V2.SuggestUsernameResult
+                 ( SuggestUsernameResult
+                 )
 import           Data.OpEnergy.Account.API.V2.ProfileAPI
                  ( ProfileAPI
                  )
@@ -29,6 +32,8 @@ import qualified OpEnergy.Account.Server.V2.AccountService.PostDisplayName
                  as PostDisplayName
 import qualified OpEnergy.Account.Server.V2.AccountService.DisplayNameExists
                  as DisplayNameExists
+import qualified OpEnergy.Account.Server.V2.AccountService.SuggestUsername
+                 as SuggestUsername
 
 -- | see Data.OpEnergy.Account.API.V2.ProfileAPI for the API definition
 handlers :: ServerT ProfileAPI (AppT Handler)
@@ -43,4 +48,8 @@ handlers
 
   :<|> ( DisplayNameExists.displayNameExistsHandler
          :: API.DisplayName -> AppM DisplayNameExistsResult
+       )
+
+  :<|> ( SuggestUsername.suggestUsernameHandler
+         :: AppM SuggestUsernameResult
        )

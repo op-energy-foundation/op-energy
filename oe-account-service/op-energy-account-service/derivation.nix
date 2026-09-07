@@ -13,6 +13,7 @@
 , cryptohash-sha256, base16-bytestring
 , bcrypt
 , random
+, vector
 , async
 , exceptions
 , op-energy-api
@@ -49,6 +50,7 @@ mkDerivation {
     cryptohash-sha256 base16-bytestring
     bcrypt
     random
+    vector
     exceptions
     stm stm-chans
     transformers
@@ -72,6 +74,7 @@ mkDerivation {
   enableSeparateBinOutput = false;
   testHaskellDepends = [ base hspec text ];
   doBenchmark = false;
+  doHaddock = false; # we are not using it without sources, so not useful for now, but consumes CI ram during build
   doCheck = false;
   license = lib.licenses.bsd3;
 }

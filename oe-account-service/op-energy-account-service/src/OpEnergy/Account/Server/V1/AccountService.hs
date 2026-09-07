@@ -27,8 +27,6 @@ import           Control.Monad.IO.Class (liftIO, MonadIO)
 import           Control.Monad.Logger(logError)
 import qualified Data.Text.Encoding as Text
 import qualified Data.ByteString.Lazy as LBS
-import qualified Data.ByteString.Char8 as BS
-import qualified Data.ByteString.Short as BS
 import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
 import           Data.Word(Word64)
@@ -51,12 +49,19 @@ import           OpEnergy.Account.Server.V1.Metrics(MetricsState(..))
 import           OpEnergy.Account.Server.V1.Person
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           Data.OpEnergy.API.V1.Error
+import           OpEnergy.Account.Server.V1.BIP39Words
+                 ( generateAvailableBIP39Username
+                 )
 
 
 -- | see OpEnergy.Account.API.V1.AccountV1API for reference of 'register' API call
 -- Current implementation is 2 * O(ln n)
-register :: (MonadIO m, MonadMonitor m) => AppT m RegisterResult
-register = do
+-- When @mRequestedName@ is @Just name@, uses that display name
+-- directly (caller is responsible for uniqueness checks).
+-- When @Nothing@, generates a BIP39-style name
+-- (e.g. @brave_tiger_482@), retrying on collision.
+register :: Maybe API.DisplayName -> AppM RegisterResult
+register mRequestedName = do
   State{ config = Config { configSalt = configSalt
                          , configAccountTokenEncryptionPrivateKey = configAccountTokenEncryptionPrivateKey
                          , configStartingBalanceSats = configStartingBalanceSats
@@ -77,15 +82,16 @@ register = do
     encryptedSecret <- liftIO
       $! encryptSecret configAccountTokenEncryptionPrivateKey secret
     let hashedSecret = hashSBS configSalt API.unAccountSecret secret
-        UUID rawUUID = uuid
-        userNameHash = API.verifyDisplayName $! "user" <> (Text.decodeUtf8 $! BS.take 6 $! BS.fromShort rawUUID)
-        person = Person
+    chosenName <- case mRequestedName of
+      Just requestedName -> return requestedName
+      Nothing -> generateAvailableBIP39Username mgetPersonByDisplayName 5
+    let person = Person
           { personCreationTime = now
           , personUuid = modelApiUUIDPerson uuid
           , personLastSeenTime = now
           , personLastUpdated = now
           , personEmail = Nothing
-          , personDisplayName = userNameHash
+          , personDisplayName = chosenName
           , personHashedSecret = hashedSecret
           , personHashedPassword = Nothing
           , personEncryptedSecret = Just encryptedSecret
@@ -100,7 +106,7 @@ register = do
       { accountSecret = secret
       , accountToken = API.verifyAccountToken $! Text.decodeUtf8 token
       , personUUID = uuid
-      , displayName = userNameHash
+      , displayName = chosenName
       }
 
 -- | see OpEnergy.Account.API.V1.AccountV1API for reference of 'login' API call

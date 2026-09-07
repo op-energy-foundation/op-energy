@@ -66,6 +66,8 @@ library
                    , Data.OpEnergy.Account.API.V2.ProfileAPI
                    , Data.OpEnergy.Account.API.V2.AccountInfo
                    , Data.OpEnergy.Account.API.V2.DisplayNameExistsResult
+                   , Data.OpEnergy.Account.API.V2.SuggestUsernameResult
+                   , Data.OpEnergy.Account.API.V2.RegisterRequest
                    , Data.OpEnergy.Account.API.V2.SetPasswordRequest
                    , Data.OpEnergy.Account.API.V2.PasswordLoginRequest
                    , Data.OpEnergy.Account.API.V2.AccountSecretResult
