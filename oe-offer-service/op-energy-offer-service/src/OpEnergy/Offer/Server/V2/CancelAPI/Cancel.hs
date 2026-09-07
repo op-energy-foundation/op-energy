@@ -29,7 +29,8 @@ import           Database.Persist.Postgresql
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountAPI
 import qualified Data.OpEnergy.Account.API.V2.WhoAmIResult as AccountV2
 import           Data.OpEnergy.API.V1.Natural(fromNatural, verifyNatural)
-import           Data.OpEnergy.Offer.API.V1.OfferInfo(OfferID(..), OfferInfo)
+import           Data.OpEnergy.Offer.API.V1.OfferID(OfferID(..))
+import           Data.OpEnergy.Offer.API.V1.OfferInfo(OfferInfo)
 import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
 import           Data.Text.Show(tshow)
 
@@ -37,8 +38,11 @@ import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLog
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           OpEnergy.Offer.Server.V1.Offer(Offer(..), OfferId, offerInfoFrom)
+import           Control.Monad(when)
+
 import           OpEnergy.Error
-                   ( eitherThrowJSON, runExceptPrefixT, describeError
+                   ( eitherThrowJSON, runExceptPrefixT
+                   , exceptTMaybeT, describeError
                    , CallstackError, invalidRequest, offerNotFound
                    , notOfferOwner, offerNotOpen
                    )
@@ -50,7 +54,7 @@ cancelHandler (OfferID idText) token =
 
 cancel :: Text -> AccountAPI.AccountToken -> AppM (Either CallstackError OfferInfo)
 cancel idText token =
-  let name = "cancel"
+  let name = "V2.CancelAPI.Cancel.cancel"
   in profile name $ runExceptPrefixT name $ do
   key <- case TR.decimal idText of
     Right (n, rest) | T.null rest -> return (toSqlKey n :: OfferId)
@@ -60,14 +64,10 @@ cancel idText token =
     ExceptT $ AccountClient.verifyAccountToken token
 
   State{ offerDBPool = pool } <- lift ask
-  mOffer <- liftIO $ flip runSqlPersistMPool pool $ get key
-  offerVal <- case mOffer of
-    Nothing -> throwE offerNotFound
-    Just o  -> return o
-  case () of
-    _ | offerPersonUUID offerVal /= personUUIDV -> throwE notOfferOwner
-    _ | offerStatus offerVal /= Open -> throwE offerNotOpen
-    _ -> return ()
+  offerVal <- exceptTMaybeT offerNotFound
+    $! liftIO $ flip runSqlPersistMPool pool $ get key
+  when (offerPersonUUID offerVal /= personUUIDV) $ throwE notOfferOwner
+  when (offerStatus offerVal /= Open) $ throwE offerNotOpen
 
   now <- liftIO getCurrentTime
   let matched = fromNatural (offerMatchedCount offerVal)

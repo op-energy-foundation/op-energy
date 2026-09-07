@@ -24,7 +24,7 @@ import           Database.Persist.Postgresql
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountAPI
 import qualified Data.OpEnergy.Account.API.V2.WhoAmIResult as AccountV2
 import           Data.OpEnergy.API.V1.Natural(verifyNatural, fromNatural)
-import           Data.OpEnergy.Offer.API.V1.OfferInfo(OfferID(..))
+import           Data.OpEnergy.Offer.API.V1.OfferID(OfferID(..))
 import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
 import           Data.OpEnergy.Offer.API.V1.ContractStatus(ContractStatus(..))
 import           Data.OpEnergy.Offer.API.V1.ContractInfo(ContractInfo)
@@ -40,6 +40,7 @@ import           OpEnergy.Offer.Server.V1.Offer
 
 import           OpEnergy.Error
                    ( eitherThrowJSON, runExceptPrefixT
+                   , exceptTMaybeT
                    , CallstackError, invalidRequest
                    , offerNotFound, offerNotOpen, offerFilled
                    , cannotAcceptOwnOffer
@@ -55,7 +56,7 @@ acceptHandler (OfferID idText) token =
 -- matchedCount, and transitions the offer to Filled when full.
 accept :: Text -> AccountAPI.AccountToken -> AppM (Either CallstackError ContractInfo)
 accept idText token =
-  let name = "accept"
+  let name = "V2.AcceptAPI.Accept.accept"
   in profile name $ runExceptPrefixT name $ do
   key <- case TR.decimal idText of
     Right (n, rest) | T.null rest -> return (toSqlKey n :: OfferId)
@@ -65,10 +66,8 @@ accept idText token =
     ExceptT $ AccountClient.verifyAccountToken token
 
   State{ offerDBPool = pool, currentTip = currentTipV } <- lift ask
-  mOffer <- liftIO $ flip runSqlPersistMPool pool $ get key
-  offerVal <- case mOffer of
-    Nothing -> throwE offerNotFound
-    Just o  -> return o
+  offerVal <- exceptTMaybeT offerNotFound
+    $! liftIO $ flip runSqlPersistMPool pool $ get key
 
   when (offerStatus offerVal /= Open) $ throwE offerNotOpen
   when (fromNatural (offerMatchedCount offerVal) >= fromNatural (offerTotalContracts offerVal)) $ throwE offerFilled
@@ -101,18 +100,32 @@ accept idText token =
         , contractSettledAt = Nothing
         }
 
-  (contractKey, newMatchedCount) <- liftIO $ flip runSqlPersistMPool pool $ do
-    cKey <- insert contractRow
-    let newCount = verifyNatural (fromNatural (offerMatchedCount offerVal) + 1)
-    _ <- updateWhereCount
-      [ OfferId ==. key ]
+  -- Atomic: insert contract + conditional increment to prevent
+  -- two concurrent accepts from overselling the last slot.
+  let staleCount = offerMatchedCount offerVal
+      newCount   = verifyNatural (fromNatural staleCount + 1)
+  (contractKey, updated) <- liftIO $ flip runSqlPersistMPool pool $ do
+    -- conditional update — only succeeds if matchedCount has not
+    -- changed since we read it above
+    bumped <- updateWhereCount
+      [ OfferId ==. key
+      , OfferMatchedCount ==. staleCount
+      , OfferStatus ==. Open
+      ]
       [ OfferMatchedCount =. newCount ]
+    cKey <- insert contractRow
     -- transition to Filled when all contracts are matched
     when (fromNatural newCount >= fromNatural (offerTotalContracts offerVal)) $ do
       _ <- (updateWhereCount
         [ OfferId ==. key ]
         [ OfferStatus =. Filled ] :: ReaderT SqlBackend IO Int64)
       return ()
-    return (cKey, newCount)
+    return (cKey, bumped)
+
+  -- if the conditional update matched 0 rows, another accept won
+  -- the race — refund and report filled
+  when (updated /= 1) $ do
+    _ <- lift $ AccountClient.creditBalance takerUUIDV (Sats (offerTakerStakeSats offerVal))
+    throwE offerFilled
 
   return $! contractInfoFromEntity (Just "taker") mTip (Entity contractKey contractRow)

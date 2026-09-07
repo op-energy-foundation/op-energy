@@ -5,9 +5,7 @@
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE DuplicateRecordFields      #-}
 module Data.OpEnergy.Offer.API.V1.OfferInfo
-  ( OfferID(..)
-  , defaultOfferID
-  , OfferInfo(..)
+  ( OfferInfo(..)
   , defaultOfferInfo
   , PaginatedOffers(..)
   , defaultPaginatedOffers
@@ -24,10 +22,8 @@ import           Control.Lens
 import           GHC.Generics
 import           Data.Typeable              (Typeable)
 import           Data.Aeson
-import           Data.Text                  (Text)
 import           Data.Time.Clock            (UTCTime)
 import           Data.Word                  (Word64)
-import           Servant.API                (FromHttpApiData(..), ToHttpApiData(..))
 
 import           Data.OpEnergy.API.V1.Block (BlockHeight, defaultBlockHeight)
 import           Data.OpEnergy.Account.API.V1.Account
@@ -39,31 +35,12 @@ import           Data.OpEnergy.Offer.API.V1.OfferStatus
 import           Data.OpEnergy.Offer.API.V1.OfferSide
                  ( OfferSide, defaultOfferSide
                  )
+import           Data.OpEnergy.Offer.API.V1.OfferID
+                 ( OfferID, defaultOfferID
+                 )
 import           Data.OpEnergy.Offer.API.V1.ContractInfo
                  ( ContractInfo, defaultContractInfo
                  )
-
--- | typed wrapper for offer identifiers
-newtype OfferID = OfferID { unOfferID :: Text }
-  deriving (Show, Eq, Generic, Typeable)
-instance ToJSON OfferID where
-  toJSON (OfferID t) = toJSON t
-instance FromJSON OfferID where
-  parseJSON = withText "OfferID" $ pure . OfferID
-instance ToSchema OfferID where
-  declareNamedSchema _ = pure $ NamedSchema (Just "OfferID") $ mempty
-    & type_ ?~ SwaggerString
-    & example ?~ toJSON defaultOfferID
-instance ToParamSchema OfferID where
-  toParamSchema _ = mempty
-    & type_ ?~ SwaggerString
-instance FromHttpApiData OfferID where
-  parseQueryParam = Right . OfferID
-instance ToHttpApiData OfferID where
-  toQueryParam (OfferID t) = t
-
-defaultOfferID :: OfferID
-defaultOfferID = OfferID "1"
 
 -- | one offer group, as returned by post/mine/list/:id/cancel
 data OfferInfo = OfferInfo

@@ -14,9 +14,11 @@ import           Data.OpEnergy.Account.API.V1.Account
 import           Data.OpEnergy.Offer.API.V1.OfferStatus
                  ( OfferStatus
                  )
-import           Data.OpEnergy.Offer.API.V1.OfferInfo
+import           Data.OpEnergy.Offer.API.V1.OfferID
                  ( OfferID
-                 , OfferInfo
+                 )
+import           Data.OpEnergy.Offer.API.V1.OfferInfo
+                 ( OfferInfo
                  , PaginatedOffers
                  , MyOffersResult
                  , PostOfferRequest

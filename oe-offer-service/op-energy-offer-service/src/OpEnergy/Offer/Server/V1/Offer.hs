@@ -44,8 +44,10 @@ import           Data.OpEnergy.Offer.API.V1.OfferSide
 import           Data.OpEnergy.Offer.API.V1.ContractStatus
                  ( ContractStatus(..)
                  )
+import qualified Data.OpEnergy.Offer.API.V1.OfferID as API
 import qualified Data.OpEnergy.Offer.API.V1.OfferInfo as API
 import qualified Data.OpEnergy.Offer.API.V1.ContractInfo as CAPI
+import qualified Data.OpEnergy.Offer.API.V1.Constants as C
 import           Data.Text.Show(tshow)
 
 -- PersistField instances for OfferStatus -- placed here (service layer)
@@ -169,7 +171,7 @@ contractInfoFromEntity mYourRole mTip (Entity key Contract{..}) =
           let tipInt = fromNatural tip
               tgtInt = fromNatural contractTargetBlock
           in fromIntegral (max 0 (tipInt - tgtInt + 1))
-        (Settled, _) -> 6
+        (Settled, _) -> C.settlementConfirmations
         _ -> 0
   in CAPI.ContractInfo
     { CAPI.contractId = CAPI.ContractID idText
