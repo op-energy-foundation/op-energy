@@ -21,7 +21,6 @@ import           OpEnergy.Account.Server.V1.Class
 import           OpEnergy.Account.Server.V1.AccountService
                  ( mgetPersonByAccountToken)
 import           OpEnergy.Account.Server.V1.Person
-import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
 
 import           OpEnergy.Error
                  ( eitherThrowJSON, runExceptPrefixT
@@ -49,8 +48,7 @@ getMe token =
     in profile name $ runExceptPrefixT name $ do
   (Entity _ person) <- exceptTMaybeT accountNotFound
     $ mgetPersonByAccountToken token
-  let (Sats bal) = personBalance person
   return $! AccountInfo
     (personDisplayName person)
     (isJust (personHashedPassword person))
-    bal
+    (personBalance person)
