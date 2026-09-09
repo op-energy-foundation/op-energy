@@ -12,21 +12,23 @@ import           Control.Lens
 import           GHC.Generics
 import           Data.Typeable              (Typeable)
 import           Data.Aeson
+import           Data.Word                  (Word64)
 
 import           Data.OpEnergy.Account.API.V1.Account
                  ( DisplayName
                  , defaultDisplayName
                  )
 
--- | result of the 'me' and 'displayname' API calls
+-- | result of the 'me' API call — identity + spendable balance
 data AccountInfo = AccountInfo
   { displayName :: DisplayName
   , hasPassword :: Bool
+  , balance     :: Word64
   }
   deriving (Show, Generic, Typeable)
 
 defaultAccountInfo :: AccountInfo
-defaultAccountInfo = AccountInfo defaultDisplayName False
+defaultAccountInfo = AccountInfo defaultDisplayName False 300000
 
 instance ToJSON AccountInfo
 instance FromJSON AccountInfo
