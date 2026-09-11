@@ -12,14 +12,19 @@ import           GHC.Generics
 import           Data.Typeable              (Typeable)
 import           Data.Aeson
 
+import           Data.OpEnergy.Account.API.V1.Account
+                 ( DisplayName
+                 )
+
 -- | result of the 'displayname/exists' API call
 data DisplayNameExistsResult = DisplayNameExistsResult
-  { exists :: Bool
+  { exists      :: Bool
+  , suggestions :: [DisplayName]
   }
   deriving (Show, Generic, Typeable)
 
 defaultDisplayNameExistsResult :: DisplayNameExistsResult
-defaultDisplayNameExistsResult = DisplayNameExistsResult False
+defaultDisplayNameExistsResult = DisplayNameExistsResult False []
 
 instance ToJSON DisplayNameExistsResult
 instance FromJSON DisplayNameExistsResult

@@ -17,8 +17,12 @@ import           Data.OpEnergy.Account.API.V2.AccountInfo
 import           Data.OpEnergy.Account.API.V2.DisplayNameExistsResult
                  ( DisplayNameExistsResult
                  )
+import           Data.OpEnergy.Account.API.V2.SuggestUsernameResult
+                 ( SuggestUsernameResult
+                 )
 
--- | Profile API subset: me, displayname, displayname/exists.
+-- | Profile API subset: me, displayname, displayname/exists,
+-- displayname/suggest.
 type ProfileAPI
   = "me"
     :> Header'
@@ -47,5 +51,13 @@ type ProfileAPI
   :<|> "displayname"
     :> "exists"
     :> Capture "displayName" DisplayName
-    :> Description "Reports whether the given display name is taken."
+    :> Description "Reports whether the given display name is taken.  \
+                   \When exists is true, the response includes 3 \
+                   \available BIP39-style suggestions."
     :> Get '[JSON] DisplayNameExistsResult
+
+  :<|> "displayname"
+    :> "suggest"
+    :> Description "Returns a single available BIP39-style display \
+                   \name (e.g. brave_tiger_482)."
+    :> Get '[JSON] SuggestUsernameResult

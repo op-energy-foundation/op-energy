@@ -1,4 +1,6 @@
 {-- | V2 displayname/exists handler: checks if a display name is taken.
+ - When the name is taken, the response includes 3 available BIP39-style
+ - suggestions.
  -}
 {-# LANGUAGE TemplateHaskell          #-}
 {-# LANGUAGE OverloadedStrings          #-}
@@ -9,6 +11,7 @@ module OpEnergy.Account.Server.V2.AccountService.DisplayNameExists
 
 import           Control.Monad.Logger(logError)
 import           Control.Monad.Trans (lift)
+import           Control.Monad       (replicateM)
 import           Data.Maybe (isJust)
 
 import qualified Data.OpEnergy.Account.API.V1.Account as API
@@ -20,9 +23,12 @@ import           OpEnergy.Account.Server.V1.Class
                  ( AppM, runLogging, profile)
 import           OpEnergy.Account.Server.V1.AccountService
                  ( mgetPersonByDisplayName)
+import           OpEnergy.Account.Server.V1.BIP39Words
+                 ( generateAvailableBIP39Username)
 
 import           OpEnergy.Error
-                 ( eitherThrowJSON, runExceptPrefixT
+                 ( eitherThrowJSON
+                 , runExceptPrefixT
                  , CallstackError
                  )
 
@@ -37,7 +43,8 @@ displayNameExistsHandler dn =
       ( runLogging . $(logError))
       $ displayNameExists dn
 
--- | business logic for V2 displayname/exists
+-- | business logic for V2 displayname/exists.  When the name is
+-- taken, generates 3 available BIP39-style suggestions.
 displayNameExists
   :: API.DisplayName
   -> AppM (Either CallstackError DisplayNameExistsResult)
@@ -45,4 +52,8 @@ displayNameExists dn =
     let name = "V2.displayNameExists"
     in profile name $ runExceptPrefixT name $ do
   mperson <- lift $ mgetPersonByDisplayName dn
-  return $! DisplayNameExistsResult (isJust mperson)
+  let taken = isJust mperson
+  suggs <- if taken
+    then lift $ replicateM 3 (generateAvailableBIP39Username mgetPersonByDisplayName 5)
+    else return []
+  return $! DisplayNameExistsResult taken suggs
