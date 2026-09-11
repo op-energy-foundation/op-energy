@@ -51,3 +51,4 @@ getMe token =
   return $! AccountInfo
     (personDisplayName person)
     (isJust (personHashedPassword person))
+    (personBalance person)

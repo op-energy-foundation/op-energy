@@ -17,16 +17,21 @@ import           Data.OpEnergy.Account.API.V1.Account
                  ( DisplayName
                  , defaultDisplayName
                  )
+import           Data.OpEnergy.Account.API.V1.Sats
+                 ( Sats
+                 , defaultSats
+                 )
 
--- | result of the 'me' and 'displayname' API calls
+-- | result of the 'me' API call — identity + spendable balance
 data AccountInfo = AccountInfo
   { displayName :: DisplayName
   , hasPassword :: Bool
+  , balance     :: Sats
   }
   deriving (Show, Generic, Typeable)
 
 defaultAccountInfo :: AccountInfo
-defaultAccountInfo = AccountInfo defaultDisplayName False
+defaultAccountInfo = AccountInfo defaultDisplayName False defaultSats
 
 instance ToJSON AccountInfo
 instance FromJSON AccountInfo
