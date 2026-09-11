@@ -5,12 +5,12 @@
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE DuplicateRecordFields      #-}
 module Data.OpEnergy.Offer.API.V1.OfferInfo
-  ( OfferID(..)
-  , defaultOfferID
-  , OfferInfo(..)
+  ( OfferInfo(..)
   , defaultOfferInfo
   , PaginatedOffers(..)
   , defaultPaginatedOffers
+  , MyOffersResult(..)
+  , defaultMyOffersResult
   , PostOfferRequest(..)
   , defaultPostOfferRequest
   , PostOfferResult(..)
@@ -22,10 +22,8 @@ import           Control.Lens
 import           GHC.Generics
 import           Data.Typeable              (Typeable)
 import           Data.Aeson
-import           Data.Text                  (Text)
 import           Data.Time.Clock            (UTCTime)
 import           Data.Word                  (Word64)
-import           Servant.API                (FromHttpApiData(..), ToHttpApiData(..))
 
 import           Data.OpEnergy.API.V1.Block (BlockHeight, defaultBlockHeight)
 import           Data.OpEnergy.Account.API.V1.Account
@@ -34,36 +32,30 @@ import           Data.OpEnergy.Account.API.V1.Account
 import           Data.OpEnergy.Offer.API.V1.OfferStatus
                  ( OfferStatus, defaultOfferStatus
                  )
+import           Data.OpEnergy.Offer.API.V1.OfferSide
+                 ( OfferSide, defaultOfferSide
+                 )
+import           Data.OpEnergy.Offer.API.V1.OfferID
+                 ( OfferID, defaultOfferID
+                 )
+import           Data.OpEnergy.Offer.API.V1.ContractInfo
+                 ( ContractInfo, defaultContractInfo
+                 )
 
--- | typed wrapper for offer identifiers
-newtype OfferID = OfferID { unOfferID :: Text }
-  deriving (Show, Eq, Generic, Typeable)
-instance ToJSON OfferID where
-  toJSON (OfferID t) = toJSON t
-instance FromJSON OfferID where
-  parseJSON = withText "OfferID" $ pure . OfferID
-instance ToSchema OfferID where
-  declareNamedSchema _ = pure $ NamedSchema (Just "OfferID") $ mempty
-    & type_ ?~ SwaggerString
-    & example ?~ toJSON defaultOfferID
-instance ToParamSchema OfferID where
-  toParamSchema _ = mempty
-    & type_ ?~ SwaggerString
-instance FromHttpApiData OfferID where
-  parseQueryParam = Right . OfferID
-instance ToHttpApiData OfferID where
-  toQueryParam (OfferID t) = t
-
-defaultOfferID :: OfferID
-defaultOfferID = OfferID "1"
-
--- | one offer, as returned by post/mine/list/:id/cancel
+-- | one offer group, as returned by post/mine/list/:id/cancel
 data OfferInfo = OfferInfo
   { offerId            :: OfferID
   , creatorDisplayName :: DisplayName
   , targetBlock        :: BlockHeight
+  , mtpCutoffEpoch     :: Word64
+  , side               :: OfferSide
   , validTillBlock     :: BlockHeight
   , makerStakeSats     :: Word64
+  , takerStakeSats     :: Word64
+  , blockRate          :: Double
+  , totalContracts     :: Word64
+  , matchedCount       :: Word64
+  , createdAtBlock     :: BlockHeight
   , status             :: OfferStatus
   , expiresAt          :: Maybe UTCTime
   , refundedAt         :: Maybe UTCTime
@@ -82,17 +74,25 @@ defaultOfferInfo = OfferInfo
   { offerId = defaultOfferID
   , creatorDisplayName = defaultDisplayName
   , targetBlock = defaultBlockHeight
+  , mtpCutoffEpoch = 0
+  , side = defaultOfferSide
   , validTillBlock = defaultBlockHeight
   , makerStakeSats = 50000
+  , takerStakeSats = 50000
+  , blockRate = 10.0
+  , totalContracts = 1
+  , matchedCount = 0
+  , createdAtBlock = defaultBlockHeight
   , status = defaultOfferStatus
   , expiresAt = Nothing
   , refundedAt = Nothing
   , created = read "2026-08-14 12:00:00 UTC"
   }
 
--- | paginated listing of offers
+-- | paginated listing of offers and their contracts
 data PaginatedOffers = PaginatedOffers
-  { items      :: [OfferInfo]
+  { offers     :: [OfferInfo]
+  , contracts  :: [ContractInfo]
   , page       :: Word64
   , limit      :: Word64
   , totalCount :: Word64
@@ -107,18 +107,42 @@ instance ToSchema PaginatedOffers where
 
 defaultPaginatedOffers :: PaginatedOffers
 defaultPaginatedOffers = PaginatedOffers
-  { items = [ defaultOfferInfo ]
+  { offers = [ defaultOfferInfo ]
+  , contracts = [ defaultContractInfo ]
   , page = 1
   , limit = 20
   , totalCount = 1
   }
 
+-- | response for the /mine endpoint — the user's offers and contracts
+data MyOffersResult = MyOffersResult
+  { offers    :: [OfferInfo]
+  , contracts :: [ContractInfo]
+  }
+  deriving (Show, Generic, Typeable)
+instance ToJSON   MyOffersResult
+instance FromJSON MyOffersResult
+instance ToSchema MyOffersResult where
+  declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
+    & mapped.schema.description ?~ "MyOffersResult schema"
+    & mapped.schema.example ?~ toJSON defaultMyOffersResult
+
+defaultMyOffersResult :: MyOffersResult
+defaultMyOffersResult = MyOffersResult
+  { offers = [ defaultOfferInfo ]
+  , contracts = [ defaultContractInfo ]
+  }
+
 -- | request body for posting new offers
 data PostOfferRequest = PostOfferRequest
   { targetBlock    :: BlockHeight
+  , mtpCutoffEpoch :: Word64
+  , side           :: OfferSide
   , validTillBlock :: BlockHeight
-  , numberOfOffers :: Word64
   , makerStakeSats :: Word64
+  , blockRate      :: Double
+  , totalContracts :: Word64
+  , createdAtBlock :: BlockHeight
   }
   deriving (Show, Generic, Typeable)
 instance ToJSON   PostOfferRequest
@@ -131,9 +155,13 @@ instance ToSchema PostOfferRequest where
 defaultPostOfferRequest :: PostOfferRequest
 defaultPostOfferRequest = PostOfferRequest
   { targetBlock = defaultBlockHeight
+  , mtpCutoffEpoch = 0
+  , side = defaultOfferSide
   , validTillBlock = defaultBlockHeight
-  , numberOfOffers = 1
   , makerStakeSats = 50000
+  , blockRate = 10.0
+  , totalContracts = 1
+  , createdAtBlock = defaultBlockHeight
   }
 
 -- | result of posting offers
