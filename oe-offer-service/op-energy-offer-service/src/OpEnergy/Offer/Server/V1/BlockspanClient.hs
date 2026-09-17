@@ -32,6 +32,7 @@ import           Data.OpEnergy.API.V1.WebSocketService.Message
                  , WebsocketRequest(..)
                  )
 import qualified Data.OpEnergy.Client as Blockspan
+import           Data.OpEnergy.Offer.API.V1.LiveMessage (LiveMessage(..))
 import           Data.Text.Show (tshow)
 
 import           OpEnergy.Offer.Server.V1.Class
@@ -41,6 +42,8 @@ import           OpEnergy.Offer.Server.V1.Class
                  , runLogging
                  )
 import           OpEnergy.Offer.Server.V1.Config (Config(..))
+import           OpEnergy.Offer.Server.V1.LiveEvent (LiveEvent(..))
+import           OpEnergy.Offer.Server.V1.WebSocketService (publishLiveEvent)
 import           OpEnergy.Error (CallstackError, blockspanRequestFailed)
 
 -- | delay between attempts to (re)connect to the blockspan websocket
@@ -99,8 +102,9 @@ handleMessage MessagePong = return ()
 handleMessage (MessageNewestBlockHeader _confirmedBlock !tipHeight _mTipBlock) = do
   State{ currentTip = currentTipV } <- ask
   previousTip <- liftIO $ STM.atomically $ TVar.swapTVar currentTipV (Just tipHeight)
-  when (previousTip /= Just tipHeight) $ runLogging $ $(logInfo)
-    ( "handleMessage: new chain tip " <> tshow tipHeight )
+  when (previousTip /= Just tipHeight) $ do
+    runLogging $ $(logInfo) ( "handleMessage: new chain tip " <> tshow tipHeight )
+    publishLiveEvent $! LiveEvent (LiveMessageBlockNew tipHeight) []
 
 -- | returns mediantime of the block with the given height, as reported by
 -- blockspan service's HTTP API
