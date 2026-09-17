@@ -29,6 +29,7 @@ import qualified Data.OpEnergy.Offer.API.V1.Constants as C
 import           Data.Text.Show(tshow)
 
 import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
+import           OpEnergy.Offer.Server.V1.Config(Config(..))
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           OpEnergy.Offer.Server.V1.Offer(Offer(..), offerInfoFrom)
@@ -52,6 +53,9 @@ post token PostOfferRequest{..} =
     throwE $ invalidRequest ("totalContracts must be between 1 and " <> tshow C.maxContracts)
   when (makerStakeSats < C.minStakeSats || makerStakeSats > C.maxStakeSats) $
     throwE $ invalidRequest ("makerStakeSats must be between " <> tshow C.minStakeSats <> " and " <> tshow C.maxStakeSats)
+  State{ config = Config{ configPlatformFeeSats = platformFeeSats } } <- lift ask
+  when (makerStakeSats <= platformFeeSats) $
+    throwE $ invalidRequest ("makerStakeSats must be greater than the platform fee of " <> tshow platformFeeSats <> " sats")
   when (blockRate <= 0) $
     throwE $ invalidRequest "blockRate must be positive"
 
