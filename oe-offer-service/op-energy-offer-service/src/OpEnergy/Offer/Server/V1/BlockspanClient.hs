@@ -97,7 +97,9 @@ receiveTipInLoop state conn = do
 -- blocks it waits for confirmation.
 handleMessage :: MonadIO m => Message -> AppT m ()
 handleMessage MessagePong = return ()
-handleMessage (MessageNewestBlockHeader _confirmedBlock tipHeight _mTipBlock) = do
+-- The tip height is forced before it is stored: its parser throws on invalid
+-- values, and an unevaluated error must not end up in 'currentTip'.
+handleMessage (MessageNewestBlockHeader _confirmedBlock !tipHeight _mTipBlock) = do
   State{ currentTip = currentTipV } <- ask
   previousTip <- liftIO $ STM.atomically $ TVar.swapTVar currentTipV (Just tipHeight)
   when (previousTip /= Just tipHeight) $ do

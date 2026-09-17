@@ -43,8 +43,10 @@ data State = State
   , logLevel :: TVar LogLevel
   , metrics :: MetricsState
   , currentTip :: TVar (Maybe BlockHeight)
-    -- ^ current chain tip, followed from blockspan service's websocket by
-    -- BlockspanClient. 'Nothing' until the first tip arrives
+    -- ^ chain tip height (blockspan service's newest confirmed block plus the
+    -- amount of blocks it waits for confirmation), followed from its
+    -- websocket by "OpEnergy.Offer.Server.V1.BlockspanClient". 'Nothing'
+    -- until the first tip arrives
   , liveEvents :: TChan LiveEvent
     -- ^ broadcast channel: every websocket connection reads its own copy
     -- of it. Events written while there are no connections are dropped
