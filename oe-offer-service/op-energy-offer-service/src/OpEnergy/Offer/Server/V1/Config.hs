@@ -4,6 +4,7 @@ module OpEnergy.Offer.Server.V1.Config where
 import           Data.Text (Text)
 import           Data.Maybe
 import           Data.Word (Word64)
+import           Control.Monad (when)
 import qualified Data.List as List
 import qualified Data.ByteString.Char8 as BS
 import qualified System.Environment as E
@@ -97,13 +98,16 @@ defaultConfig = Config
   }
 
 -- | parses websocket URL. The websocket client does not support TLS, so
--- only @ws://@ is accepted, as well as @http://@ for consistency with the
--- rest of the URLs in this config.
+-- only @ws://@ and @http://@ (for consistency with the rest of the URLs in
+-- this config) are accepted; @wss://@ and @https://@ are rejected.
 --
 -- Example: "ws://127.0.0.1:8999/api/v1/ws"
-parseWebsocketUrl :: MonadThrow m => String -> m BaseUrl
-parseWebsocketUrl url =
-  parseBaseUrl $! maybe url ("http://" <>) (List.stripPrefix "ws://" url)
+parseWebsocketUrl :: (MonadThrow m, MonadFail m) => String -> m BaseUrl
+parseWebsocketUrl url = do
+  burl <- parseBaseUrl $! maybe url ("http://" <>) (List.stripPrefix "ws://" url)
+  when (baseUrlScheme burl /= Http) $
+    fail ("parseWebsocketUrl: TLS is not supported, use ws:// instead of " <> url)
+  return burl
 
 getConfigFromEnvironment :: IO Config
 getConfigFromEnvironment = do

@@ -12,10 +12,14 @@ module Data.OpEnergy.Offer.API.V1.LiveMessage
 
 import           Data.Aeson
 import           Data.Text                  (Text)
+import qualified Data.Text                  as Text
 import           Data.Word                  (Word64)
 
 import           Data.OpEnergy.API.V1.Block (BlockHeight)
-import           Data.OpEnergy.Account.API.V1.Account (AccountToken)
+import           Data.OpEnergy.Account.API.V1.Account
+                 ( AccountToken
+                 , everifyAccountToken
+                 )
 import           Data.OpEnergy.Offer.API.V1.OfferID (OfferID)
 import           Data.OpEnergy.Offer.API.V1.ContractInfo (ContractID)
 import           Data.OpEnergy.Offer.API.V1.OfferSide (OfferSide)
@@ -24,7 +28,9 @@ import           Data.OpEnergy.Offer.API.V1.OfferStatus (OfferStatus)
 -- | request from the frontend
 data LiveRequest
   = LiveRequestInit
-    -- ^ @{"action": "init"}@: start receiving notifications
+    -- ^ @{"action": "init"}@: answered with 'LiveMessageBlockNew' for the
+    -- current chain tip, if it is known. Notifications are sent from the
+    -- moment the connection is opened, whether or not this is requested
   | LiveRequestAuth AccountToken
     -- ^ @{"action": "auth", "token": "..."}@: additionally receive
     -- notifications about the given account's own offers, contracts and
@@ -38,7 +44,10 @@ instance FromJSON LiveRequest where
     action <- v .: "action"
     case (action :: Text) of
       "init" -> return LiveRequestInit
-      "auth" -> LiveRequestAuth <$> v .: "token"
+      "auth" -> do
+        rawToken <- v .: "token"
+        either (fail . Text.unpack) (return . LiveRequestAuth)
+          (everifyAccountToken rawToken)
       "ping" -> return LiveRequestPing
       other -> fail ("LiveRequest: unknown action: " <> show other)
 
