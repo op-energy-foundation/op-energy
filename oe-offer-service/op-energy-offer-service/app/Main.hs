@@ -11,6 +11,7 @@ import           Control.Monad.Logger (runStdoutLoggingT, logInfo)
 import           OpEnergy.Offer.Server
 import           OpEnergy.Offer.Server.V1.Config
 import           OpEnergy.Offer.Server.V1.Class (runAppT, runLogging)
+import qualified OpEnergy.Offer.Server.V1.BlockspanClient as BlockspanClient
 
 -- | entry point
 main :: IO ()
@@ -22,12 +23,16 @@ main = runStdoutLoggingT $ do
   schedulerA <- liftIO $ asyncBound $ runAppT state $ do
     runLogging $ $(logInfo) "scheduler thread"
     OpEnergy.Offer.Server.schedulerMainLoop
+  blockspanClientA <- liftIO $ asyncBound $ runAppT state $ do
+    runLogging $ $(logInfo) "blockspan websocket client thread"
+    BlockspanClient.runBlockspanTipClient
   serverA <- liftIO $ asyncBound $ runAppT state $ do
     runLogging $ $(logInfo) "serving API"
     runServer
   liftIO $ waitAnyCancel $
     [ serverA
     , schedulerA
+    , blockspanClientA
     , prometheusA
     ]
   return ()
