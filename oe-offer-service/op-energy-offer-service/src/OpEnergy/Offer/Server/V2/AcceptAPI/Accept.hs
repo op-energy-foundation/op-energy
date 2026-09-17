@@ -8,6 +8,7 @@ module OpEnergy.Offer.Server.V2.AcceptAPI.Accept
   ) where
 
 import           Control.Monad(when)
+import           Data.Maybe(isNothing)
 import           Control.Monad.Trans.Reader(ask)
 import           Control.Monad.Trans(lift)
 import           Control.Monad.Trans.Except(ExceptT(..), throwE)
@@ -100,12 +101,12 @@ accept idText token =
         , contractSettledAt = Nothing
         }
 
-  -- Atomic: insert contract + conditional increment to prevent
+  -- Atomic: conditional increment + insert contract to prevent
   -- two concurrent accepts from overselling the last slot.
   let staleCount = offerMatchedCount offerVal
       newCount   = verifyNatural (fromNatural staleCount + 1)
       isFilled   = fromNatural newCount >= fromNatural (offerTotalContracts offerVal)
-  (contractKey, updated) <- liftIO $ flip runSqlPersistMPool pool $ do
+  mcontractKey <- liftIO $ flip runSqlPersistMPool pool $ do
     -- conditional update — only succeeds if matchedCount has not
     -- changed since we read it above
     bumped <- updateWhereCount
@@ -114,19 +115,23 @@ accept idText token =
       , OfferStatus ==. Open
       ]
       [ OfferMatchedCount =. newCount ]
-    cKey <- insert contractRow
-    -- transition to Filled when all contracts are matched
-    when isFilled $
-      updateWhere
-        [ OfferId ==. key ]
-        [ OfferStatus =. Filled ]
-    return (cKey, bumped)
+    if bumped /= 1
+      then return Nothing -- the slot is not ours: create no contract
+      else do
+        cKey <- insert contractRow
+        -- transition to Filled when all contracts are matched
+        when isFilled $
+          updateWhere
+            [ OfferId ==. key ]
+            [ OfferStatus =. Filled ]
+        return (Just cKey)
 
-  -- if the conditional update matched 0 rows, another accept won
-  -- the race — refund and report filled
-  when (updated /= 1) $ do
+  -- if the conditional update matched 0 rows, another accept or a cancel
+  -- won the race — refund and report filled
+  when (isNothing mcontractKey) $ do
     _ <- lift $ AccountClient.creditBalance takerUUIDV (Sats (offerTakerStakeSats offerVal))
     throwE offerFilled
+  contractKey <- exceptTMaybeT offerFilled $ return mcontractKey
 
   lift $ publishLiveEvent $! LiveEvent
     (LiveMessageContractCreated
