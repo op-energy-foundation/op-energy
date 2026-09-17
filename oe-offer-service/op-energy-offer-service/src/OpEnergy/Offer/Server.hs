@@ -35,6 +35,7 @@ import           OpEnergy.Offer.Server.V1.DB
 import           OpEnergy.Offer.Server.V1.Metrics
 import           OpEnergy.Offer.Server.V2 (offerServer)
 import qualified OpEnergy.Offer.Server.V2.Expiry as Expiry
+import qualified OpEnergy.Offer.Server.V2.Settlement as Settlement
 
 -- required by prometheus-client
 instance MonadMonitor (LoggingT IO)
@@ -91,9 +92,15 @@ schedulerMainLoop = do
   case mTip of
     Nothing -> return ()
     Just tip -> do
+      -- expiry goes first: it closes offers which should not be accepted
+      -- anymore, before settlement pays out contracts
       expiredCount <- Expiry.expireStaleOffers tip
       if expiredCount > 0
         then runLogging $ $(logDebug) (tshow expiredCount <> " offer(s) expired at tip " <> tshow tip)
+        else return ()
+      settledCount <- Settlement.settleContracts tip
+      if settledCount > 0
+        then runLogging $ $(logDebug) (tshow settledCount <> " contract(s) settled at tip " <> tshow tip)
         else return ()
   liftIO $ threadDelay ((fromPositive delaySecs) * 1000000)
   schedulerMainLoop

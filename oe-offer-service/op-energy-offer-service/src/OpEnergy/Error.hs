@@ -13,6 +13,7 @@ module OpEnergy.Error
   , dbQueryError
 
   , accountServiceUnavailable
+  , blockspanRequestFailed
 
   , authenticationFailure
   , invalidRequest
@@ -64,6 +65,7 @@ data Error
   = BadRequest BadRequestError
   | Internal InternalError
   | AccountServiceUnavailable Text
+  | BlockspanRequestFailed Text
 
 data CallstackError = CallstackError Text Error
 
@@ -74,6 +76,8 @@ dbQueryError = CallstackError "" $! Internal DBQueryError
 
 accountServiceUnavailable :: Text -> CallstackError
 accountServiceUnavailable = CallstackError "" . AccountServiceUnavailable
+blockspanRequestFailed :: Text -> CallstackError
+blockspanRequestFailed = CallstackError "" . BlockspanRequestFailed
 
 authenticationFailure :: CallstackError
 authenticationFailure = CallstackError "" $! BadRequest AuthenticationFailure
@@ -103,6 +107,7 @@ errorToServerError (BadRequest CannotAcceptOwnOffer) = (err403, tshow CannotAcce
 errorToServerError (BadRequest specificError) = (err400, tshow specificError)
 errorToServerError (Internal specificError) = (err500, tshow specificError)
 errorToServerError (AccountServiceUnavailable reason) = (err502, "account service unavailable: " <> reason)
+errorToServerError (BlockspanRequestFailed reason) = (err502, "blockspan request failed: " <> reason)
 
 -- | renders a CallstackError as plain text for logging
 describeError :: CallstackError -> Text
