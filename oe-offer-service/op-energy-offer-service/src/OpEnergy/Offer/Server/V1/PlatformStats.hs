@@ -43,6 +43,8 @@ PlatformStats
 -- | adds the given fee to the platform's total of collected fees, creating
 -- the single record if it does not exist yet. Should be called within the
 -- same transaction as the settlement of the contract which produced the fee.
+-- The select-then-insert is safe only because the settlement sweep, running
+-- in the single scheduler thread, is the only writer of this table.
 addCollectedFeeTx
   :: MonadIO m
   => Word64

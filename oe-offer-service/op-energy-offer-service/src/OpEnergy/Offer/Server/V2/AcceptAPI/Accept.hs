@@ -27,9 +27,8 @@ import           Data.OpEnergy.API.V1.Natural(verifyNatural, fromNatural)
 import           Data.OpEnergy.Offer.API.V1.OfferID(OfferID(..))
 import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
 import           Data.OpEnergy.Offer.API.V1.ContractStatus(ContractStatus(..))
-import           Data.OpEnergy.Offer.API.V1.ContractInfo(ContractInfo, ContractID(..))
+import           Data.OpEnergy.Offer.API.V1.ContractInfo(ContractInfo)
 import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
-import           Data.Text.Show(tshow)
 import qualified Control.Concurrent.STM.TVar as TVar
 
 import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
@@ -135,7 +134,7 @@ accept idText token =
 
   lift $ publishLiveEvent $! LiveEvent
     (LiveMessageContractCreated
-      (ContractID (tshow (fromSqlKey contractKey)))
+      (contractIDFromKey contractKey)
       (OfferID idText)
     )
     [offerPersonUUID offerVal, takerUUIDV]

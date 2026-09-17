@@ -14,6 +14,7 @@ module OpEnergy.Offer.Server where
 import           System.IO as IO
 import           Servant ( Application, Proxy(..), ServerT, serve, hoistServer, (:<|>)(..))
 import           Network.Wai.Handler.Warp(run)
+import           Control.Monad (when)
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Concurrent (threadDelay)
 import           Control.Monad.IO.Class(liftIO, MonadIO)
@@ -101,8 +102,7 @@ schedulerMainLoop = do
         then runLogging $ $(logDebug) (tshow expiredCount <> " offer(s) expired at tip " <> tshow tip)
         else return ()
       settledCount <- Settlement.settleContracts tip
-      if settledCount > 0
-        then runLogging $ $(logDebug) (tshow settledCount <> " contract(s) settled at tip " <> tshow tip)
-        else return ()
+      when (settledCount > 0) $
+        runLogging $ $(logDebug) (tshow settledCount <> " contract(s) settled at tip " <> tshow tip)
   liftIO $ threadDelay ((fromPositive delaySecs) * 1000000)
   schedulerMainLoop

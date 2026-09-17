@@ -56,6 +56,7 @@ publishLiveEvent event = do
   liftIO $ STM.atomically $ TChan.writeTChan liveEventsV event
 
 -- | This procedure is the mainloop of every websocket connection, which:
+--
 -- - handles requests from the frontend;
 -- - forwards live events to the frontend.
 -- It returns when the connection is closed.

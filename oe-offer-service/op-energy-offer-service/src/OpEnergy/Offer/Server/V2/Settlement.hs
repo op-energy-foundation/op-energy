@@ -23,7 +23,6 @@ import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
 import           Data.OpEnergy.Offer.API.V1.ContractStatus (ContractStatus(..))
 import           Data.OpEnergy.Offer.API.V1.OfferSide (OfferSide(..))
 import qualified Data.OpEnergy.Offer.API.V1.Constants as C
-import           Data.OpEnergy.Offer.API.V1.ContractInfo (ContractID(..))
 import           Data.OpEnergy.Offer.API.V1.LiveMessage (LiveMessage(..))
 import           Data.Text.Show (tshow)
 
@@ -43,7 +42,7 @@ import qualified OpEnergy.Offer.Server.V1.BlockspanClient as BlockspanClient
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           OpEnergy.Error
                    ( runExceptPrefixT, exceptTMaybeT, describeError
-                   , CallstackError, dbQueryError, unspecified
+                   , CallstackError, dbQueryError, potDoesNotCoverFee
                    )
 
 -- | Settles every live contract, whose target block has got
@@ -54,21 +53,20 @@ settleContracts :: (MonadIO m, MonadMonitor m) => BlockHeight -> AppT m Int
 settleContracts tipHeight =
   let name = "V2.Settlement.settleContracts"
   in profile name $ do
-  econtracts <- selectSettleableContracts tipHeight
-  case econtracts of
-    Left err -> do
-      runLogging $ $(logError) (describeError err)
-      return 0
-    Right contracts -> do
-      results <- forM contracts $ \contract -> do
-        esettled <- settleContract contract
-        case esettled of
-          Right settled -> return settled
-          Left err -> do
-            -- the contract stays live and will be retried on the next tick
-            runLogging $ $(logError) (describeError err)
-            return False
-      return $! length (filter id results)
+  contracts <- either
+    (\err -> runLogging ($(logError) (describeError err)) >> return [])
+    return
+    =<< selectSettleableContracts tipHeight
+  results <- forM contracts $ \contract@(Entity contractId _) -> either
+    (\err -> do
+      -- the contract stays live and will be retried on the next tick
+      runLogging $ $(logError)
+        ( "contract " <> tshow (fromSqlKey contractId) <> ": " <> describeError err )
+      return False
+    )
+    return
+    =<< settleContract contract
+  return $! length (filter id results)
 
 -- | returns live contracts, whose target block has got
 -- 'C.settlementConfirmations' confirmations at the given chain tip
@@ -78,9 +76,9 @@ selectSettleableContracts
   -> AppT m (Either CallstackError [Entity Contract])
 selectSettleableContracts tipHeight =
   let name = "V2.Settlement.selectSettleableContracts"
-      maxTargetBlock =
-        fromNatural tipHeight - fromIntegral C.settlementConfirmations
   in profile name $ runExceptPrefixT name $ do
+  let maxTargetBlock =
+        fromNatural tipHeight - fromIntegral C.settlementConfirmations
   if maxTargetBlock < 0
     then return [] -- chain is shorter than the confirmation depth
     else exceptTMaybeT dbQueryError $ withDBTransaction "selectList" $ selectList
@@ -90,6 +88,7 @@ selectSettleableContracts tipHeight =
       [ Asc ContractId ]
 
 -- | settles the given contract:
+--
 -- - determines the winning side from the mediantime of the contract's
 --   target block: BEFORE wins if it is earlier than the contract's cutoff,
 --   AFTER wins otherwise;
@@ -107,11 +106,8 @@ settleContract (Entity contractId Contract{..}) =
   in profile name $ runExceptPrefixT name $ do
   State{ config = Config{ configPlatformFeeSats = platformFeeSats } } <- lift ask
   let potSats = contractMakerStakeSats + contractTakerStakeSats
-  when (potSats <= platformFeeSats) $ throwE $ unspecified
-    ( "contract " <> tshow (fromSqlKey contractId) <> ": pot of "
-    <> tshow potSats <> " sats does not cover the platform fee of "
-    <> tshow platformFeeSats <> " sats"
-    )
+  when (potSats <= platformFeeSats) $
+    throwE $ potDoesNotCoverFee potSats platformFeeSats
   actualMtpEpoch <- ExceptT $ BlockspanClient.getBlockMediantime contractTargetBlock
   let winnerSide = if actualMtpEpoch < contractMtpCutoffEpoch
         then Before
@@ -148,7 +144,7 @@ settleContract (Entity contractId Contract{..}) =
         )
     lift $ publishLiveEvent $! LiveEvent
       (LiveMessageContractSettled
-        (ContractID (tshow (fromSqlKey contractId)))
+        (contractIDFromKey contractId)
         winnerSide
         actualMtpEpoch
       )

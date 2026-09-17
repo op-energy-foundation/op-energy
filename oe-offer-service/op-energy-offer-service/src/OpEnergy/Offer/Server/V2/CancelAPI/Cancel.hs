@@ -32,6 +32,7 @@ import           Data.OpEnergy.API.V1.Natural(fromNatural, verifyNatural)
 import           Data.OpEnergy.Offer.API.V1.OfferID(OfferID(..))
 import           Data.OpEnergy.Offer.API.V1.OfferInfo(OfferInfo)
 import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
+import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 import           Data.Text.Show(tshow)
 
 import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
@@ -40,7 +41,6 @@ import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           OpEnergy.Offer.Server.V1.Offer
 import           OpEnergy.Offer.Server.V1.LiveEvent(LiveEvent(..))
 import           OpEnergy.Offer.Server.V1.WebSocketService(publishLiveEvent)
-import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 import           Control.Monad(when)
 
 import           OpEnergy.Error

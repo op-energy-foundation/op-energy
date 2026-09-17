@@ -11,6 +11,7 @@ module OpEnergy.Error
 
   , unspecified
   , dbQueryError
+  , potDoesNotCoverFee
 
   , accountServiceUnavailable
   , blockspanRequestFailed
@@ -27,6 +28,7 @@ module OpEnergy.Error
 
 import           Data.Text(Text)
 import qualified Data.Text as Text
+import           Data.Word(Word64)
 
 import           Control.Monad.Error.Class(MonadError)
 import           Control.Monad.Trans.Except(ExceptT(..), runExceptT, throwE)
@@ -57,8 +59,13 @@ instance Show BadRequestError where
 data InternalError
   = Unspecified Text
   | DBQueryError
+  | PotDoesNotCoverFee Word64 Word64
+    -- ^ pot of a contract and the platform fee, both in sats
 instance Show InternalError where
   show DBQueryError = "DB query failed"
+  show (PotDoesNotCoverFee potSats feeSats) =
+    "contract pot of " ++ show potSats ++ " sats does not cover the platform fee of "
+    ++ show feeSats ++ " sats"
   show (Unspecified description) = "Internal error: " ++ Text.unpack description
 
 data Error
@@ -73,6 +80,8 @@ unspecified :: Text -> CallstackError
 unspecified = CallstackError "" . Internal . Unspecified
 dbQueryError :: CallstackError
 dbQueryError = CallstackError "" $! Internal DBQueryError
+potDoesNotCoverFee :: Word64 -> Word64 -> CallstackError
+potDoesNotCoverFee potSats feeSats = CallstackError "" $! Internal $! PotDoesNotCoverFee potSats feeSats
 
 accountServiceUnavailable :: Text -> CallstackError
 accountServiceUnavailable = CallstackError "" . AccountServiceUnavailable

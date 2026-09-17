@@ -26,18 +26,17 @@ import qualified Data.OpEnergy.Account.API.V2.WhoAmIResult as AccountV2
 import           Data.OpEnergy.API.V1.Natural(verifyNatural)
 import           Data.OpEnergy.Offer.API.V1.OfferInfo(PostOfferRequest(..), PostOfferResult(..))
 import qualified Data.OpEnergy.Offer.API.V1.Constants as C
+import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 import           Data.Text.Show(tshow)
 
 import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
 import           OpEnergy.Offer.Server.V1.Config(Config(..))
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
-import           OpEnergy.Offer.Server.V1.Offer(Offer(..), offerInfoFrom)
+import           OpEnergy.Offer.Server.V1.Offer(Offer(..), offerInfoFrom, offerIDFromKey)
 import           OpEnergy.Offer.Server.V1.LiveEvent(LiveEvent(..))
 import           OpEnergy.Offer.Server.V1.WebSocketService(publishLiveEvent)
 import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
-import           Data.OpEnergy.Offer.API.V1.OfferID(OfferID(..))
-import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 
 import           OpEnergy.Error
                    ( eitherThrowJSON, runExceptPrefixT, describeError
@@ -101,12 +100,11 @@ post token PostOfferRequest{..} =
     $ fmap Right $ flip runSqlPersistMPool pool $ insert offerRow
   case einserted of
     Right key -> do
-      let idText = tshow (fromSqlKey key)
       lift $ publishLiveEvent $! LiveEvent
-        (LiveMessageOfferCreated (OfferID idText))
+        (LiveMessageOfferCreated (offerIDFromKey key))
         [personUUIDV]
       return $! PostOfferResult
-        { offers = [ offerInfoFrom idText offerRow ] }
+        { offers = [ offerInfoFrom (tshow (fromSqlKey key)) offerRow ] }
     Left insertErr -> do
       ecredited <- lift $ AccountClient.creditBalance personUUIDV (Sats totalStake)
       lift $ runLogging $ $(logError)
