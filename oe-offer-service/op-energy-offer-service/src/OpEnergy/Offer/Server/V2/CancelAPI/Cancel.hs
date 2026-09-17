@@ -34,12 +34,15 @@ import           Data.OpEnergy.API.V1.Natural(fromNatural, verifyNatural)
 import           Data.OpEnergy.Offer.API.V1.OfferID(OfferID(..))
 import           Data.OpEnergy.Offer.API.V1.OfferInfo(OfferInfo)
 import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
+import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 import           Data.Text.Show(tshow)
 
 import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           OpEnergy.Offer.Server.V1.Offer
+import           OpEnergy.Offer.Server.V1.LiveEvent(LiveEvent(..))
+import           OpEnergy.Offer.Server.V1.WebSocketService(publishLiveEvent)
 import           Control.Monad(when)
 
 import           OpEnergy.Error
@@ -78,6 +81,13 @@ cancel idText token =
       <> " sats failed, needs manual reconciliation: " <> describeError err
       )
 
+  lift $ publishLiveEvent $! LiveEvent
+    (LiveMessageOfferChanged
+      (OfferID idText)
+      (offerStatus updatedVal)
+      (fromIntegral (fromNatural (offerMatchedCount updatedVal)))
+    )
+    [personUUIDV]
   return $! offerInfoFrom idText updatedVal
 
 -- | how many times cancel reads the offer again, when a concurrent accept has
