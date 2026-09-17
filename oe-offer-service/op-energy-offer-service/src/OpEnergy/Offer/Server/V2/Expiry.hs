@@ -6,8 +6,8 @@ module OpEnergy.Offer.Server.V2.Expiry
   ) where
 
 import           Control.Monad(forM, forM_)
-import           Control.Monad.Trans.Reader(ask)
 import           Control.Monad.IO.Class(liftIO, MonadIO)
+import           Data.Maybe(fromMaybe)
 import           Data.Time.Clock(getCurrentTime)
 
 import           Database.Persist.Postgresql
@@ -20,7 +20,7 @@ import           Data.OpEnergy.Offer.API.V1.OfferID(OfferID(..))
 import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 import           Data.Text.Show(tshow)
 
-import           OpEnergy.Offer.Server.V1.Class(AppT, State(..), profile)
+import           OpEnergy.Offer.Server.V1.Class(AppT, profile, withDBTransaction)
 import           OpEnergy.Offer.Server.V1.Offer
 import           OpEnergy.Offer.Server.V1.OfferService(refundAndCloseOffer)
 import           OpEnergy.Offer.Server.V1.LiveEvent(LiveEvent(..))
@@ -30,11 +30,13 @@ expireStaleOffers :: (MonadIO m, MonadMonitor m) => BlockHeight -> AppT m Int
 expireStaleOffers tipHeight =
   let name = "V2.Expiry.expireStaleOffers"
   in profile name $ do
-  State{ offerDBPool = pool } <- ask
   now <- liftIO getCurrentTime
-  staleOfferIds <- liftIO $ flip runSqlPersistMPool pool $ selectKeysList
-    [ OfferStatus ==. Open, OfferTargetBlock <=. tipHeight ]
-    []
+  -- a failed query is logged by withDBTransaction; the sweep retries next tick
+  staleOfferIds <- fromMaybe [] <$> withDBTransaction "selectKeysList"
+    ( selectKeysList
+      [ OfferStatus ==. Open, OfferTargetBlock <=. tipHeight ]
+      []
+    )
   results <- forM staleOfferIds $ \offerId -> do
     mclosed <- refundAndCloseOffer offerId Expired now
     forM_ mclosed $ \offerVal -> publishLiveEvent $! LiveEvent
