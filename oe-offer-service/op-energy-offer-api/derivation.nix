@@ -1,6 +1,6 @@
 { mkDerivation, lib, base
 , hspec, text, time
-, servant, servant-swagger, swagger2
+, servant, servant-swagger, servant-websockets, swagger2
 , aeson, aeson-pretty
 , bytestring
 , lens
@@ -16,7 +16,7 @@ mkDerivation {
   isExecutable = true;
   libraryHaskellDepends = [
     base
-    servant servant-swagger swagger2
+    servant servant-swagger servant-websockets swagger2
     aeson
     text bytestring time
     lens
