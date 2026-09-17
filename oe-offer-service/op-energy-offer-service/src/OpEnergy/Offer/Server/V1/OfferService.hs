@@ -60,7 +60,7 @@ refundAndCloseOffer offerId newStatus now = do
   case mClosed of
     Nothing -> return Nothing
     Just offerVal -> do
-      let unfilled = fromNatural (offerTotalContracts offerVal) - fromNatural (offerMatchedCount offerVal)
+      let unfilled = fromNatural (offerTotalContracts offerVal - offerMatchedCount offerVal)
           refundAmount = offerMakerStakeSats offerVal * fromIntegral unfilled
       ecredited <- AccountClient.creditBalance (offerPersonUUID offerVal) (Sats refundAmount)
       case ecredited of

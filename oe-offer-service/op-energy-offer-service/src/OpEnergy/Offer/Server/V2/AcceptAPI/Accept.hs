@@ -36,7 +36,7 @@ import           OpEnergy.Offer.Server.V1.Offer
 
 import           OpEnergy.Error
                    ( eitherThrowJSON, runExceptPrefixT
-                   , exceptTMaybeT
+                   , exceptTMaybeT, describeError
                    , CallstackError, invalidRequest
                    , offerNotFound, offerNotOpen, offerFilled
                    , cannotAcceptOwnOffer
@@ -96,31 +96,35 @@ accept idText token =
         , contractSettledAt = Nothing
         }
 
-  -- Atomic: insert contract + conditional increment to prevent
-  -- two concurrent accepts from overselling the last slot.
+  -- Atomic: conditional increment then insert contract.
+  -- The CAS update prevents two concurrent accepts from overselling.
   let staleCount = offerMatchedCount offerVal
       newCount   = verifyNatural (fromNatural staleCount + 1)
-  (contractKey, updated) <- liftIO $ flip runSqlPersistMPool pool $ do
-    -- conditional update — only succeeds if matchedCount has not
-    -- changed since we read it above
+  mContractKey <- liftIO $ flip runSqlPersistMPool pool $ do
     bumped <- updateWhereCount
       [ OfferId ==. key
       , OfferMatchedCount ==. staleCount
       , OfferStatus ==. Open
       ]
       [ OfferMatchedCount =. newCount ]
-    cKey <- insert contractRow
-    -- transition to Filled when all contracts are matched
-    when (fromNatural newCount >= fromNatural (offerTotalContracts offerVal)) $
-      updateWhere
-        [ OfferId ==. key ]
-        [ OfferStatus =. Filled ]
-    return (cKey, bumped)
+    if bumped /= 1
+      then return Nothing
+      else do
+        cKey <- insert contractRow
+        when (fromNatural newCount >= fromNatural (offerTotalContracts offerVal)) $
+          update key [ OfferStatus =. Filled ]
+        return (Just cKey)
 
-  -- if the conditional update matched 0 rows, another accept won
-  -- the race — refund and report filled
-  when (updated /= 1) $ do
-    _ <- lift $ AccountClient.creditBalance takerUUIDV (Sats (offerTakerStakeSats offerVal))
-    throwE offerFilled
-
-  return $! contractInfoFromEntity (Just "taker") mTip (Entity contractKey contractRow)
+  case mContractKey of
+    Nothing -> do
+      ecredited <- lift $ AccountClient.creditBalance takerUUIDV (Sats (offerTakerStakeSats offerVal))
+      case ecredited of
+        Right _ -> return ()
+        Left err -> lift $ runLogging $ $(logError)
+          ( "accept: CAS failed for offer " <> T.pack (show (fromSqlKey key))
+          <> " but refund of " <> T.pack (show (offerTakerStakeSats offerVal))
+          <> " sats failed, needs manual reconciliation: " <> describeError err
+          )
+      throwE offerFilled
+    Just contractKey ->
+      return $! contractInfoFromEntity (Just "taker") mTip (Entity contractKey contractRow)

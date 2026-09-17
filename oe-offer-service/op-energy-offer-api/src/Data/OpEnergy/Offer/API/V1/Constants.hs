@@ -39,6 +39,6 @@ maxContracts = 20
 minStakeSats :: Word64
 minStakeSats = 1
 
--- | Maximum maker stake per contract (so takerStake >= 1).
+-- | Maximum maker stake per contract (so takerStake <= 99999).
 maxStakeSats :: Word64
 maxStakeSats = 99999

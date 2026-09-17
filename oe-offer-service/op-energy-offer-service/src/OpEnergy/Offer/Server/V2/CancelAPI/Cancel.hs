@@ -9,6 +9,7 @@
  -   Existing contracts remain @Live@.
  -}
 {-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE BangPatterns               #-}
 module OpEnergy.Offer.Server.V2.CancelAPI.Cancel
   ( cancel
   , cancelHandler
@@ -23,6 +24,7 @@ import           Data.Text(Text)
 import qualified Data.Text as T
 import qualified Data.Text.Read as TR
 import           Data.Time.Clock(getCurrentTime)
+import           Data.Int(Int64)
 
 import           Database.Persist.Postgresql
 
@@ -70,40 +72,52 @@ cancel idText token =
   when (offerStatus offerVal /= Open) $ throwE offerNotOpen
 
   now <- liftIO getCurrentTime
-  let matched = fromNatural (offerMatchedCount offerVal)
-      total   = fromNatural (offerTotalContracts offerVal)
-      unfilled = total - matched
+  let matched = offerMatchedCount offerVal
+      total   = offerTotalContracts offerVal
+      !unfilled = fromNatural (total - matched)
       refundAmount = offerMakerStakeSats offerVal * fromIntegral unfilled
 
-  updatedVal <- if matched == 0
+  -- Atomic CAS: only update if status is still Open
+  (updatedVal, changed) <- if fromNatural matched == (0 :: Int)
     then do
-      -- full cancel
-      liftIO $ flip runSqlPersistMPool pool $
-        update key [ OfferStatus =. Cancelled
-                   , OfferRefundedAt =. Just now
-                   ]
-      return offerVal { offerStatus = Cancelled, offerRefundedAt = Just now }
+      bumped <- liftIO $ flip runSqlPersistMPool pool $
+        updateWhereCount
+          [ OfferId ==. key, OfferStatus ==. Open ]
+          [ OfferStatus =. Cancelled
+          , OfferRefundedAt =. Just now
+          ]
+      return (offerVal { offerStatus = Cancelled, offerRefundedAt = Just now }, bumped)
     else do
-      -- partial cancel: reduce totalContracts to matchedCount, mark Filled
-      liftIO $ flip runSqlPersistMPool pool $
-        update key [ OfferTotalContracts =. verifyNatural matched
-                   , OfferStatus =. Filled
-                   , OfferRefundedAt =. Just now
-                   ]
-      return offerVal
-        { offerTotalContracts = verifyNatural matched
-        , offerStatus = Filled
-        , offerRefundedAt = Just now
-        }
+      bumped <- liftIO $ flip runSqlPersistMPool pool $
+        updateWhereCount
+          [ OfferId ==. key, OfferStatus ==. Open ]
+          [ OfferTotalContracts =. matched
+          , OfferStatus =. Filled
+          , OfferRefundedAt =. Just now
+          ]
+      return ( offerVal
+               { offerTotalContracts = matched
+               , offerStatus = Filled
+               , offerRefundedAt = Just now
+               }
+             , bumped
+             )
+
+  when (changed /= (1 :: Int64)) $ throwE offerNotOpen
 
   -- refund unfilled stake
   ecredited <- lift $ AccountClient.creditBalance personUUIDV (Sats refundAmount)
   case ecredited of
     Right _ -> return ()
-    Left err -> lift $ runLogging $ $(logError)
-      ( "cancel: offer " <> tshow (fromSqlKey key)
-      <> " closed but stake refund of " <> tshow refundAmount
-      <> " sats failed, needs manual reconciliation: " <> describeError err
-      )
+    Left err -> do
+      lift $ runLogging $ $(logError)
+        ( "cancel: offer " <> tshow (fromSqlKey key)
+        <> " closed but stake refund of " <> tshow refundAmount
+        <> " sats failed, needs manual reconciliation: " <> describeError err
+        )
+      throwE $ invalidRequest
+        ( "offer cancelled but refund of " <> tshow refundAmount
+        <> " sats failed — contact support"
+        )
 
   return $! offerInfoFrom idText updatedVal

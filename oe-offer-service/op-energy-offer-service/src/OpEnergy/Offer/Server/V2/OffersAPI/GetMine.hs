@@ -38,13 +38,15 @@ getMine token =
     ExceptT $ AccountClient.verifyAccountToken token
   State{ offerDBPool = pool, currentTip = currentTipV } <- lift ask
   mTip <- liftIO $ TVar.readTVarIO currentTipV
+  -- TODO: expose pagination params in the API type (mid-term)
+  let maxResults = 200
   (offerRows, contractRows) <- liftIO $ flip runSqlPersistMPool pool $ do
-    os <- selectList [ OfferPersonUUID ==. personUUIDV ] [ Desc OfferCreated ]
+    os <- selectList [ OfferPersonUUID ==. personUUIDV ] [ Desc OfferCreated, LimitTo maxResults ]
     cs <- selectList
       ( [ ContractMakerUUID ==. personUUIDV ]
         ||. [ ContractTakerUUID ==. personUUIDV ]
       )
-      [ Desc ContractMatchedAt ]
+      [ Desc ContractMatchedAt, LimitTo maxResults ]
     return (os, cs)
   let assignRole entity =
         let c = entityVal entity
