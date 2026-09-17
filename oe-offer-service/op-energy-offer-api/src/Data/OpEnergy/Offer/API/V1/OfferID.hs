@@ -6,6 +6,7 @@
 {-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE DeriveDataTypeable         #-}
 {-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE PatternGuards              #-}
 module Data.OpEnergy.Offer.API.V1.OfferID
   ( OfferID(..)
   , defaultOfferID
