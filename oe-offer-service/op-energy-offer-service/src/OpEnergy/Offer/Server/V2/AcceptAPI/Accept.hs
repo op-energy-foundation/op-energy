@@ -26,13 +26,17 @@ import           Data.OpEnergy.API.V1.Natural(verifyNatural, fromNatural)
 import           Data.OpEnergy.Offer.API.V1.OfferID(OfferID(..))
 import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
 import           Data.OpEnergy.Offer.API.V1.ContractStatus(ContractStatus(..))
-import           Data.OpEnergy.Offer.API.V1.ContractInfo(ContractInfo)
+import           Data.OpEnergy.Offer.API.V1.ContractInfo(ContractInfo, ContractID(..))
+import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
+import           Data.Text.Show(tshow)
 import qualified Control.Concurrent.STM.TVar as TVar
 
 import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           OpEnergy.Offer.Server.V1.Offer
+import           OpEnergy.Offer.Server.V1.LiveEvent(LiveEvent(..))
+import           OpEnergy.Offer.Server.V1.WebSocketService(publishLiveEvent)
 
 import           OpEnergy.Error
                    ( eitherThrowJSON, runExceptPrefixT
@@ -100,6 +104,7 @@ accept idText token =
   -- two concurrent accepts from overselling the last slot.
   let staleCount = offerMatchedCount offerVal
       newCount   = verifyNatural (fromNatural staleCount + 1)
+      isFilled   = fromNatural newCount >= fromNatural (offerTotalContracts offerVal)
   (contractKey, updated) <- liftIO $ flip runSqlPersistMPool pool $ do
     -- conditional update — only succeeds if matchedCount has not
     -- changed since we read it above
@@ -111,7 +116,7 @@ accept idText token =
       [ OfferMatchedCount =. newCount ]
     cKey <- insert contractRow
     -- transition to Filled when all contracts are matched
-    when (fromNatural newCount >= fromNatural (offerTotalContracts offerVal)) $
+    when isFilled $
       updateWhere
         [ OfferId ==. key ]
         [ OfferStatus =. Filled ]
@@ -123,4 +128,17 @@ accept idText token =
     _ <- lift $ AccountClient.creditBalance takerUUIDV (Sats (offerTakerStakeSats offerVal))
     throwE offerFilled
 
+  lift $ publishLiveEvent $! LiveEvent
+    (LiveMessageContractCreated
+      (ContractID (tshow (fromSqlKey contractKey)))
+      (OfferID idText)
+    )
+    [offerPersonUUID offerVal, takerUUIDV]
+  lift $ publishLiveEvent $! LiveEvent
+    (LiveMessageOfferChanged
+      (OfferID idText)
+      (if isFilled then Filled else Open)
+      (fromIntegral (fromNatural newCount))
+    )
+    []
   return $! contractInfoFromEntity (Just "taker") mTip (Entity contractKey contractRow)

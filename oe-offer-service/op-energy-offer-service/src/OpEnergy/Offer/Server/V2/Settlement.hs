@@ -23,6 +23,8 @@ import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
 import           Data.OpEnergy.Offer.API.V1.ContractStatus (ContractStatus(..))
 import           Data.OpEnergy.Offer.API.V1.OfferSide (OfferSide(..))
 import qualified Data.OpEnergy.Offer.API.V1.Constants as C
+import           Data.OpEnergy.Offer.API.V1.ContractInfo (ContractID(..))
+import           Data.OpEnergy.Offer.API.V1.LiveMessage (LiveMessage(..))
 import           Data.Text.Show (tshow)
 
 import           OpEnergy.Offer.Server.V1.Class
@@ -35,6 +37,8 @@ import           OpEnergy.Offer.Server.V1.Class
 import           OpEnergy.Offer.Server.V1.Config (Config(..))
 import           OpEnergy.Offer.Server.V1.Offer
 import           OpEnergy.Offer.Server.V1.PlatformStats (addCollectedFeeTx)
+import           OpEnergy.Offer.Server.V1.LiveEvent (LiveEvent(..))
+import           OpEnergy.Offer.Server.V1.WebSocketService (publishLiveEvent)
 import qualified OpEnergy.Offer.Server.V1.BlockspanClient as BlockspanClient
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           OpEnergy.Error
@@ -142,4 +146,11 @@ settleContract (Entity contractId Contract{..}) =
         <> " -- creditBalance failed, needs manual reconciliation: "
         <> describeError err
         )
+    lift $ publishLiveEvent $! LiveEvent
+      (LiveMessageContractSettled
+        (ContractID (tshow (fromSqlKey contractId)))
+        winnerSide
+        actualMtpEpoch
+      )
+      [contractMakerUUID, contractTakerUUID]
   return settled

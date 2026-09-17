@@ -33,7 +33,11 @@ import           OpEnergy.Offer.Server.V1.Config(Config(..))
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           OpEnergy.Offer.Server.V1.Offer(Offer(..), offerInfoFrom)
+import           OpEnergy.Offer.Server.V1.LiveEvent(LiveEvent(..))
+import           OpEnergy.Offer.Server.V1.WebSocketService(publishLiveEvent)
 import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
+import           Data.OpEnergy.Offer.API.V1.OfferID(OfferID(..))
+import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 
 import           OpEnergy.Error
                    ( eitherThrowJSON, runExceptPrefixT, describeError
@@ -96,8 +100,13 @@ post token PostOfferRequest{..} =
   einserted <- liftIO $ E.handle (\(e :: SomeException) -> return $! Left (tshow e))
     $ fmap Right $ flip runSqlPersistMPool pool $ insert offerRow
   case einserted of
-    Right key -> return $! PostOfferResult
-      { offers = [ offerInfoFrom (tshow (fromSqlKey key)) offerRow ] }
+    Right key -> do
+      let idText = tshow (fromSqlKey key)
+      lift $ publishLiveEvent $! LiveEvent
+        (LiveMessageOfferCreated (OfferID idText))
+        [personUUIDV]
+      return $! PostOfferResult
+        { offers = [ offerInfoFrom idText offerRow ] }
     Left insertErr -> do
       ecredited <- lift $ AccountClient.creditBalance personUUIDV (Sats totalStake)
       lift $ runLogging $ $(logError)

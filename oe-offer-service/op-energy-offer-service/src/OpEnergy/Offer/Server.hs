@@ -34,6 +34,7 @@ import           OpEnergy.Offer.Server.V1.Class (AppT, AppM, State(..), defaultS
 import           OpEnergy.Offer.Server.V1.DB
 import           OpEnergy.Offer.Server.V1.Metrics
 import           OpEnergy.Offer.Server.V2 (offerServer)
+import           OpEnergy.Offer.Server.V1.WebSocketService (webSocketConnection)
 import qualified OpEnergy.Offer.Server.V2.Expiry as Expiry
 import qualified OpEnergy.Offer.Server.V2.Settlement as Settlement
 
@@ -75,6 +76,7 @@ runServer = do
         serverSwaggerBackend :: ServerT API AppM
         serverSwaggerBackend
           = (return apiSwagger)
+          :<|> webSocketConnection
           :<|> offerServer
 
 -- | tasks, that should be running during start

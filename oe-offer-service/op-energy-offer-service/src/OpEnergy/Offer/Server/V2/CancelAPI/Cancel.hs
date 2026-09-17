@@ -38,6 +38,9 @@ import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLog
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           OpEnergy.Offer.Server.V1.Offer
+import           OpEnergy.Offer.Server.V1.LiveEvent(LiveEvent(..))
+import           OpEnergy.Offer.Server.V1.WebSocketService(publishLiveEvent)
+import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 import           Control.Monad(when)
 
 import           OpEnergy.Error
@@ -106,4 +109,11 @@ cancel idText token =
       <> " sats failed, needs manual reconciliation: " <> describeError err
       )
 
+  lift $ publishLiveEvent $! LiveEvent
+    (LiveMessageOfferChanged
+      (OfferID idText)
+      (offerStatus updatedVal)
+      (fromIntegral matched)
+    )
+    [personUUIDV]
   return $! offerInfoFrom idText updatedVal

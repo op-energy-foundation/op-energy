@@ -7,6 +7,7 @@ import           Control.Lens
 import           Data.Proxy
 import           Data.Swagger
 import           Servant.API
+import           Servant.API.WebSocket (WebSocket)
 import           Servant.Swagger
 
 import           Data.OpEnergy.Offer.API.V1
@@ -21,9 +22,17 @@ type OfferAPI
 type OfferSwaggerAPI
   = "api" :> "v1" :> "offer" :> "swagger.json" :> Get '[JSON] Swagger
 
+-- | API for the websocket with live notifications, see
+-- 'Data.OpEnergy.Offer.API.V1.LiveMessage'. It has to be separate from
+-- 'OfferAPI', as websockets are supported neither by servant-client nor by
+-- swagger.
+type OfferWebSocketAPI
+  = "api" :> "v1" :> "offer" :> "ws" :> WebSocket
+
 -- | Combined API of the Offer service with Swagger documentation.
 type API
   = OfferSwaggerAPI
+  :<|> OfferWebSocketAPI
   :<|> OfferAPI
 
 -- | Swagger spec for the Offer API.

@@ -9,6 +9,8 @@ import qualified Data.Text as Text
 import           Data.Map(Map)
 import qualified Control.Concurrent.STM.TVar as TVar
 import           Control.Concurrent.STM.TVar (TVar)
+import qualified Control.Concurrent.STM.TChan as TChan
+import           Control.Concurrent.STM.TChan (TChan)
 import           Control.Monad.Trans.Reader (runReaderT, ReaderT, ask, asks, local)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Trans(lift)
@@ -26,6 +28,7 @@ import qualified Control.Exception.Safe as E
 import           Data.OpEnergy.API.V1.Block(BlockHeight)
 import           OpEnergy.Offer.Server.V1.Config
 import           OpEnergy.Offer.Server.V1.Metrics
+import           OpEnergy.Offer.Server.V1.LiveEvent (LiveEvent)
 
 instance MonadMonitor Handler where
   doIO = liftIO
@@ -42,6 +45,9 @@ data State = State
   , currentTip :: TVar (Maybe BlockHeight)
     -- ^ current chain tip, followed from blockspan service's websocket by
     -- BlockspanClient. 'Nothing' until the first tip arrives
+  , liveEvents :: TChan LiveEvent
+    -- ^ broadcast channel: every websocket connection reads its own copy
+    -- of it. Events written while there are no connections are dropped
   , callStack :: Text
   }
 
@@ -53,6 +59,7 @@ defaultState :: (MonadLoggerIO m ) => Config-> MetricsState-> LogFunc-> Pool Sql
 defaultState config metrics logFunc offerDBPool = do
   logLevelV <- liftIO $ TVar.newTVarIO (configLogLevelMin config)
   currentTipV <- liftIO $ TVar.newTVarIO Nothing
+  liveEventsV <- liftIO $ TChan.newBroadcastTChanIO
   return $ State
     { config = config
     , offerDBPool = offerDBPool
@@ -60,6 +67,7 @@ defaultState config metrics logFunc offerDBPool = do
     , logLevel = logLevelV
     , metrics = metrics
     , currentTip = currentTipV
+    , liveEvents = liveEventsV
     , callStack = ""
     }
 
