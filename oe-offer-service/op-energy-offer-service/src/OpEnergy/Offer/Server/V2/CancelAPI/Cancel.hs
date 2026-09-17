@@ -78,26 +78,34 @@ cancel idText token =
       unfilled = total - matched
       refundAmount = offerMakerStakeSats offerVal * fromIntegral unfilled
 
-  updatedVal <- if matched == 0
-    then do
-      -- full cancel
-      liftIO $ flip runSqlPersistMPool pool $
-        update key [ OfferStatus =. Cancelled
-                   , OfferRefundedAt =. Just now
-                   ]
-      return offerVal { offerStatus = Cancelled, offerRefundedAt = Just now }
-    else do
-      -- partial cancel: reduce totalContracts to matchedCount, mark Filled
-      liftIO $ flip runSqlPersistMPool pool $
-        update key [ OfferTotalContracts =. verifyNatural matched
-                   , OfferStatus =. Filled
-                   , OfferRefundedAt =. Just now
-                   ]
-      return offerVal
-        { offerTotalContracts = verifyNatural matched
-        , offerStatus = Filled
-        , offerRefundedAt = Just now
-        }
+  let (updates, updatedVal) = if matched == 0
+        then -- full cancel
+          ( [ OfferStatus =. Cancelled
+            , OfferRefundedAt =. Just now
+            ]
+          , offerVal { offerStatus = Cancelled, offerRefundedAt = Just now }
+          )
+        else -- partial cancel: reduce totalContracts to matchedCount, mark Filled
+          ( [ OfferTotalContracts =. verifyNatural matched
+            , OfferStatus =. Filled
+            , OfferRefundedAt =. Just now
+            ]
+          , offerVal
+            { offerTotalContracts = verifyNatural matched
+            , offerStatus = Filled
+            , offerRefundedAt = Just now
+            }
+          )
+  -- conditional update — only succeeds if neither the expiry sweep nor an
+  -- accept has changed the offer since we read it above, so the refund below
+  -- is never paid twice and never covers a slot that has been matched
+  updated <- liftIO $ flip runSqlPersistMPool pool $ updateWhereCount
+    [ OfferId ==. key
+    , OfferStatus ==. Open
+    , OfferMatchedCount ==. offerMatchedCount offerVal
+    ]
+    updates
+  when (updated /= 1) $ throwE offerNotOpen
 
   -- refund unfilled stake
   ecredited <- lift $ AccountClient.creditBalance personUUIDV (Sats refundAmount)
