@@ -24,6 +24,7 @@
 , unliftio-core
 , resourcet
 , mtl
+, websockets
 , GIT_COMMIT_HASH
 , ...
 }:
@@ -59,6 +60,7 @@ mkDerivation {
     wai-middleware-prometheus
     unliftio-core
     resourcet
+    websockets
   ];
   preBuild = ''
     sed -i 's/GIT_COMMIT_HASH/${GIT_COMMIT_HASH}/' src/OpEnergy/Offer/Server/GitCommitHash.hs
