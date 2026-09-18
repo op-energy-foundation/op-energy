@@ -38,8 +38,13 @@ closeOfferIfOpenTx offerId newStatus now = do
     Just offerVal
       | offerStatus offerVal /= Open -> return Nothing
       | otherwise -> do
+          -- the refund is computed from this row's matchedCount, so the
+          -- flip must fail if an accept has changed it in the meantime
           updated <- updateWhereCount
-            [ OfferId ==. offerId, OfferStatus ==. Open ]
+            [ OfferId ==. offerId
+            , OfferStatus ==. Open
+            , OfferMatchedCount ==. offerMatchedCount offerVal
+            ]
             [ OfferStatus =. newStatus, OfferRefundedAt =. Just now ]
           if updated /= (1 :: Int64)
             then return Nothing
