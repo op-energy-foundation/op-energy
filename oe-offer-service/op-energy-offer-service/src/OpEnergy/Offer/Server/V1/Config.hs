@@ -3,6 +3,8 @@ module OpEnergy.Offer.Server.V1.Config where
 
 import           Data.Text (Text)
 import           Data.Maybe
+import           Control.Monad (when)
+import qualified Data.List as List
 import qualified Data.ByteString.Char8 as BS
 import qualified System.Environment as E
 import           Data.OpEnergy.API.V1.Positive
@@ -48,6 +50,8 @@ data Config = Config
   , configInternalServiceSharedSecret :: Text
     -- ^ sent as the X-Internal-Service-Secret header on every
     -- internal/balance/{deduct,credit} call
+  , configBlockspanWebsocketURL :: BaseUrl
+    -- ^ blockspan service's websocket, used to follow the chain tip
   }
   deriving Show
 instance FromJSON Config where
@@ -64,6 +68,7 @@ instance FromJSON Config where
     <*> ( v .:? "PROMETHEUS_PORT" .!= (configPrometheusPort defaultConfig))
     <*> ((v .:? "ACCOUNT_SERVICE_API_URL" .!= (showBaseUrl $ configAccountServiceURL defaultConfig)) >>= parseBaseUrl)
     <*> ( v .:? "INTERNAL_SERVICE_SHARED_SECRET" .!= (configInternalServiceSharedSecret defaultConfig))
+    <*> ((v .:? "BLOCKSPAN_WS_URL" .!= (showBaseUrl $ configBlockspanWebsocketURL defaultConfig)) >>= parseWebsocketUrl)
 
 defaultConfig:: Config
 defaultConfig = Config
@@ -79,7 +84,20 @@ defaultConfig = Config
   , configPrometheusPort = 7909
   , configAccountServiceURL = BaseUrl Http "127.0.0.1" 8899 ""
   , configInternalServiceSharedSecret = error "defaultConfig: you are missing INTERNAL_SERVICE_SHARED_SECRET from config -- must match oe-account-service's own value. Generate with \"dd if=/dev/urandom bs=1 count=32 2>/dev/null | base64 -w 0\" command"
+  , configBlockspanWebsocketURL = BaseUrl Http "127.0.0.1" 8999 "/api/v1/ws"
   }
+
+-- | parses websocket URL. The websocket client does not support TLS, so
+-- only @ws://@ and @http://@ (for consistency with the rest of the URLs in
+-- this config) are accepted; @wss://@ and @https://@ are rejected.
+--
+-- Example: "ws://127.0.0.1:8999/api/v1/ws"
+parseWebsocketUrl :: (MonadThrow m, MonadFail m) => String -> m BaseUrl
+parseWebsocketUrl url = do
+  burl <- parseBaseUrl $! maybe url ("http://" <>) (List.stripPrefix "ws://" url)
+  when (baseUrlScheme burl /= Http) $
+    fail ("parseWebsocketUrl: TLS is not supported, use ws:// instead of " <> url)
+  return burl
 
 getConfigFromEnvironment :: IO Config
 getConfigFromEnvironment = do
