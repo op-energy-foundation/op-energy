@@ -1,4 +1,4 @@
-{-- | POST /api/v2/offer/post
+{-- | POST /api/v1/offer/post
  -}
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE RecordWildCards            #-}
@@ -18,13 +18,14 @@ import qualified Control.Concurrent.STM.TVar as TVar
 import           Control.Exception.Safe(SomeException)
 import qualified Control.Exception.Safe as E
 import           Data.Time.Clock(getCurrentTime)
-import           Data.Word(Word64)
 
 import           Database.Persist.Postgresql
 
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountAPI
 import qualified Data.OpEnergy.Account.API.V2.WhoAmIResult as AccountV2
+import           Data.OpEnergy.API.V1.Natural(verifyNatural)
 import           Data.OpEnergy.Offer.API.V1.OfferInfo(PostOfferRequest(..), PostOfferResult(..))
+import qualified Data.OpEnergy.Offer.API.V1.Constants as C
 import           Data.Text.Show(tshow)
 
 import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
@@ -38,14 +39,6 @@ import           OpEnergy.Error
                    , CallstackError, invalidRequest, unspecified
                    )
 
-minOffers, maxOffers :: Word64
-minOffers = 1
-maxOffers = 20
-
-minStakeSats, maxStakeSats :: Word64
-minStakeSats = 1
-maxStakeSats = 100000000
-
 postHandler :: AccountAPI.AccountToken -> PostOfferRequest -> AppM PostOfferResult
 postHandler token request =
   let name = "V2.PostOfferAPI.Post.postHandler"
@@ -53,12 +46,14 @@ postHandler token request =
 
 post :: AccountAPI.AccountToken -> PostOfferRequest -> AppM (Either CallstackError PostOfferResult)
 post token PostOfferRequest{..} =
-  let name = "post"
+  let name = "V2.PostOfferAPI.Post.post"
   in profile name $ runExceptPrefixT name $ do
-  when (numberOfOffers < minOffers || numberOfOffers > maxOffers) $
-    throwE $ invalidRequest ("numberOfOffers must be between " <> tshow minOffers <> " and " <> tshow maxOffers)
-  when (makerStakeSats < minStakeSats || makerStakeSats > maxStakeSats) $
-    throwE $ invalidRequest ("makerStakeSats must be between " <> tshow minStakeSats <> " and " <> tshow maxStakeSats)
+  when (totalContracts < 1 || totalContracts > C.maxContracts) $
+    throwE $ invalidRequest ("totalContracts must be between 1 and " <> tshow C.maxContracts)
+  when (makerStakeSats < C.minStakeSats || makerStakeSats > C.maxStakeSats) $
+    throwE $ invalidRequest ("makerStakeSats must be between " <> tshow C.minStakeSats <> " and " <> tshow C.maxStakeSats)
+  when (blockRate <= 0) $
+    throwE $ invalidRequest "blockRate must be positive"
 
   (AccountV2.WhoAmIResult personUUIDV displayNameV _balance) <-
     ExceptT $ AccountClient.verifyAccountToken token
@@ -70,7 +65,8 @@ post token PostOfferRequest{..} =
       throwE $ invalidRequest ("targetBlock must be in the future (current tip: " <> tshow tip <> ")")
     _ -> return ()
 
-  let totalStake = makerStakeSats * numberOfOffers
+  let totalStake = makerStakeSats * totalContracts
+      takerStakeSatsV = C.totalPotSats - makerStakeSats
   _ <- ExceptT $ AccountClient.deductBalance personUUIDV (Sats totalStake)
 
   now <- liftIO getCurrentTime
@@ -79,25 +75,32 @@ post token PostOfferRequest{..} =
         { offerPersonUUID = personUUIDV
         , offerCreatorDisplayName = displayNameV
         , offerTargetBlock = targetBlock
+        , offerMtpCutoffEpoch = mtpCutoffEpoch
+        , offerSide = side
         , offerValidTillBlock = validTillBlock
         , offerMakerStakeSats = makerStakeSats
+        , offerTakerStakeSats = takerStakeSatsV
+        , offerBlockRate = blockRate
+        , offerTotalContracts = verifyNatural (fromIntegral totalContracts)
+        , offerMatchedCount = verifyNatural 0
+        , offerCreatedAtBlock = createdAtBlock
         , offerStatus = Open
         , offerExpiresAt = Nothing
         , offerRefundedAt = Nothing
         , offerCreated = now
         }
   einserted <- liftIO $ E.handle (\(e :: SomeException) -> return $! Left (tshow e))
-    $ fmap Right $ flip runSqlPersistMPool pool $ sequence $ replicate (fromIntegral numberOfOffers) (insert offerRow)
+    $ fmap Right $ flip runSqlPersistMPool pool $ insert offerRow
   case einserted of
-    Right keys -> return $! PostOfferResult
-      { offers = map (\k -> offerInfoFrom (tshow (fromSqlKey k)) offerRow) keys }
+    Right key -> return $! PostOfferResult
+      { offers = [ offerInfoFrom (tshow (fromSqlKey key)) offerRow ] }
     Left insertErr -> do
       ecredited <- lift $ AccountClient.creditBalance personUUIDV (Sats totalStake)
       lift $ runLogging $ $(logError)
-        ( "post: failed to persist offer rows after staking " <> tshow totalStake
+        ( "post: failed to persist offer row after staking " <> tshow totalStake
         <> " sats for " <> tshow personUUIDV <> ": " <> insertErr
         <> case ecredited of
              Right _ -> "; stake was refunded"
              Left creditErr -> "; stake refund ALSO failed, needs manual reconciliation: " <> describeError creditErr
         )
-      throwE $ unspecified ("post: failed to persist offer rows: " <> insertErr)
+      throwE $ unspecified ("post: failed to persist offer row: " <> insertErr)

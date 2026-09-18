@@ -5,8 +5,13 @@ module OpEnergy.Offer.Server.V2.OffersAPI
   , getByIdHandler
   ) where
 
+import           Data.OpEnergy.Offer.API.V1.OfferID
+                 ( OfferID
+                 )
 import           Data.OpEnergy.Offer.API.V1.OfferInfo
-                 ( OfferID, OfferInfo, PaginatedOffers(..)
+                 ( OfferInfo
+                 , PaginatedOffers
+                 , MyOffersResult
                  )
 import           Data.OpEnergy.API.V1.Positive
 
@@ -20,7 +25,7 @@ import qualified OpEnergy.Offer.Server.V2.OffersAPI.GetById as GetById
 
 getMineHandler
   :: AccountV1.AccountToken
-  -> AppM [OfferInfo]
+  -> AppM MyOffersResult
 getMineHandler = GetMine.getMineHandler
 
 getListHandler
