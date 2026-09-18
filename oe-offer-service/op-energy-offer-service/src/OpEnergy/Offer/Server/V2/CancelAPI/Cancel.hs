@@ -30,7 +30,7 @@ import           Database.Persist.Postgresql
 
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountAPI
 import qualified Data.OpEnergy.Account.API.V2.WhoAmIResult as AccountV2
-import           Data.OpEnergy.API.V1.Natural(fromNatural, verifyNatural)
+import           Data.OpEnergy.API.V1.Natural(fromNatural)
 import           Data.OpEnergy.Offer.API.V1.OfferID(OfferID(..))
 import           Data.OpEnergy.Offer.API.V1.OfferInfo(OfferInfo)
 import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
