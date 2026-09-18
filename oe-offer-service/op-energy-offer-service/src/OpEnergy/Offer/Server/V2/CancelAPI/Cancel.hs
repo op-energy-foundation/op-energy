@@ -22,7 +22,6 @@ import           Control.Monad.IO.Class(MonadIO, liftIO)
 import           Prometheus(MonadMonitor)
 import           Control.Monad.Logger(logError)
 import           Data.Text(Text)
-import           Data.Time.Clock(UTCTime)
 import           Data.Int(Int64)
 import           Data.Word(Word64)
 
