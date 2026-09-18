@@ -26,12 +26,13 @@ library
                    , Data.OpEnergy.Offer.API.V1.ContractInfo
                    , Data.OpEnergy.Offer.API.V1.Constants
                    , Data.OpEnergy.Offer.API.V1.OffersAPI
+                   , Data.OpEnergy.Offer.API.V1.LiveMessage
 
     build-depends:    base >=4.15.1.0
                     , aeson
                     , text
                     , bytestring
-                    , servant, servant-swagger
+                    , servant, servant-swagger, servant-websockets
                     , swagger2
                     , time
                     , lens
