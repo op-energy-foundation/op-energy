@@ -35,7 +35,10 @@ import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           OpEnergy.Offer.Server.V1.Offer(Offer(..), offerInfoFromEntity)
 import           OpEnergy.Offer.Server.V1.LiveEvent(LiveEvent(..))
-import           OpEnergy.Offer.Server.V1.WebSocketService(publishLiveEvent)
+import           OpEnergy.Offer.Server.V1.WebSocketService
+                   ( publishLiveEvent
+                   , withLiveEventOrderE
+                   )
 import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
 
 import           OpEnergy.Error
@@ -72,48 +75,57 @@ post token PostOfferRequest{..} =
       throwE $ invalidRequest ("targetBlock must be in the future (current tip: " <> tshow tip <> ")")
     _ -> return ()
 
-  let totalStake = makerStakeSats * totalContracts
-      takerStakeSatsV = C.totalPotSats - makerStakeSats
-  Sats makerBalance <-
-    ExceptT $ AccountClient.deductBalance personUUIDV (Sats totalStake)
+  -- balances and offers change from here on: in withLiveEventOrder, so the
+  -- change's events are published in the order of the changes
+  withLiveEventOrderE $ do
+    let totalStake = makerStakeSats * totalContracts
+        takerStakeSatsV = C.totalPotSats - makerStakeSats
+    Sats makerBalance <-
+      ExceptT $ AccountClient.deductBalance personUUIDV (Sats totalStake)
 
-  now <- liftIO getCurrentTime
-  State{ offerDBPool = pool } <- lift ask
-  let offerRow = Offer
-        { offerPersonUUID = personUUIDV
-        , offerCreatorDisplayName = displayNameV
-        , offerTargetBlock = targetBlock
-        , offerMtpCutoffEpoch = mtpCutoffEpoch
-        , offerSide = side
-        , offerValidTillBlock = validTillBlock
-        , offerMakerStakeSats = makerStakeSats
-        , offerTakerStakeSats = takerStakeSatsV
-        , offerBlockRate = blockRate
-        , offerTotalContracts = verifyNatural (fromIntegral totalContracts)
-        , offerMatchedCount = verifyNatural 0
-        , offerCreatedAtBlock = createdAtBlock
-        , offerStatus = Open
-        , offerExpiresAt = Nothing
-        , offerRefundedAt = Nothing
-        , offerCreated = now
-        }
-  einserted <- liftIO $ E.handle (\(e :: SomeException) -> return $! Left (tshow e))
-    $ fmap Right $ flip runSqlPersistMPool pool $ insert offerRow
-  case einserted of
-    Right key -> do
-      let offerInfo = offerInfoFromEntity (Entity key offerRow)
-      lift $ publishLiveEvent $! LiveEvent
-        (LiveMessageOfferCreated offerInfo)
-        [(personUUIDV, makerBalance)]
-      return $! PostOfferResult
-        { offers = [ offerInfo ] }
-    Left insertErr -> do
-      ecredited <- lift $ AccountClient.creditBalance personUUIDV (Sats totalStake)
-      lift $ runLogging $ $(logError)
-        ( "post: failed to persist offer row after staking " <> tshow totalStake
-        <> " sats for " <> tshow personUUIDV <> ": " <> insertErr
-        <> case ecredited of
-             Right _ -> "; stake was refunded"
-             Left creditErr -> "; stake refund ALSO failed, needs manual reconciliation: " <> describeError creditErr
-        )
-      throwE $ unspecified ("post: failed to persist offer row: " <> insertErr)
+    now <- liftIO getCurrentTime
+    State{ offerDBPool = pool } <- lift ask
+    let offerRow = Offer
+          { offerPersonUUID = personUUIDV
+          , offerCreatorDisplayName = displayNameV
+          , offerTargetBlock = targetBlock
+          , offerMtpCutoffEpoch = mtpCutoffEpoch
+          , offerSide = side
+          , offerValidTillBlock = validTillBlock
+          , offerMakerStakeSats = makerStakeSats
+          , offerTakerStakeSats = takerStakeSatsV
+          , offerBlockRate = blockRate
+          , offerTotalContracts = verifyNatural (fromIntegral totalContracts)
+          , offerMatchedCount = verifyNatural 0
+          , offerCreatedAtBlock = createdAtBlock
+          , offerStatus = Open
+          , offerExpiresAt = Nothing
+          , offerRefundedAt = Nothing
+          , offerCreated = now
+          }
+    einserted <- liftIO
+      $ E.handle (\(e :: SomeException) -> return $! Left (tshow e))
+      $ fmap Right $ flip runSqlPersistMPool pool $ insert offerRow
+    case einserted of
+      Right key -> do
+        let offerInfo = offerInfoFromEntity (Entity key offerRow)
+        lift $ publishLiveEvent $! LiveEvent
+          (LiveMessageOfferCreated offerInfo)
+          [(personUUIDV, makerBalance)]
+        return $! PostOfferResult
+          { offers = [ offerInfo ] }
+      Left insertErr -> do
+        ecredited <- lift
+          $ AccountClient.creditBalance personUUIDV (Sats totalStake)
+        lift $ runLogging $ $(logError)
+          ( "post: failed to persist offer row after staking "
+          <> tshow totalStake
+          <> " sats for " <> tshow personUUIDV <> ": " <> insertErr
+          <> case ecredited of
+               Right _ -> "; stake was refunded"
+               Left creditErr ->
+                 "; stake refund ALSO failed, needs manual reconciliation: "
+                 <> describeError creditErr
+          )
+        throwE $ unspecified
+          ("post: failed to persist offer row: " <> insertErr)
