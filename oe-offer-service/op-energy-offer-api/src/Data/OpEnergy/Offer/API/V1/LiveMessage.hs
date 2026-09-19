@@ -3,14 +3,25 @@
  -
  - Notifications only say what has changed. The frontend is expected to
  - reload the affected data with the offer API.
+ -
+ - Notifications sent to every connection are numbered 1, 2, ... from the
+ - start of the service. Every connection first receives 'LiveMessageHello'
+ - with the number of the last notification sent before it opened, and
+ - afterwards every later notification in order, so a gap in the numbers
+ - means that one was missed. Messages to one connection only have no
+ - number. The numbers start again when the service restarts, so they can
+ - only be compared within one connection: after a reconnect, the frontend
+ - has to reload its data.
  -}
 {-# LANGUAGE OverloadedStrings          #-}
 module Data.OpEnergy.Offer.API.V1.LiveMessage
   ( LiveRequest(..)
   , LiveMessage(..)
+  , SequencedMessage(..)
   ) where
 
 import           Data.Aeson
+import           Data.Aeson.Types           (Pair)
 import           Data.Text                  (Text)
 import qualified Data.Text                  as Text
 import           Data.Word                  (Word64)
@@ -28,9 +39,9 @@ import           Data.OpEnergy.Offer.API.V1.OfferStatus (OfferStatus)
 -- | request from the frontend
 data LiveRequest
   = LiveRequestInit
-    -- ^ @{"action": "init"}@: answered with 'LiveMessageBlockNew' for the
-    -- current chain tip, if it is known. Notifications are sent from the
-    -- moment the connection is opened, whether or not this is requested
+    -- ^ @{"action": "init"}@: accepted and ignored. The chain tip, if it is
+    -- known, is sent right after 'LiveMessageHello', when the connection
+    -- opens
   | LiveRequestAuth AccountToken
     -- ^ @{"action": "auth", "token": "..."}@: additionally receive
     -- notifications about the given account's own offers, contracts and
@@ -70,37 +81,59 @@ data LiveMessage
     -- contracts or balance. Sent only after 'LiveRequestAuth'
   | LiveMessagePong
     -- ^ answer to 'LiveRequestPing'
+  | LiveMessageHello
+    -- ^ the first message of every connection, sent with the number of the
+    -- last notification published before the connection opened
   deriving (Eq, Show)
 
-instance ToJSON LiveMessage where
-  toJSON (LiveMessageOfferCreated offerId) = object
-    [ "type" .= ("offer.created" :: Text)
-    , "offerId" .= offerId
-    ]
-  toJSON (LiveMessageOfferChanged offerId status matchedCount) = object
-    [ "type" .= ("offer.changed" :: Text)
-    , "offerId" .= offerId
-    , "status" .= status
-    , "matchedCount" .= matchedCount
-    ]
-  toJSON (LiveMessageContractCreated contractId offerId) = object
-    [ "type" .= ("contract.created" :: Text)
-    , "contractId" .= contractId
-    , "offerId" .= offerId
-    ]
-  toJSON (LiveMessageContractSettled contractId winnerSide actualMtpEpoch) = object
-    [ "type" .= ("contract.settled" :: Text)
-    , "contractId" .= contractId
-    , "winnerSide" .= winnerSide
-    , "actualMtpEpoch" .= actualMtpEpoch
-    ]
-  toJSON (LiveMessageBlockNew height) = object
-    [ "type" .= ("block.new" :: Text)
-    , "height" .= height
-    ]
-  toJSON LiveMessageMyChanged = object
-    [ "type" .= ("my.changed" :: Text)
-    ]
-  toJSON LiveMessagePong = object
-    [ "type" .= ("pong" :: Text)
-    ]
+-- | a message as it is sent to a connection: with its sequence number
+-- (@"seq"@) if it is a notification sent to every connection or
+-- 'LiveMessageHello', without one if it is sent to this connection only:
+-- the chain tip right after 'LiveMessageHello', 'LiveMessageMyChanged' and
+-- 'LiveMessagePong'. Unnumbered messages never cause a gap
+data SequencedMessage = SequencedMessage (Maybe Word64) LiveMessage
+  deriving (Eq, Show)
+
+instance ToJSON SequencedMessage where
+  toJSON (SequencedMessage mseqNo message) = object
+    ( maybe id (\seqNo -> (("seq" .= seqNo) :)) mseqNo
+      (liveMessagePairs message)
+    )
+
+-- | JSON fields of the given notification
+liveMessagePairs :: LiveMessage -> [Pair]
+liveMessagePairs (LiveMessageOfferCreated offerId) =
+  [ "type" .= ("offer.created" :: Text)
+  , "offerId" .= offerId
+  ]
+liveMessagePairs (LiveMessageOfferChanged offerId status matchedCount) =
+  [ "type" .= ("offer.changed" :: Text)
+  , "offerId" .= offerId
+  , "status" .= status
+  , "matchedCount" .= matchedCount
+  ]
+liveMessagePairs (LiveMessageContractCreated contractId offerId) =
+  [ "type" .= ("contract.created" :: Text)
+  , "contractId" .= contractId
+  , "offerId" .= offerId
+  ]
+liveMessagePairs
+    (LiveMessageContractSettled contractId winnerSide actualMtpEpoch) =
+  [ "type" .= ("contract.settled" :: Text)
+  , "contractId" .= contractId
+  , "winnerSide" .= winnerSide
+  , "actualMtpEpoch" .= actualMtpEpoch
+  ]
+liveMessagePairs (LiveMessageBlockNew height) =
+  [ "type" .= ("block.new" :: Text)
+  , "height" .= height
+  ]
+liveMessagePairs LiveMessageMyChanged =
+  [ "type" .= ("my.changed" :: Text)
+  ]
+liveMessagePairs LiveMessagePong =
+  [ "type" .= ("pong" :: Text)
+  ]
+liveMessagePairs LiveMessageHello =
+  [ "type" .= ("hello" :: Text)
+  ]
