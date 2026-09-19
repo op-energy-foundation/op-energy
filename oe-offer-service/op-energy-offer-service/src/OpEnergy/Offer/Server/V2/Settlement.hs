@@ -36,7 +36,10 @@ import           OpEnergy.Offer.Server.V1.Class
 import           OpEnergy.Offer.Server.V1.Config (Config(..))
 import           OpEnergy.Offer.Server.V1.Offer
 import           OpEnergy.Offer.Server.V1.PlatformStats (addCollectedFeeTx)
-import           OpEnergy.Offer.Server.V1.LiveEvent (LiveEvent(..))
+import           OpEnergy.Offer.Server.V1.LiveEvent
+                 ( LiveEvent(..)
+                 , changedBalance
+                 )
 import           OpEnergy.Offer.Server.V1.WebSocketService (publishLiveEvent)
 import qualified OpEnergy.Offer.Server.V1.BlockspanClient as BlockspanClient
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
@@ -157,5 +160,6 @@ settleContract (Entity contractId contract@Contract{..}) =
         (contractInfoFromEntity Nothing Nothing
           (Entity contractId settledContract))
       )
-      [contractMakerUUID, contractTakerUUID]
+      -- only the winner's balance has changed
+      (changedBalance winnerUUID ecredited)
   return settled
