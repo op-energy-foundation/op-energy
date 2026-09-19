@@ -55,7 +55,10 @@ creditBalanceHandler secret request =
       ( runLogging . $(logError))
       $ creditBalance secret request
 
--- | business logic for V2 balance credit
+-- | business logic for V2 balance credit. Returns the balance after the
+-- credit, read in the same transaction as the update: the update holds the
+-- account's row lock until the transaction commits, so no other change of
+-- the balance can come in between.
 creditBalance
   :: Text
   -> BalanceAdjustRequest
@@ -66,15 +69,16 @@ creditBalance secret (BalanceAdjustRequest personUUIDV (Sats amountSats)) =
   checkInternalServiceSecret secret
   State{ accountDBPool = pool } <- lift ask
   let modelUUID = modelApiUUIDPerson personUUIDV
-  (Entity key person) <- exceptTMaybeT accountNotFound
+  (Entity key _) <- exceptTMaybeT accountNotFound
     $ liftIO $ flip runSqlPersistMPool pool
     $ selectFirst [ PersonUuid ==. modelUUID ] []
-  liftIO $ flip runSqlPersistMPool pool $ do
-    nowUTC <- liftIO getCurrentTime
-    let now = utcTimeToPOSIXSeconds nowUTC
-    update key
-      [ PersonBalance +=. Sats amountSats
-      , PersonLastUpdated =. now
-      ]
-  let Sats currentBalance = personBalance person
-  return $! BalanceAdjustResult (Sats (currentBalance + amountSats))
+  balance <- exceptTMaybeT accountNotFound
+    $ liftIO $ flip runSqlPersistMPool pool $ do
+      nowUTC <- liftIO getCurrentTime
+      let now = utcTimeToPOSIXSeconds nowUTC
+      update key
+        [ PersonBalance +=. Sats amountSats
+        , PersonLastUpdated =. now
+        ]
+      fmap personBalance <$> get key
+  return $! BalanceAdjustResult balance
