@@ -20,7 +20,10 @@ import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 import           OpEnergy.Offer.Server.V1.Class(AppT, profile, withDBTransaction)
 import           OpEnergy.Offer.Server.V1.Offer
 import           OpEnergy.Offer.Server.V1.OfferService(refundAndCloseOffer)
-import           OpEnergy.Offer.Server.V1.LiveEvent(LiveEvent(..))
+import           OpEnergy.Offer.Server.V1.LiveEvent
+                   ( LiveEvent(..)
+                   , changedBalance
+                   )
 import           OpEnergy.Offer.Server.V1.WebSocketService(publishLiveEvent)
 
 expireStaleOffers :: (MonadIO m, MonadMonitor m) => BlockHeight -> AppT m Int
@@ -36,8 +39,8 @@ expireStaleOffers tipHeight =
     )
   results <- forM staleOfferIds $ \offerId -> do
     mclosed <- refundAndCloseOffer offerId Expired now
-    forM_ mclosed $ \offerVal -> publishLiveEvent $! LiveEvent
+    forM_ mclosed $ \(offerVal, ecredited) -> publishLiveEvent $! LiveEvent
       (LiveMessageOfferChanged (offerInfoFromEntity (Entity offerId offerVal)))
-      [offerPersonUUID offerVal]
+      (changedBalance (offerPersonUUID offerVal) ecredited)
     return mclosed
   return $! length [ () | Just _ <- results ]
