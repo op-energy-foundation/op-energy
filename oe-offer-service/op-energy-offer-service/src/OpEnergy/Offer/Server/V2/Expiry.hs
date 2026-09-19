@@ -6,9 +6,8 @@ module OpEnergy.Offer.Server.V2.Expiry
   ) where
 
 import           Control.Monad(forM, forM_)
-import           Control.Monad.IO.Class(liftIO, MonadIO)
+import           Control.Monad.IO.Class(MonadIO)
 import           Data.Maybe(fromMaybe)
-import           Data.Time.Clock(getCurrentTime)
 
 import           Database.Persist.Postgresql
 import           Prometheus(MonadMonitor)
@@ -17,6 +16,7 @@ import           Data.OpEnergy.API.V1.Block(BlockHeight)
 import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
 import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 
+import           OpEnergy.Offer.Server.V1.Time(getCurrentTimeDB)
 import           OpEnergy.Offer.Server.V1.Class(AppT, profile, withDBTransaction)
 import           OpEnergy.Offer.Server.V1.Offer
 import           OpEnergy.Offer.Server.V1.OfferService
@@ -44,7 +44,7 @@ expireStaleOffers :: (MonadIO m, MonadMonitor m) => BlockHeight -> AppT m Int
 expireStaleOffers tipHeight =
   let name = "V2.Expiry.expireStaleOffers"
   in profile name $ do
-  now <- liftIO getCurrentTime
+  now <- getCurrentTimeDB
   -- a failed query is logged by withDBTransaction; the sweep retries next tick
   staleOfferIds <- fromMaybe [] <$> withDBTransaction "selectKeysList"
     ( selectKeysList

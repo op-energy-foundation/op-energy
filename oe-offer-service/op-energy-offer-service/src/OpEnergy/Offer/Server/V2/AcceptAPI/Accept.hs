@@ -15,7 +15,6 @@ import           Control.Monad.IO.Class(liftIO)
 import           Control.Monad.Logger(logError)
 import           Data.Text(Text)
 import qualified Data.Text as T
-import           Data.Time.Clock(getCurrentTime)
 
 import           Database.Persist.Postgresql
 
@@ -29,6 +28,7 @@ import           Data.OpEnergy.Offer.API.V1.ContractInfo(ContractInfo)
 import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 import qualified Control.Concurrent.STM.TVar as TVar
 
+import           OpEnergy.Offer.Server.V1.Time(getCurrentTimeDB)
 import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
@@ -86,7 +86,7 @@ accept idText token =
     Sats takerBalance <- ExceptT $ AccountClient.deductBalance takerUUIDV
       (Sats (offerTakerStakeSats offerVal))
 
-    now <- liftIO getCurrentTime
+    now <- getCurrentTimeDB
     let contractRow = Contract
           { contractOfferId = key
           , contractTargetBlock = offerTargetBlock offerVal

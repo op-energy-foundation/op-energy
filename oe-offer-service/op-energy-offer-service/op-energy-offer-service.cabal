@@ -36,6 +36,7 @@ library
                    , OpEnergy.Offer.Server.V1.LiveEvent
                    , OpEnergy.Offer.Server.V1.WebSocketService
                    , OpEnergy.Offer.Server.V1.OfferService
+                   , OpEnergy.Offer.Server.V1.Time
                    , OpEnergy.Offer.Server.V2
                    , OpEnergy.Offer.Server.V2.PostOfferAPI
                    , OpEnergy.Offer.Server.V2.PostOfferAPI.Post
