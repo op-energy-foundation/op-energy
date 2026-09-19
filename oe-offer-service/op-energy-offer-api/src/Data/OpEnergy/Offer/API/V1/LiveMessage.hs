@@ -112,9 +112,11 @@ liveMessagePairs (LiveMessageOfferCreated offer) =
   [ "type" .= ("offer.created" :: Text)
   , "offer" .= offer
   ]
-liveMessagePairs (LiveMessageOfferChanged offer) =
+liveMessagePairs (LiveMessageOfferChanged offerId status matchedCount) =
   [ "type" .= ("offer.changed" :: Text)
-  , "offer" .= offer
+  , "offerId" .= offerId
+  , "status" .= status
+  , "matchedCount" .= matchedCount
   ]
 liveMessagePairs (LiveMessageContractCreated contract) =
   [ "type" .= ("contract.created" :: Text)
@@ -128,6 +130,15 @@ liveMessagePairs (LiveMessageBlockNew height mmediantime) =
   [ "type" .= ("block.new" :: Text)
   , "height" .= height
   , "mediantime" .= mmediantime
+    (LiveMessageContractSettled contractId winnerSide actualMtpEpoch) =
+  [ "type" .= ("contract.settled" :: Text)
+  , "contractId" .= contractId
+  , "winnerSide" .= winnerSide
+  , "actualMtpEpoch" .= actualMtpEpoch
+  ]
+liveMessagePairs (LiveMessageBlockNew height) =
+  [ "type" .= ("block.new" :: Text)
+  , "height" .= height
   ]
 liveMessagePairs LiveMessageMyChanged =
   [ "type" .= ("my.changed" :: Text)

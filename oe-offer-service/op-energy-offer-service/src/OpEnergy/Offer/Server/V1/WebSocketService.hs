@@ -75,7 +75,6 @@ webSocketConnection conn = do
              , liveEventSeq = liveEventSeqV
              , currentTip = currentTipV
              , currentTipMediantime = currentTipMediantimeV
-             } <- ask
   liftIO $ do
     -- subscribes and reads the state it starts from in one transaction, so
     -- the connection receives every event published after that state. A
