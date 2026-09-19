@@ -14,7 +14,6 @@ import           Database.Persist.Postgresql
 import           Prometheus(MonadMonitor)
 
 import           Data.OpEnergy.API.V1.Block(BlockHeight)
-import           Data.OpEnergy.API.V1.Natural(fromNatural)
 import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
 import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 
@@ -38,11 +37,7 @@ expireStaleOffers tipHeight =
   results <- forM staleOfferIds $ \offerId -> do
     mclosed <- refundAndCloseOffer offerId Expired now
     forM_ mclosed $ \offerVal -> publishLiveEvent $! LiveEvent
-      (LiveMessageOfferChanged
-        (offerIDFromKey offerId)
-        Expired
-        (fromIntegral (fromNatural (offerMatchedCount offerVal)))
-      )
+      (LiveMessageOfferChanged (offerInfoFromEntity (Entity offerId offerVal)))
       [offerPersonUUID offerVal]
     return mclosed
   return $! length [ () | Just _ <- results ]
