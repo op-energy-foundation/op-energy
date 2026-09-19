@@ -55,6 +55,12 @@ getConnection config = do
     migrateOfferDBSchema config
     printMigration migrateOffer
     runMigration migrateOffer
+    -- the offer list reads the contracts of its offers by offer_id, and
+    -- persistent creates no index for a foreign key. For both new and
+    -- existing DBs
+    rawExecute
+      "CREATE INDEX IF NOT EXISTS contract_offer_id_idx ON contract (offer_id)"
+      []
     -- creates platform_stats table, for both new and existing DBs
     printMigration migratePlatformStats
     runMigration migratePlatformStats
