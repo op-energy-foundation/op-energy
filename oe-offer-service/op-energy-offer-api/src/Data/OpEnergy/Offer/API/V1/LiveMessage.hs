@@ -108,15 +108,13 @@ instance ToJSON SequencedMessage where
 
 -- | JSON fields of the given notification
 liveMessagePairs :: LiveMessage -> [Pair]
-liveMessagePairs (LiveMessageOfferCreated offerId) =
+liveMessagePairs (LiveMessageOfferCreated offer) =
   [ "type" .= ("offer.created" :: Text)
-  , "offerId" .= offerId
+  , "offer" .= offer
   ]
-liveMessagePairs (LiveMessageOfferChanged offerId status matchedCount) =
+liveMessagePairs (LiveMessageOfferChanged offer) =
   [ "type" .= ("offer.changed" :: Text)
-  , "offerId" .= offerId
-  , "status" .= status
-  , "matchedCount" .= matchedCount
+  , "offer" .= offer
   ]
 liveMessagePairs (LiveMessageContractCreated contractId offerId) =
   [ "type" .= ("contract.created" :: Text)
