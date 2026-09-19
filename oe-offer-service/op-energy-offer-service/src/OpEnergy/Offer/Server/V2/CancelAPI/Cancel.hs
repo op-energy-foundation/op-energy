@@ -21,7 +21,7 @@ import           Control.Monad.IO.Class(MonadIO, liftIO)
 import           Prometheus(MonadMonitor)
 import           Control.Monad.Logger(logError)
 import           Data.Text(Text)
-import           Data.Time.Clock(UTCTime, getCurrentTime)
+import           Data.Time.Clock(UTCTime)
 import           Data.Word(Word64)
 
 import           Database.Persist.Postgresql
@@ -36,6 +36,7 @@ import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
 import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 import           Data.Text.Show(tshow)
 
+import           OpEnergy.Offer.Server.V1.Time(getCurrentTimeDB)
 import           OpEnergy.Offer.Server.V1.Class
                    ( AppM, AppT, State(..), profile, runLogging
                    )
@@ -77,7 +78,7 @@ cancel idText token =
   -- balances and offers change from here on: in withLiveEventOrder, so the
   -- change's events are published in the order of the changes
   withLiveEventOrderE $ do
-    now <- liftIO getCurrentTime
+    now <- getCurrentTimeDB
     (updatedVal, refundAmount) <-
       closeForCancel key personUUIDV now cancelAttempts
 
