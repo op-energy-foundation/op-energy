@@ -95,13 +95,14 @@ selectSettleableContracts tipHeight =
 -- - in one transaction, marks the contract as settled and adds the platform
 --   fee to the platform's total. The transaction changes nothing if the
 --   contract is no longer live, so a contract is never paid twice;
--- - credits the winner with both stakes minus the platform fee.
+-- - credits the winner with both stakes minus the platform fee;
+-- - publishes the settled contract as 'LiveMessageContractSettled'.
 -- Returns 'False' if the contract was no longer live.
 settleContract
   :: (MonadIO m, MonadMonitor m)
   => Entity Contract
   -> AppT m (Either CallstackError Bool)
-settleContract (Entity contractId Contract{..}) =
+settleContract (Entity contractId contract@Contract{..}) =
   let name = "V2.Settlement.settleContract"
   in profile name $ runExceptPrefixT name $ do
   State{ config = Config{ configPlatformFeeSats = platformFeeSats } } <- lift ask
@@ -117,6 +118,13 @@ settleContract (Entity contractId Contract{..}) =
         else contractTakerUUID
       payoutSats = potSats - platformFeeSats
   now <- liftIO getCurrentTime
+  -- the contract as the transaction below leaves it: keep both in sync
+  let settledContract = contract
+        { contractStatus = Settled
+        , contractWinnerSide = Just winnerSide
+        , contractActualMtpEpoch = Just actualMtpEpoch
+        , contractSettledAt = Just now
+        }
   settled <- exceptTMaybeT dbQueryError $ withDBTransaction "markSettled" $ do
     updated <- updateWhereCount
       [ ContractId ==. contractId, ContractStatus ==. Live ]
@@ -142,11 +150,12 @@ settleContract (Entity contractId Contract{..}) =
         <> " -- creditBalance failed, needs manual reconciliation: "
         <> describeError err
         )
+    -- sent to every connection, so without yourRole. No chain tip is
+    -- needed: a settled contract's confirmations don't depend on it
     lift $ publishLiveEvent $! LiveEvent
       (LiveMessageContractSettled
-        (contractIDFromKey contractId)
-        winnerSide
-        actualMtpEpoch
+        (contractInfoFromEntity Nothing Nothing
+          (Entity contractId settledContract))
       )
       [contractMakerUUID, contractTakerUUID]
   return settled
