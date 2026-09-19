@@ -78,14 +78,11 @@ cancel idText token =
       <> " sats failed, needs manual reconciliation: " <> describeError err
       )
 
+  let offerInfo = offerInfoFromEntity (Entity key updatedVal)
   lift $ publishLiveEvent $! LiveEvent
-    (LiveMessageOfferChanged
-      (OfferID idText)
-      (offerStatus updatedVal)
-      (fromIntegral (fromNatural (offerMatchedCount updatedVal)))
-    )
+    (LiveMessageOfferChanged offerInfo)
     [personUUIDV]
-  return $! offerInfoFrom idText updatedVal
+  return $! offerInfo
 
 -- | how many times cancel reads the offer again, when a concurrent accept has
 -- changed its matchedCount between the read and the update
