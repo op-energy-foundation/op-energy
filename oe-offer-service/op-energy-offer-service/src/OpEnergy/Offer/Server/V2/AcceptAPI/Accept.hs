@@ -15,7 +15,6 @@ import           Control.Monad.IO.Class(liftIO)
 import           Control.Monad.Logger(logError)
 import           Data.Text(Text)
 import qualified Data.Text as T
-import qualified Data.Text.Read as TR
 import           Data.Time.Clock(getCurrentTime)
 
 import           Database.Persist.Postgresql
@@ -57,9 +56,8 @@ accept :: Text -> AccountAPI.AccountToken -> AppM (Either CallstackError Contrac
 accept idText token =
   let name = "V2.AcceptAPI.Accept.accept"
   in profile name $ runExceptPrefixT name $ do
-  key <- case TR.decimal idText of
-    Right (n, rest) | T.null rest -> return (toSqlKey n :: OfferId)
-    _ -> throwE $ invalidRequest "invalid offer id"
+  key <- exceptTMaybeT (invalidRequest "invalid offer id")
+    $ return (offerKeyFromIDText idText)
 
   (AccountV2.WhoAmIResult takerUUIDV takerDisplayNameV _balance) <-
     ExceptT $ AccountClient.verifyAccountToken token
