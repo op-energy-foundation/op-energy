@@ -17,7 +17,8 @@ module OpEnergy.Offer.Server.V2.CancelAPI.Cancel
 import           Control.Monad.Trans.Reader(ask)
 import           Control.Monad.Trans(lift)
 import           Control.Monad.Trans.Except(ExceptT(..), throwE)
-import           Control.Monad.IO.Class(liftIO)
+import           Control.Monad.IO.Class(MonadIO, liftIO)
+import           Prometheus(MonadMonitor)
 import           Control.Monad.Logger(logError)
 import           Data.Text(Text)
 import           Data.Time.Clock(UTCTime, getCurrentTime)
@@ -35,7 +36,9 @@ import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
 import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 import           Data.Text.Show(tshow)
 
-import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
+import           OpEnergy.Offer.Server.V1.Class
+                   ( AppM, AppT, State(..), profile, runLogging
+                   )
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           OpEnergy.Offer.Server.V1.Offer
@@ -43,7 +46,10 @@ import           OpEnergy.Offer.Server.V1.LiveEvent
                    ( LiveEvent(..)
                    , changedBalance
                    )
-import           OpEnergy.Offer.Server.V1.WebSocketService(publishLiveEvent)
+import           OpEnergy.Offer.Server.V1.WebSocketService
+                   ( publishLiveEvent
+                   , withLiveEventOrderE
+                   )
 import           Control.Monad(when)
 
 import           OpEnergy.Error
@@ -68,24 +74,29 @@ cancel idText token =
   (AccountV2.WhoAmIResult personUUIDV _displayName _balance) <-
     ExceptT $ AccountClient.verifyAccountToken token
 
-  now <- liftIO getCurrentTime
-  (updatedVal, refundAmount) <- closeForCancel key personUUIDV now cancelAttempts
+  -- balances and offers change from here on: in withLiveEventOrder, so the
+  -- change's events are published in the order of the changes
+  withLiveEventOrderE $ do
+    now <- liftIO getCurrentTime
+    (updatedVal, refundAmount) <-
+      closeForCancel key personUUIDV now cancelAttempts
 
-  -- refund unfilled stake
-  ecredited <- lift $ AccountClient.creditBalance personUUIDV (Sats refundAmount)
-  case ecredited of
-    Right _ -> return ()
-    Left err -> lift $ runLogging $ $(logError)
-      ( "cancel: offer " <> tshow (fromSqlKey key)
-      <> " closed but stake refund of " <> tshow refundAmount
-      <> " sats failed, needs manual reconciliation: " <> describeError err
-      )
+    -- refund unfilled stake
+    ecredited <- lift
+      $ AccountClient.creditBalance personUUIDV (Sats refundAmount)
+    case ecredited of
+      Right _ -> return ()
+      Left err -> lift $ runLogging $ $(logError)
+        ( "cancel: offer " <> tshow (fromSqlKey key)
+        <> " closed but stake refund of " <> tshow refundAmount
+        <> " sats failed, needs manual reconciliation: " <> describeError err
+        )
 
-  let offerInfo = offerInfoFromEntity (Entity key updatedVal)
-  lift $ publishLiveEvent $! LiveEvent
-    (LiveMessageOfferChanged offerInfo)
-    (changedBalance personUUIDV ecredited)
-  return $! offerInfo
+    let offerInfo = offerInfoFromEntity (Entity key updatedVal)
+    lift $ publishLiveEvent $! LiveEvent
+      (LiveMessageOfferChanged offerInfo)
+      (changedBalance personUUIDV ecredited)
+    return $! offerInfo
 
 -- | how many times cancel reads the offer again, when a concurrent accept has
 -- changed its matchedCount between the read and the update
@@ -99,11 +110,12 @@ cancelAttempts = 3
 -- If the offer is still open, it is read again, up to the given amount of
 -- attempts. Returns the closed offer and the refund due to its creator.
 closeForCancel
-  :: OfferId
+  :: (MonadIO m, MonadMonitor m)
+  => OfferId
   -> AccountAPI.UUID AccountAPI.Person
   -> UTCTime
   -> Int
-  -> ExceptT CallstackError AppM (Offer, Word64)
+  -> ExceptT CallstackError (AppT m) (Offer, Word64)
 closeForCancel key personUUIDV now attemptsLeft = do
   State{ offerDBPool = pool } <- lift ask
   offerVal <- exceptTMaybeT offerNotFound

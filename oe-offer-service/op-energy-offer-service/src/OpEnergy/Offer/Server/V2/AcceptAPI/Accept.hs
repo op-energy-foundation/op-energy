@@ -34,7 +34,10 @@ import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           OpEnergy.Offer.Server.V1.Offer
 import           OpEnergy.Offer.Server.V1.LiveEvent(LiveEvent(..))
-import           OpEnergy.Offer.Server.V1.WebSocketService(publishLiveEvent)
+import           OpEnergy.Offer.Server.V1.WebSocketService
+                   ( publishLiveEvent
+                   , withLiveEventOrderE
+                   )
 
 import           OpEnergy.Error
                    ( eitherThrowJSON, runExceptPrefixT
@@ -70,80 +73,85 @@ accept idText token =
   when (fromNatural (offerMatchedCount offerVal) >= fromNatural (offerTotalContracts offerVal)) $ throwE offerFilled
   when (offerPersonUUID offerVal == takerUUIDV) $ throwE cannotAcceptOwnOffer
 
-  Sats takerBalance <- ExceptT $ AccountClient.deductBalance takerUUIDV
-    (Sats (offerTakerStakeSats offerVal))
+  -- balances and offers change from here on: in withLiveEventOrder, so the
+  -- change's events are published in the order of the changes
+  withLiveEventOrderE $ do
+    Sats takerBalance <- ExceptT $ AccountClient.deductBalance takerUUIDV
+      (Sats (offerTakerStakeSats offerVal))
 
-  now <- liftIO getCurrentTime
-  mTip <- liftIO $ TVar.readTVarIO currentTipV
-  let takerCreatedAtBlock = case mTip of
-        Just tip -> tip
-        Nothing  -> offerCreatedAtBlock offerVal
-  let contractRow = Contract
-        { contractOfferId = key
-        , contractTargetBlock = offerTargetBlock offerVal
-        , contractMtpCutoffEpoch = offerMtpCutoffEpoch offerVal
-        , contractMakerSide = offerSide offerVal
-        , contractMakerUUID = offerPersonUUID offerVal
-        , contractMakerDisplayName = offerCreatorDisplayName offerVal
-        , contractMakerStakeSats = offerMakerStakeSats offerVal
-        , contractTakerUUID = takerUUIDV
-        , contractTakerDisplayName = takerDisplayNameV
-        , contractTakerStakeSats = offerTakerStakeSats offerVal
-        , contractBlockRate = offerBlockRate offerVal
-        , contractStatus = Live
-        , contractActualMtpEpoch = Nothing
-        , contractWinnerSide = Nothing
-        , contractCreatedAtBlock = takerCreatedAtBlock
-        , contractMatchedAt = now
-        , contractSettledAt = Nothing
-        }
+    now <- liftIO getCurrentTime
+    mTip <- liftIO $ TVar.readTVarIO currentTipV
+    let takerCreatedAtBlock = case mTip of
+          Just tip -> tip
+          Nothing  -> offerCreatedAtBlock offerVal
+    let contractRow = Contract
+          { contractOfferId = key
+          , contractTargetBlock = offerTargetBlock offerVal
+          , contractMtpCutoffEpoch = offerMtpCutoffEpoch offerVal
+          , contractMakerSide = offerSide offerVal
+          , contractMakerUUID = offerPersonUUID offerVal
+          , contractMakerDisplayName = offerCreatorDisplayName offerVal
+          , contractMakerStakeSats = offerMakerStakeSats offerVal
+          , contractTakerUUID = takerUUIDV
+          , contractTakerDisplayName = takerDisplayNameV
+          , contractTakerStakeSats = offerTakerStakeSats offerVal
+          , contractBlockRate = offerBlockRate offerVal
+          , contractStatus = Live
+          , contractActualMtpEpoch = Nothing
+          , contractWinnerSide = Nothing
+          , contractCreatedAtBlock = takerCreatedAtBlock
+          , contractMatchedAt = now
+          , contractSettledAt = Nothing
+          }
 
-  -- Atomic: conditional increment + insert contract to prevent
-  -- two concurrent accepts from overselling the last slot.
-  let staleCount = offerMatchedCount offerVal
-      newCount   = verifyNatural (fromNatural staleCount + 1)
-      isFilled   = fromNatural newCount >= fromNatural (offerTotalContracts offerVal)
-      -- the offer as the transaction below leaves it
-      acceptedVal = offerVal
-        { offerMatchedCount = newCount
-        , offerStatus = if isFilled then Filled else Open
-        }
-  mcontractKey <- liftIO $ flip runSqlPersistMPool pool $ do
-    -- conditional update — only succeeds if matchedCount has not
-    -- changed since we read it above
-    bumped <- updateWhereCount
-      [ OfferId ==. key
-      , OfferMatchedCount ==. staleCount
-      , OfferStatus ==. Open
-      ]
-      [ OfferMatchedCount =. newCount ]
-    if bumped /= 1
-      then return Nothing -- the slot is not ours: create no contract
-      else do
-        cKey <- insert contractRow
-        -- transition to Filled when all contracts are matched
-        when isFilled $
-          updateWhere
-            [ OfferId ==. key ]
-            [ OfferStatus =. Filled ]
-        return (Just cKey)
+    -- Atomic: conditional increment + insert contract to prevent
+    -- two concurrent accepts from overselling the last slot.
+    let staleCount = offerMatchedCount offerVal
+        newCount   = verifyNatural (fromNatural staleCount + 1)
+        isFilled   =
+          fromNatural newCount >= fromNatural (offerTotalContracts offerVal)
+        -- the offer as the transaction below leaves it
+        acceptedVal = offerVal
+          { offerMatchedCount = newCount
+          , offerStatus = if isFilled then Filled else Open
+          }
+    mcontractKey <- liftIO $ flip runSqlPersistMPool pool $ do
+      -- conditional update — only succeeds if matchedCount has not
+      -- changed since we read it above
+      bumped <- updateWhereCount
+        [ OfferId ==. key
+        , OfferMatchedCount ==. staleCount
+        , OfferStatus ==. Open
+        ]
+        [ OfferMatchedCount =. newCount ]
+      if bumped /= 1
+        then return Nothing -- the slot is not ours: create no contract
+        else do
+          cKey <- insert contractRow
+          -- transition to Filled when all contracts are matched
+          when isFilled $
+            updateWhere
+              [ OfferId ==. key ]
+              [ OfferStatus =. Filled ]
+          return (Just cKey)
 
-  -- if the conditional update matched 0 rows, another accept or a cancel
-  -- won the race — refund and report filled
-  when (isNothing mcontractKey) $ do
-    _ <- lift $ AccountClient.creditBalance takerUUIDV (Sats (offerTakerStakeSats offerVal))
-    throwE offerFilled
-  contractKey <- exceptTMaybeT offerFilled $ return mcontractKey
+    -- if the conditional update matched 0 rows, another accept or a cancel
+    -- won the race — refund and report filled
+    when (isNothing mcontractKey) $ do
+      _ <- lift $ AccountClient.creditBalance takerUUIDV
+        (Sats (offerTakerStakeSats offerVal))
+      throwE offerFilled
+    contractKey <- exceptTMaybeT offerFilled $ return mcontractKey
 
-  let contractEntity = Entity contractKey contractRow
-  -- sent to every connection, so without yourRole
-  lift $ publishLiveEvent $! LiveEvent
-    (LiveMessageContractCreated
-      (contractInfoFromEntity Nothing mTip contractEntity)
-    )
-    -- the maker's balance does not change on accept
-    [(takerUUIDV, takerBalance)]
-  lift $ publishLiveEvent $! LiveEvent
-    (LiveMessageOfferChanged (offerInfoFromEntity (Entity key acceptedVal)))
-    []
-  return $! contractInfoFromEntity (Just "taker") mTip contractEntity
+    let contractEntity = Entity contractKey contractRow
+    -- sent to every connection, so without yourRole
+    lift $ publishLiveEvent $! LiveEvent
+      (LiveMessageContractCreated
+        (contractInfoFromEntity Nothing mTip contractEntity)
+      )
+      -- the maker's balance does not change on accept
+      [(takerUUIDV, takerBalance)]
+    lift $ publishLiveEvent $! LiveEvent
+      (LiveMessageOfferChanged (offerInfoFromEntity (Entity key acceptedVal)))
+      []
+    return $! contractInfoFromEntity (Just "taker") mTip contractEntity
