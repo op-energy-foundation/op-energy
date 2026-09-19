@@ -10,9 +10,8 @@ import           Control.Monad (forM, when)
 import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.Trans.Except (ExceptT(..), throwE)
-import           Control.Monad.IO.Class (MonadIO, liftIO)
+import           Control.Monad.IO.Class (MonadIO)
 import           Control.Monad.Logger (logError, logInfo)
-import           Data.Time.Clock (getCurrentTime)
 
 import           Database.Persist.Postgresql
 import           Prometheus (MonadMonitor)
@@ -26,6 +25,7 @@ import qualified Data.OpEnergy.Offer.API.V1.Constants as C
 import           Data.OpEnergy.Offer.API.V1.LiveMessage (LiveMessage(..))
 import           Data.Text.Show (tshow)
 
+import           OpEnergy.Offer.Server.V1.Time (getCurrentTimeDB)
 import           OpEnergy.Offer.Server.V1.Class
                  ( AppT
                  , State(..)
@@ -126,7 +126,7 @@ settleContract (Entity contractId contract@Contract{..}) =
   -- the contract and the winner's balance change from here on: in
   -- withLiveEventOrder, so the change's events are published in order
   withLiveEventOrderE $ do
-    now <- liftIO getCurrentTime
+    now <- getCurrentTimeDB
     -- the contract as the transaction below leaves it: keep both in sync
     let settledContract = contract
           { contractStatus = Settled
