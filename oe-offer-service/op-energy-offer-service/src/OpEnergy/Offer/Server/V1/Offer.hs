@@ -212,4 +212,3 @@ offerKeyFromIDText idText = case TR.decimal idText of
   Right (n, rest)
     | T.null rest && n <= toInteger (maxBound :: Int64) ->
       Just (toSqlKey (fromInteger n))
-  _ -> Nothing
