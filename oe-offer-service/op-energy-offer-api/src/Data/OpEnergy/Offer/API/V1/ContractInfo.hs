@@ -61,7 +61,7 @@ instance ToHttpApiData ContractID where
 defaultContractID :: ContractID
 defaultContractID = ContractID "1"
 
--- | one matched contract, as returned by accept/mine/list
+-- | one matched contract, as returned by accept/mine/list/:id/details
 data ContractInfo = ContractInfo
   { contractId       :: ContractID
   , offerId          :: OfferID

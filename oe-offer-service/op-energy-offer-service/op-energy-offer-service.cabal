@@ -43,6 +43,7 @@ library
                    , OpEnergy.Offer.Server.V2.OffersAPI.GetMine
                    , OpEnergy.Offer.Server.V2.OffersAPI.GetList
                    , OpEnergy.Offer.Server.V2.OffersAPI.GetById
+                   , OpEnergy.Offer.Server.V2.OffersAPI.GetDetails
                    , OpEnergy.Offer.Server.V2.CancelAPI
                    , OpEnergy.Offer.Server.V2.CancelAPI.Cancel
                    , OpEnergy.Offer.Server.V2.AcceptAPI
