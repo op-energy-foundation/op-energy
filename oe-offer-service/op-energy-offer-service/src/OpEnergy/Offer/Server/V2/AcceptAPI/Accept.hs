@@ -134,13 +134,14 @@ accept idText token =
     throwE offerFilled
   contractKey <- exceptTMaybeT offerFilled $ return mcontractKey
 
+  let contractEntity = Entity contractKey contractRow
+  -- sent to every connection, so without yourRole
   lift $ publishLiveEvent $! LiveEvent
     (LiveMessageContractCreated
-      (contractIDFromKey contractKey)
-      (offerIDFromKey key)
+      (contractInfoFromEntity Nothing mTip contractEntity)
     )
     [offerPersonUUID offerVal, takerUUIDV]
   lift $ publishLiveEvent $! LiveEvent
     (LiveMessageOfferChanged (offerInfoFromEntity (Entity key acceptedVal)))
     []
-  return $! contractInfoFromEntity (Just "taker") mTip (Entity contractKey contractRow)
+  return $! contractInfoFromEntity (Just "taker") mTip contractEntity
