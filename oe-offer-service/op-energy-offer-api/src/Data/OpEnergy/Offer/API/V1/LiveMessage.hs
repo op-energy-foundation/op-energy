@@ -130,9 +130,7 @@ liveMessagePairs (LiveMessageBlockNew height mmediantime) =
   , "mediantime" .= mmediantime
     (LiveMessageContractSettled contractId winnerSide actualMtpEpoch) =
   [ "type" .= ("contract.settled" :: Text)
-  , "contractId" .= contractId
-  , "winnerSide" .= winnerSide
-  , "actualMtpEpoch" .= actualMtpEpoch
+  , "contract" .= contract
   ]
 liveMessagePairs (LiveMessageBlockNew height mmediantime) =
   [ "type" .= ("block.new" :: Text)
