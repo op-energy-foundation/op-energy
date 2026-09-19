@@ -70,7 +70,8 @@ accept idText token =
   when (fromNatural (offerMatchedCount offerVal) >= fromNatural (offerTotalContracts offerVal)) $ throwE offerFilled
   when (offerPersonUUID offerVal == takerUUIDV) $ throwE cannotAcceptOwnOffer
 
-  _ <- ExceptT $ AccountClient.deductBalance takerUUIDV (Sats (offerTakerStakeSats offerVal))
+  Sats takerBalance <- ExceptT $ AccountClient.deductBalance takerUUIDV
+    (Sats (offerTakerStakeSats offerVal))
 
   now <- liftIO getCurrentTime
   mTip <- liftIO $ TVar.readTVarIO currentTipV
@@ -140,7 +141,8 @@ accept idText token =
         (LiveMessageContractCreated
           (contractInfoFromEntity Nothing mTip contractEntity)
         )
-        [offerPersonUUID offerVal, takerUUIDV]
+        -- the maker's balance does not change on accept
+        [(takerUUIDV, takerBalance)]
       lift $ publishLiveEvent $! LiveEvent
         (LiveMessageOfferChanged (offerInfoFromEntity (Entity key acceptedVal)))
         []
