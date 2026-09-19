@@ -48,6 +48,10 @@ data State = State
     -- amount of blocks it waits for confirmation), followed from its
     -- websocket by "OpEnergy.Offer.Server.V1.BlockspanClient". 'Nothing'
     -- until the first tip arrives
+  , currentTipMediantime :: TVar (Maybe Word64)
+    -- ^ mediantime of the block at 'currentTip', 'Nothing' while blockspan
+    -- service has not reported that block's header. Written and read
+    -- together with 'currentTip', in one transaction
   , liveEvents :: TChan (Word64, LiveEvent)
     -- ^ broadcast channel of published live events with their sequence
     -- numbers: every websocket connection reads its own copy of it. Events
@@ -67,6 +71,7 @@ defaultState :: (MonadLoggerIO m ) => Config-> MetricsState-> LogFunc-> Pool Sql
 defaultState config metrics logFunc offerDBPool = do
   logLevelV <- liftIO $ TVar.newTVarIO (configLogLevelMin config)
   currentTipV <- liftIO $ TVar.newTVarIO Nothing
+  currentTipMediantimeV <- liftIO $ TVar.newTVarIO Nothing
   liveEventsV <- liftIO $ TChan.newBroadcastTChanIO
   liveEventSeqV <- liftIO $ TVar.newTVarIO 0
   return $ State
@@ -76,6 +81,7 @@ defaultState config metrics logFunc offerDBPool = do
     , logLevel = logLevelV
     , metrics = metrics
     , currentTip = currentTipV
+    , currentTipMediantime = currentTipMediantimeV
     , liveEvents = liveEventsV
     , liveEventSeq = liveEventSeqV
     , callStack = ""
