@@ -24,7 +24,10 @@ import           OpEnergy.Offer.Server.V1.LiveEvent
                    ( LiveEvent(..)
                    , changedBalance
                    )
-import           OpEnergy.Offer.Server.V1.WebSocketService(publishLiveEvent)
+import           OpEnergy.Offer.Server.V1.WebSocketService
+                   ( publishLiveEvent
+                   , withLiveEventOrder
+                   )
 
 expireStaleOffers :: (MonadIO m, MonadMonitor m) => BlockHeight -> AppT m Int
 expireStaleOffers tipHeight =
@@ -37,7 +40,7 @@ expireStaleOffers tipHeight =
       [ OfferStatus ==. Open, OfferTargetBlock <=. tipHeight ]
       []
     )
-  results <- forM staleOfferIds $ \offerId -> do
+  results <- forM staleOfferIds $ \offerId -> withLiveEventOrder $ do
     mclosed <- refundAndCloseOffer offerId Expired now
     forM_ mclosed $ \(offerVal, ecredited) -> publishLiveEvent $! LiveEvent
       (LiveMessageOfferChanged (offerInfoFromEntity (Entity offerId offerVal)))
