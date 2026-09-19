@@ -8,13 +8,10 @@ module OpEnergy.Offer.Server.V2.OffersAPI.GetDetails
 
 import           Control.Monad.Trans.Reader(ask)
 import           Control.Monad.Trans(lift)
-import           Control.Monad.Trans.Except(throwE)
 import           Control.Monad.IO.Class(liftIO)
 import           Control.Monad.Logger(logError)
 import qualified Control.Concurrent.STM.TVar as TVar
 import           Data.Text(Text)
-import qualified Data.Text as T
-import qualified Data.Text.Read as TR
 
 import           Database.Persist.Postgresql
 
@@ -56,9 +53,8 @@ getDetails :: Text -> AppM (Either CallstackError OfferDetails)
 getDetails idText =
   let name = "V2.OffersAPI.GetDetails.getDetails"
   in profile name $ runExceptPrefixT name $ do
-  key <- case TR.decimal idText of
-    Right (n, rest) | T.null rest -> return (toSqlKey n :: OfferId)
-    _ -> throwE $ invalidRequest "invalid offer id"
+  key <- exceptTMaybeT (invalidRequest "invalid offer id")
+    $ return (offerKeyFromIDText idText)
   State{ currentTip = currentTipV } <- lift ask
   (mofferVal, contractRows) <- exceptTMaybeT dbQueryError
     $ withDBTransaction "selectOfferDetails" $ do
