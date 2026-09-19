@@ -20,8 +20,6 @@ import           Control.Monad.Trans.Except(ExceptT(..), throwE)
 import           Control.Monad.IO.Class(liftIO)
 import           Control.Monad.Logger(logError)
 import           Data.Text(Text)
-import qualified Data.Text as T
-import qualified Data.Text.Read as TR
 import           Data.Time.Clock(UTCTime, getCurrentTime)
 import           Data.Word(Word64)
 
@@ -61,9 +59,8 @@ cancel :: Text -> AccountAPI.AccountToken -> AppM (Either CallstackError OfferIn
 cancel idText token =
   let name = "V2.CancelAPI.Cancel.cancel"
   in profile name $ runExceptPrefixT name $ do
-  key <- case TR.decimal idText of
-    Right (n, rest) | T.null rest -> return (toSqlKey n :: OfferId)
-    _ -> throwE $ invalidRequest "invalid offer id"
+  key <- exceptTMaybeT (invalidRequest "invalid offer id")
+    $ return (offerKeyFromIDText idText)
 
   (AccountV2.WhoAmIResult personUUIDV _displayName _balance) <-
     ExceptT $ AccountClient.verifyAccountToken token
