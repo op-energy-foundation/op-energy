@@ -15,6 +15,7 @@ module OpEnergy.Error
 
   , accountServiceUnavailable
   , blockspanRequestFailed
+  , chainTipUnknown
 
   , authenticationFailure
   , invalidRequest
@@ -23,6 +24,8 @@ module OpEnergy.Error
   , notOfferOwner
   , offerNotOpen
   , offerFilled
+  , offerExpired
+  , offerChanged
   , cannotAcceptOwnOffer
   ) where
 
@@ -33,7 +36,10 @@ import           Data.Word(Word64)
 import           Control.Monad.Error.Class(MonadError)
 import           Control.Monad.Trans.Except(ExceptT(..), runExceptT, throwE)
 
-import           Servant(ServerError, err400, err401, err403, err404, err409, err500, err502)
+import           Servant
+                   ( ServerError, err400, err401, err403, err404, err409, err500
+                   , err502, err503
+                   )
 import           Data.Text.Show( tshow)
 import           Data.OpEnergy.API.V1.Error(throwJSON)
 
@@ -45,6 +51,8 @@ data BadRequestError
   | NotOfferOwner
   | OfferNotOpen
   | OfferFilled
+  | OfferExpired
+  | OfferChanged
   | CannotAcceptOwnOffer
 instance Show BadRequestError where
   show AuthenticationFailure = "authentication failure"
@@ -54,6 +62,8 @@ instance Show BadRequestError where
   show NotOfferOwner = "only the offer's creator may do this"
   show OfferNotOpen = "offer is not open"
   show OfferFilled = "offer has no remaining contracts"
+  show OfferExpired = "offer has expired at the current chain tip"
+  show OfferChanged = "offer has changed meanwhile, try again"
   show CannotAcceptOwnOffer = "cannot accept your own offer"
 
 data InternalError
@@ -73,6 +83,8 @@ data Error
   | Internal InternalError
   | AccountServiceUnavailable Text
   | BlockspanRequestFailed Text
+  | ChainTipUnknown
+    -- ^ the service has not received the chain tip yet
 
 data CallstackError = CallstackError Text Error
 
@@ -87,6 +99,8 @@ accountServiceUnavailable :: Text -> CallstackError
 accountServiceUnavailable = CallstackError "" . AccountServiceUnavailable
 blockspanRequestFailed :: Text -> CallstackError
 blockspanRequestFailed = CallstackError "" . BlockspanRequestFailed
+chainTipUnknown :: CallstackError
+chainTipUnknown = CallstackError "" $! ChainTipUnknown
 
 authenticationFailure :: CallstackError
 authenticationFailure = CallstackError "" $! BadRequest AuthenticationFailure
@@ -102,6 +116,10 @@ offerNotOpen :: CallstackError
 offerNotOpen = CallstackError "" $! BadRequest OfferNotOpen
 offerFilled :: CallstackError
 offerFilled = CallstackError "" $! BadRequest OfferFilled
+offerExpired :: CallstackError
+offerExpired = CallstackError "" $! BadRequest OfferExpired
+offerChanged :: CallstackError
+offerChanged = CallstackError "" $! BadRequest OfferChanged
 cannotAcceptOwnOffer :: CallstackError
 cannotAcceptOwnOffer = CallstackError "" $! BadRequest CannotAcceptOwnOffer
 
@@ -112,11 +130,15 @@ errorToServerError (BadRequest NotOfferOwner) = (err403, tshow NotOfferOwner)
 errorToServerError (BadRequest OfferNotFound) = (err404, tshow OfferNotFound)
 errorToServerError (BadRequest OfferNotOpen) = (err409, tshow OfferNotOpen)
 errorToServerError (BadRequest OfferFilled) = (err409, tshow OfferFilled)
+errorToServerError (BadRequest OfferExpired) = (err409, tshow OfferExpired)
+errorToServerError (BadRequest OfferChanged) = (err409, tshow OfferChanged)
 errorToServerError (BadRequest CannotAcceptOwnOffer) = (err403, tshow CannotAcceptOwnOffer)
 errorToServerError (BadRequest specificError) = (err400, tshow specificError)
 errorToServerError (Internal specificError) = (err500, tshow specificError)
 errorToServerError (AccountServiceUnavailable reason) = (err502, "account service unavailable: " <> reason)
 errorToServerError (BlockspanRequestFailed reason) = (err502, "blockspan request failed: " <> reason)
+errorToServerError ChainTipUnknown =
+  (err503, "the chain tip is not known yet, try again shortly")
 
 -- | renders a CallstackError as plain text for logging
 describeError :: CallstackError -> Text
