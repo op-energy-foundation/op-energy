@@ -112,11 +112,9 @@ liveMessagePairs (LiveMessageOfferCreated offer) =
   [ "type" .= ("offer.created" :: Text)
   , "offer" .= offer
   ]
-liveMessagePairs (LiveMessageOfferChanged offerId status matchedCount) =
+liveMessagePairs (LiveMessageOfferChanged offer) =
   [ "type" .= ("offer.changed" :: Text)
-  , "offerId" .= offerId
-  , "status" .= status
-  , "matchedCount" .= matchedCount
+  , "offer" .= offer
   ]
 liveMessagePairs (LiveMessageContractCreated contract) =
   [ "type" .= ("contract.created" :: Text)
