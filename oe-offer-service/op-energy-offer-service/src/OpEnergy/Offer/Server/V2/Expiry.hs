@@ -26,7 +26,10 @@ import           OpEnergy.Offer.Server.V1.Class
                  )
 import           OpEnergy.Offer.Server.V1.Offer
 import           OpEnergy.Offer.Server.V1.OfferService(refundAndCloseOffer)
-import           OpEnergy.Offer.Server.V1.LiveEvent(LiveEvent(..))
+import           OpEnergy.Offer.Server.V1.LiveEvent
+                   ( LiveEvent(..)
+                   , changedBalance
+                   )
 import           OpEnergy.Offer.Server.V1.WebSocketService(publishLiveEvent)
 
 -- | Closes every offer, whose target block the chain tip has passed, and

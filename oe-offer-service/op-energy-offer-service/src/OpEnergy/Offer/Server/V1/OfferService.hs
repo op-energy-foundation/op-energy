@@ -88,4 +88,4 @@ refundAndCloseOffer offerId newStatus now =
           <> " sats was NOT refunded -- "
           <> "creditBalance failed, needs manual reconciliation: " <> describeError err
           )
-      return $! Just offerVal
+      return $! Just (offerVal, ecredited)

@@ -40,7 +40,10 @@ import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLog
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           OpEnergy.Offer.Server.V1.Offer
-import           OpEnergy.Offer.Server.V1.LiveEvent(LiveEvent(..))
+import           OpEnergy.Offer.Server.V1.LiveEvent
+                   ( LiveEvent(..)
+                   , changedBalance
+                   )
 import           OpEnergy.Offer.Server.V1.WebSocketService(publishLiveEvent)
 import           Control.Monad(when)
 
@@ -87,7 +90,7 @@ cancel idText token =
   let offerInfo = offerInfoFromEntity (Entity key updatedVal)
   lift $ publishLiveEvent $! LiveEvent
     (LiveMessageOfferChanged offerInfo)
-    [personUUIDV]
+    (changedBalance personUUIDV ecredited)
   return $! offerInfo
 
 -- | closes the given account's open offer: fully when nothing is matched
