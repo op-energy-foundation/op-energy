@@ -3,6 +3,7 @@ module OpEnergy.Offer.Server.V2.OffersAPI
   ( getMineHandler
   , getListHandler
   , getByIdHandler
+  , getDetailsHandler
   ) where
 
 import           Data.OpEnergy.Offer.API.V1.OfferID
@@ -13,6 +14,9 @@ import           Data.OpEnergy.Offer.API.V1.OfferInfo
                  , PaginatedOffers
                  , MyOffersResult
                  )
+import           Data.OpEnergy.Offer.API.V1.OfferDetails
+                 ( OfferDetails
+                 )
 import           Data.OpEnergy.API.V1.Positive
 
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountV1
@@ -22,6 +26,7 @@ import           OpEnergy.Offer.Server.V1.Class (AppM)
 import qualified OpEnergy.Offer.Server.V2.OffersAPI.GetMine as GetMine
 import qualified OpEnergy.Offer.Server.V2.OffersAPI.GetList as GetList
 import qualified OpEnergy.Offer.Server.V2.OffersAPI.GetById as GetById
+import qualified OpEnergy.Offer.Server.V2.OffersAPI.GetDetails as GetDetails
 
 getMineHandler
   :: AccountV1.AccountToken
@@ -40,3 +45,8 @@ getByIdHandler
   :: OfferID
   -> AppM OfferInfo
 getByIdHandler = GetById.getByIdHandler
+
+getDetailsHandler
+  :: OfferID
+  -> AppM OfferDetails
+getDetailsHandler = GetDetails.getDetailsHandler
