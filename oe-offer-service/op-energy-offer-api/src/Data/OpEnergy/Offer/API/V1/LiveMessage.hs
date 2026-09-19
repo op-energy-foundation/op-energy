@@ -136,9 +136,10 @@ liveMessagePairs (LiveMessageBlockNew height mmediantime) =
   , "winnerSide" .= winnerSide
   , "actualMtpEpoch" .= actualMtpEpoch
   ]
-liveMessagePairs (LiveMessageBlockNew height) =
+liveMessagePairs (LiveMessageBlockNew height mmediantime) =
   [ "type" .= ("block.new" :: Text)
   , "height" .= height
+  , "mediantime" .= mmediantime
   ]
 liveMessagePairs LiveMessageMyChanged =
   [ "type" .= ("my.changed" :: Text)
