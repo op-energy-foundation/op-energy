@@ -74,16 +74,18 @@ webSocketConnection conn = do
   state@State{ liveEvents = liveEventsV
              , liveEventSeq = liveEventSeqV
              , currentTip = currentTipV
+             , currentTipMediantime = currentTipMediantimeV
              } <- ask
   liftIO $ do
     -- subscribes and reads the state it starts from in one transaction, so
     -- the connection receives every event published after that state. A
     -- chain tip, which is stored but not published yet, comes twice: in the
     -- state and as the next block.new, which the frontend can apply again
-    (eventsV, lastSeqNo, mtip) <- STM.atomically $ (,,)
+    (eventsV, lastSeqNo, mtip, mmediantime) <- STM.atomically $ (,,,)
       <$> TChan.dupTChan liveEventsV
       <*> TVar.readTVar liveEventSeqV
       <*> TVar.readTVar currentTipV
+      <*> TVar.readTVar currentTipMediantimeV
     personV <- TVar.newTVarIO Nothing
     sendLock <- MVar.newMVar ()
     let send :: SequencedMessage -> IO ()
@@ -96,7 +98,7 @@ webSocketConnection conn = do
         -- sent before any event is forwarded, so nothing can overtake them
         send (SequencedMessage (Just lastSeqNo) LiveMessageHello)
         forM_ mtip $ \tip ->
-          send (SequencedMessage Nothing (LiveMessageBlockNew tip))
+          send (SequencedMessage Nothing (LiveMessageBlockNew tip mmediantime))
         Async.race_
           (forever $ handleRequest state conn send personV)
           (forever $ forwardEvent send personV eventsV)

@@ -1,8 +1,10 @@
 {-- | Messages of the offer service's websocket: requests from the frontend
  - and live notifications about offers, contracts and new blocks.
  -
- - Notifications only say what has changed. The frontend is expected to
- - reload the affected data with the offer API.
+ - Notifications about offers and contracts only say what has changed.
+ - The frontend is expected to reload the affected data with the offer API.
+ - A new block's notification carries the chain tip's height and
+ - mediantime.
  -
  - Notifications sent to every connection are numbered 1, 2, ... from the
  - start of the service. Every connection first receives 'LiveMessageHello'
@@ -74,8 +76,11 @@ data LiveMessage
   | LiveMessageContractSettled ContractID OfferSide Word64
     -- ^ a contract has been settled. Contains the winning side and the
     -- actual mediantime of the contract's target block
-  | LiveMessageBlockNew BlockHeight
-    -- ^ new chain tip: confirmations of live contracts have changed
+  | LiveMessageBlockNew BlockHeight (Maybe Word64)
+    -- ^ new chain tip, or a newly known mediantime of the same tip: its
+    -- height and the mediantime of the block at that height, @null@ while
+    -- the offer service does not know it. On a new tip, confirmations of
+    -- live contracts have changed
   | LiveMessageMyChanged
     -- ^ something of the authenticated account has changed: its offers,
     -- contracts or balance. Sent only after 'LiveRequestAuth'
@@ -124,9 +129,10 @@ liveMessagePairs
   , "winnerSide" .= winnerSide
   , "actualMtpEpoch" .= actualMtpEpoch
   ]
-liveMessagePairs (LiveMessageBlockNew height) =
+liveMessagePairs (LiveMessageBlockNew height mmediantime) =
   [ "type" .= ("block.new" :: Text)
   , "height" .= height
+  , "mediantime" .= mmediantime
   ]
 liveMessagePairs LiveMessageMyChanged =
   [ "type" .= ("my.changed" :: Text)
