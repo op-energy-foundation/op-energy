@@ -1,11 +1,13 @@
 {-- | Shared logic for cancel and expiry -- the only two places an Offer's
- - stake is ever refunded.
+ - stake is ever refunded -- and the rule, shared by expiry and accept, of
+ - which offers can still be accepted.
  -}
 {-# LANGUAGE TemplateHaskell            #-}
 module OpEnergy.Offer.Server.V1.OfferService
   ( closeOfferIfOpenTx
   , refundAndCloseOffer
   , notAcceptableAtFilter
+  , isOfferAcceptableAt
   ) where
 
 import           Control.Monad(join)
@@ -32,10 +34,18 @@ import           Data.Text.Show(tshow)
 -- given chain tip: an offer can be accepted up to and including its
 -- validTillBlock, and never once the tip has reached its target block. The
 -- second condition matters for an offer whose validTillBlock is not before
--- its target block.
+-- its target block. Selects exactly the offers for which
+-- 'isOfferAcceptableAt' is False: keep both in sync.
 notAcceptableAtFilter :: BlockHeight -> [Filter Offer]
 notAcceptableAtFilter tip =
   [ OfferValidTillBlock <. tip ] ||. [ OfferTargetBlock <=. tip ]
+
+-- | Whether the given offer can still be accepted at the given chain tip:
+-- up to and including its validTillBlock, and before the tip reaches its
+-- target block. The opposite of 'notAcceptableAtFilter'.
+isOfferAcceptableAt :: BlockHeight -> Offer -> Bool
+isOfferAcceptableAt tip offerVal =
+  tip <= offerValidTillBlock offerVal && tip < offerTargetBlock offerVal
 
 -- | Idempotent, atomic, local-only status flip
 closeOfferIfOpenTx
