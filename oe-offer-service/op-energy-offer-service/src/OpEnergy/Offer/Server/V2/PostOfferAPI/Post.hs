@@ -17,7 +17,6 @@ import           Control.Monad.Logger(logError)
 import qualified Control.Concurrent.STM.TVar as TVar
 import           Control.Exception.Safe(SomeException)
 import qualified Control.Exception.Safe as E
-import           Data.Time.Clock(getCurrentTime)
 
 import           Database.Persist.Postgresql
 
@@ -29,6 +28,7 @@ import qualified Data.OpEnergy.Offer.API.V1.Constants as C
 import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 import           Data.Text.Show(tshow)
 
+import           OpEnergy.Offer.Server.V1.Time(getCurrentTimeDB)
 import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
 import           OpEnergy.Offer.Server.V1.Config(Config(..))
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
@@ -83,7 +83,7 @@ post token PostOfferRequest{..} =
     Sats makerBalance <-
       ExceptT $ AccountClient.deductBalance personUUIDV (Sats totalStake)
 
-    now <- liftIO getCurrentTime
+    now <- getCurrentTimeDB
     State{ offerDBPool = pool } <- lift ask
     let offerRow = Offer
           { offerPersonUUID = personUUIDV
