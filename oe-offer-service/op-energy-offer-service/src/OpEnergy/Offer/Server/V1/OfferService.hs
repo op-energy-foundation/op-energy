@@ -5,6 +5,7 @@
 module OpEnergy.Offer.Server.V1.OfferService
   ( closeOfferIfOpenTx
   , refundAndCloseOffer
+  , notAcceptableAtFilter
   ) where
 
 import           Control.Monad(join)
@@ -17,6 +18,7 @@ import           Data.Time.Clock(UTCTime)
 import           Database.Persist.Postgresql
 import           Prometheus(MonadMonitor)
 
+import           Data.OpEnergy.API.V1.Block(BlockHeight)
 import           Data.OpEnergy.API.V1.Natural(fromNatural)
 import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
 import           OpEnergy.Offer.Server.V1.Class(AppT, runLogging, withDBTransaction)
@@ -25,6 +27,15 @@ import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           OpEnergy.Error(CallstackError, describeError)
 import           Data.Text.Show(tshow)
+
+-- | DB filter for the offers, which can not be accepted anymore at the
+-- given chain tip: an offer can be accepted up to and including its
+-- validTillBlock, and never once the tip has reached its target block. The
+-- second condition matters for an offer whose validTillBlock is not before
+-- its target block.
+notAcceptableAtFilter :: BlockHeight -> [Filter Offer]
+notAcceptableAtFilter tip =
+  [ OfferValidTillBlock <. tip ] ||. [ OfferTargetBlock <=. tip ]
 
 -- | Idempotent, atomic, local-only status flip
 closeOfferIfOpenTx
