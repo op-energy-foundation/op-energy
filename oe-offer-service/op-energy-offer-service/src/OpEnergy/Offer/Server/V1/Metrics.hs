@@ -26,6 +26,7 @@ import           Data.OpEnergy.API.V1.Positive
 -- | defines the whole state used by backend
 data MetricsState = MetricsState
   { offerPost :: P.Histogram
+  , offerAccept :: P.Histogram
   , offerGetMine :: P.Histogram
   , offerGetList :: P.Histogram
   , offerGetById :: P.Histogram
@@ -40,6 +41,7 @@ data MetricsState = MetricsState
 initMetrics :: MonadIO m => Config-> m MetricsState
 initMetrics _config = do
   offerPost <- P.register $ P.histogram (P.Info "offerPost" "") microBuckets
+  offerAccept <- P.register $ P.histogram (P.Info "offerAccept" "") microBuckets
   offerGetMine <- P.register $ P.histogram (P.Info "offerGetMine" "") microBuckets
   offerGetList <- P.register $ P.histogram (P.Info "offerGetList" "") microBuckets
   offerGetById <- P.register $ P.histogram (P.Info "offerGetById" "") microBuckets
@@ -51,6 +53,7 @@ initMetrics _config = do
   tmap <- liftIO $ STM.newTVarIO (Map.empty)
   return $ MetricsState
     { offerPost = offerPost
+    , offerAccept = offerAccept
     , offerGetMine = offerGetMine
     , offerGetList = offerGetList
     , offerGetById = offerGetById

@@ -14,15 +14,23 @@ import           Data.OpEnergy.Account.API.V1.Account
 import           Data.OpEnergy.Offer.API.V1.OfferStatus
                  ( OfferStatus
                  )
-import           Data.OpEnergy.Offer.API.V1.OfferInfo
+import           Data.OpEnergy.Offer.API.V1.OfferID
                  ( OfferID
-                 , OfferInfo
+                 )
+import           Data.OpEnergy.Offer.API.V1.OfferInfo
+                 ( OfferInfo
                  , PaginatedOffers
+                 , MyOffersResult
                  , PostOfferRequest
                  , PostOfferResult
                  )
+import           Data.OpEnergy.Offer.API.V1.ContractInfo
+                 ( ContractInfo
+                 )
 
 -- | all offer endpoints in one API type
+--
+-- Route order: post, cancel, accept, mine, list, getById
 type OffersAPI
   = "post"
     :> Header'
@@ -34,8 +42,8 @@ type OffersAPI
        "Authorization"
        AccountToken
     :> ReqBody '[JSON] PostOfferRequest
-    :> Description "Posts one or more maker offers, staking \
-                   \numberOfOffers*makerStakeSats sats from the caller's \
+    :> Description "Posts one offer group, staking \
+                   \totalContracts*makerStakeSats sats from the caller's \
                    \sandbox wallet balance."
     :> Post '[JSON] PostOfferResult
 
@@ -50,8 +58,24 @@ type OffersAPI
        "Authorization"
        AccountToken
     :> Description "Cancels the given offer. Only its creator may, and \
-                   \only while it is still open. Refunds the stake."
+                   \only while it is still open. Refunds the unfilled \
+                   \portion of the stake."
     :> Post '[JSON] OfferInfo
+
+  :<|> Capture "id" OfferID
+    :> "accept"
+    :> Header'
+       '[ Required
+        , Strict
+        , Description "Account token gotten from the account service's \
+                      \/login or /register"
+        ]
+       "Authorization"
+       AccountToken
+    :> Description "Accepts one contract from the given offer. Deducts \
+                   \takerStakeSats from the caller's balance. The caller \
+                   \must not be the offer creator."
+    :> Post '[JSON] ContractInfo
 
   :<|> "mine"
     :> Header'
@@ -62,9 +86,9 @@ type OffersAPI
         ]
        "Authorization"
        AccountToken
-    :> Description "Lists offers posted by the authenticated account, \
-                   \newest first."
-    :> Get '[JSON] [OfferInfo]
+    :> Description "Returns the authenticated user's offers and \
+                   \contracts (as maker or taker)."
+    :> Get '[JSON] MyOffersResult
 
   :<|> "list"
     :> QueryParam'
@@ -95,7 +119,8 @@ type OffersAPI
         ]
        "limit"
        (Positive Int)
-    :> Description "Public listing of offers across every account."
+    :> Description "Public listing of offers and contracts across \
+                   \every account."
     :> Get '[JSON] PaginatedOffers
 
   :<|> Capture "id" OfferID
