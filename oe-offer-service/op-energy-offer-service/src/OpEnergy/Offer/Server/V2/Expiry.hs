@@ -15,6 +15,7 @@ import           Database.Persist.Postgresql
 import           Prometheus(MonadMonitor)
 
 import           Data.OpEnergy.API.V1.Block(BlockHeight)
+import           Data.OpEnergy.API.V1.Natural(fromNatural)
 import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
 import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 
