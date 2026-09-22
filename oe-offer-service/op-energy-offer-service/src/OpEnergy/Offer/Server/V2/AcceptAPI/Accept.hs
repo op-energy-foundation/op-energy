@@ -102,6 +102,11 @@ accept idText token =
   let staleCount = offerMatchedCount offerVal
       newCount   = verifyNatural (fromNatural staleCount + 1)
       isFilled   = fromNatural newCount >= fromNatural (offerTotalContracts offerVal)
+      -- the offer as the transaction below leaves it
+      acceptedVal = offerVal
+        { offerMatchedCount = newCount
+        , offerStatus = if isFilled then Filled else Open
+        }
   mContractKey <- liftIO $ flip runSqlPersistMPool pool $ do
     bumped <- updateWhereCount
       [ OfferId ==. key
@@ -132,14 +137,10 @@ accept idText token =
       lift $ publishLiveEvent $! LiveEvent
         (LiveMessageContractCreated
           (contractIDFromKey contractKey)
-          (OfferID idText)
+          (offerIDFromKey key)
         )
         [offerPersonUUID offerVal, takerUUIDV]
       lift $ publishLiveEvent $! LiveEvent
-        (LiveMessageOfferChanged
-          (OfferID idText)
-          (if isFilled then Filled else Open)
-          (fromIntegral (fromNatural newCount))
-        )
+        (LiveMessageOfferChanged (offerInfoFromEntity (Entity key acceptedVal)))
         []
       return $! contractInfoFromEntity (Just "taker") mTip (Entity contractKey contractRow)
