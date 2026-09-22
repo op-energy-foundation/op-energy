@@ -167,10 +167,10 @@ contractInfoFromEntity mYourRole mTip (Entity key Contract{..}) =
   let idText = tshow (fromSqlKey key)
       offerIdText = tshow (fromSqlKey contractOfferId)
       confs = case (contractStatus, mTip) of
-        (Live, Just tip) ->
+        (Live, Just tip) -> -- the blocks mined after the target block
           let tipInt = fromNatural tip
               tgtInt = fromNatural contractTargetBlock
-          in fromIntegral (max 0 (tipInt - tgtInt + 1))
+          in fromIntegral (max 0 (tipInt - tgtInt))
         (Settled, _) -> C.settlementConfirmations
         _ -> 0
   in CAPI.ContractInfo
