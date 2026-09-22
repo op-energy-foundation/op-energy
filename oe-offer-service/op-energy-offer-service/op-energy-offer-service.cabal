@@ -31,6 +31,7 @@ library
                    , OpEnergy.Offer.Server.V1.DB
                    , OpEnergy.Offer.Server.V1.DB.Migrations
                    , OpEnergy.Offer.Server.V1.AccountClient
+                   , OpEnergy.Offer.Server.V1.BlockspanClient
                    , OpEnergy.Offer.Server.V1.OfferService
                    , OpEnergy.Offer.Server.V2
                    , OpEnergy.Offer.Server.V2.PostOfferAPI
@@ -79,6 +80,7 @@ library
                     , async
                     , unliftio-core
                     , resourcet
+                    , websockets
     ghc-options:    -O2 -Wall -Werror -Wno-unticked-promoted-constructors -fno-warn-name-shadowing -Wno-orphans
     default-extensions:       OverloadedStrings
                             , ScopedTypeVariables

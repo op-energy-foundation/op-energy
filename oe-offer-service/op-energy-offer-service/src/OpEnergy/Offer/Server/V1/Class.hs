@@ -40,8 +40,10 @@ data State = State
   , logLevel :: TVar LogLevel
   , metrics :: MetricsState
   , currentTip :: TVar (Maybe BlockHeight)
-    -- ^ best-effort current chain tip. Never populated by this port --
-    -- wiring a live tip source is future work.
+    -- ^ chain tip height (blockspan service's newest confirmed block plus the
+    -- amount of blocks it waits for confirmation), followed from its
+    -- websocket by "OpEnergy.Offer.Server.V1.BlockspanClient". 'Nothing'
+    -- until the first tip arrives
   , callStack :: Text
   }
 
