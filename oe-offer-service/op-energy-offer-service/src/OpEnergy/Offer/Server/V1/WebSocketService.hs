@@ -6,10 +6,13 @@
 module OpEnergy.Offer.Server.V1.WebSocketService
   ( webSocketConnection
   , publishLiveEvent
+  , withLiveEventOrder
+  , withLiveEventOrderE
   ) where
 
 import           Control.Monad (forever, forM_)
 import           Control.Monad.Trans.Reader (ask)
+import           Control.Monad.Trans.Except (ExceptT(..), runExceptT)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Logger (logDebug)
 import qualified Control.Concurrent.Async as Async
@@ -55,7 +58,8 @@ keepAlivePingSecs = 30
 -- sequence number. The number is taken and the event is queued in one
 -- transaction, so every connection receives the events in the order of
 -- their numbers. Should be called only after the change has been committed
--- to the DB
+-- to the DB, and, for a change of offers, contracts or balances, inside the
+-- change's 'withLiveEventOrder'
 publishLiveEvent :: MonadIO m => LiveEvent -> AppT m ()
 publishLiveEvent event = do
   State{ liveEvents = liveEventsV, liveEventSeq = liveEventSeqV } <- ask
@@ -63,6 +67,36 @@ publishLiveEvent event = do
     seqNo <- (+ 1) <$> TVar.readTVar liveEventSeqV
     TVar.writeTVar liveEventSeqV $! seqNo
     TChan.writeTChan liveEventsV (seqNo, event)
+
+-- | Runs the given part of a change of offers, contracts or balances -- the
+-- part, which changes them and publishes the change's live events -- while
+-- no other such part runs. So changes publish their events in the order
+-- they are made, and a connection never receives an older state of an
+-- offer, a contract or a balance after a newer one, which the sequence
+-- numbers alone can't prevent: they are taken when an event is published,
+-- not when its change is committed.
+--
+-- Reads, which change nothing, are made before: verifying the token, the
+-- checks of a request (except cancel's, which go with its update) and the
+-- mediantime of a contract's target block, so a slow one does not hold up
+-- other changes. The account service calls, which change a balance, are
+-- inside, as their order matters. The conditional DB updates of accept,
+-- cancel, expiry and settlement stay: accept reads the offer before taking
+-- the lock, so its conditional update is what keeps two accepts from taking
+-- the same slot, and all of them keep the data consistent with more than
+-- one instance of the service. Must not be nested: the lock is not
+-- reentrant.
+withLiveEventOrder :: MonadIO m => AppT IO a -> AppT m a
+withLiveEventOrder change = do
+  state@State{ liveEventOrder = liveEventOrderV } <- ask
+  liftIO $ MVar.withMVar liveEventOrderV $ \_ -> runAppT state change
+
+-- | 'withLiveEventOrder' for a change, which can fail
+withLiveEventOrderE
+  :: MonadIO m
+  => ExceptT e (AppT IO) a
+  -> ExceptT e (AppT m) a
+withLiveEventOrderE = ExceptT . withLiveEventOrder . runExceptT
 
 -- | This procedure is the mainloop of every websocket connection, which:
 --

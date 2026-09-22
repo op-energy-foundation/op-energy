@@ -40,7 +40,10 @@ import           OpEnergy.Offer.Server.V1.LiveEvent
                  ( LiveEvent(..)
                  , changedBalance
                  )
-import           OpEnergy.Offer.Server.V1.WebSocketService (publishLiveEvent)
+import           OpEnergy.Offer.Server.V1.WebSocketService
+                 ( publishLiveEvent
+                 , withLiveEventOrderE
+                 )
 import qualified OpEnergy.Offer.Server.V1.BlockspanClient as BlockspanClient
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           OpEnergy.Error
@@ -120,46 +123,50 @@ settleContract (Entity contractId contract@Contract{..}) =
         then contractMakerUUID
         else contractTakerUUID
       payoutSats = potSats - platformFeeSats
-  now <- liftIO getCurrentTime
-  -- the contract as the transaction below leaves it: keep both in sync
-  let settledContract = contract
-        { contractStatus = Settled
-        , contractWinnerSide = Just winnerSide
-        , contractActualMtpEpoch = Just actualMtpEpoch
-        , contractSettledAt = Just now
-        }
-  settled <- exceptTMaybeT dbQueryError $ withDBTransaction "markSettled" $ do
-    updated <- updateWhereCount
-      [ ContractId ==. contractId, ContractStatus ==. Live ]
-      [ ContractStatus =. Settled
-      , ContractWinnerSide =. Just winnerSide
-      , ContractActualMtpEpoch =. Just actualMtpEpoch
-      , ContractSettledAt =. Just now
-      ]
-    when (updated == 1) $ addCollectedFeeTx platformFeeSats now
-    return $! updated == 1
-  when settled $ do
-    ecredited <- lift $ AccountClient.creditBalance winnerUUID (Sats payoutSats)
-    lift $ runLogging $ case ecredited of
-      Right _ -> $(logInfo)
-        ( "contract " <> tshow (fromSqlKey contractId) <> " settled: "
-        <> tshow winnerSide <> " won, " <> tshow payoutSats
-        <> " sats credited to " <> tshow winnerUUID
+  -- the contract and the winner's balance change from here on: in
+  -- withLiveEventOrder, so the change's events are published in order
+  withLiveEventOrderE $ do
+    now <- liftIO getCurrentTime
+    -- the contract as the transaction below leaves it: keep both in sync
+    let settledContract = contract
+          { contractStatus = Settled
+          , contractWinnerSide = Just winnerSide
+          , contractActualMtpEpoch = Just actualMtpEpoch
+          , contractSettledAt = Just now
+          }
+    settled <- exceptTMaybeT dbQueryError $ withDBTransaction "markSettled" $ do
+      updated <- updateWhereCount
+        [ ContractId ==. contractId, ContractStatus ==. Live ]
+        [ ContractStatus =. Settled
+        , ContractWinnerSide =. Just winnerSide
+        , ContractActualMtpEpoch =. Just actualMtpEpoch
+        , ContractSettledAt =. Just now
+        ]
+      when (updated == 1) $ addCollectedFeeTx platformFeeSats now
+      return $! updated == 1
+    when settled $ do
+      ecredited <- lift
+        $ AccountClient.creditBalance winnerUUID (Sats payoutSats)
+      lift $ runLogging $ case ecredited of
+        Right _ -> $(logInfo)
+          ( "contract " <> tshow (fromSqlKey contractId) <> " settled: "
+          <> tshow winnerSide <> " won, " <> tshow payoutSats
+          <> " sats credited to " <> tshow winnerUUID
+          )
+        Left err -> $(logError)
+          ( "contract " <> tshow (fromSqlKey contractId) <> " settled ("
+          <> tshow winnerSide <> " won) but its payout of " <> tshow payoutSats
+          <> " sats was NOT credited to " <> tshow winnerUUID
+          <> " -- creditBalance failed, needs manual reconciliation: "
+          <> describeError err
+          )
+      -- sent to every connection, so without yourRole. No chain tip is
+      -- needed: a settled contract's confirmations don't depend on it
+      lift $ publishLiveEvent $! LiveEvent
+        (LiveMessageContractSettled
+          (contractInfoFromEntity Nothing Nothing
+            (Entity contractId settledContract))
         )
-      Left err -> $(logError)
-        ( "contract " <> tshow (fromSqlKey contractId) <> " settled ("
-        <> tshow winnerSide <> " won) but its payout of " <> tshow payoutSats
-        <> " sats was NOT credited to " <> tshow winnerUUID
-        <> " -- creditBalance failed, needs manual reconciliation: "
-        <> describeError err
-        )
-    -- sent to every connection, so without yourRole. No chain tip is
-    -- needed: a settled contract's confirmations don't depend on it
-    lift $ publishLiveEvent $! LiveEvent
-      (LiveMessageContractSettled
-        (contractInfoFromEntity Nothing Nothing
-          (Entity contractId settledContract))
-      )
-      -- only the winner's balance has changed
-      (changedBalance winnerUUID ecredited)
-  return settled
+        -- only the winner's balance has changed
+        (changedBalance winnerUUID ecredited)
+    return settled
