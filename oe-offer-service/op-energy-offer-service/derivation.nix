@@ -25,6 +25,7 @@
 , resourcet
 , mtl
 , websockets
+, servant-websockets
 , GIT_COMMIT_HASH
 , ...
 }:
@@ -61,6 +62,7 @@ mkDerivation {
     unliftio-core
     resourcet
     websockets
+    servant-websockets
   ];
   preBuild = ''
     sed -i 's/GIT_COMMIT_HASH/${GIT_COMMIT_HASH}/' src/OpEnergy/Offer/Server/GitCommitHash.hs
