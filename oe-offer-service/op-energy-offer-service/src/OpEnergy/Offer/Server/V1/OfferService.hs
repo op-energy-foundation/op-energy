@@ -7,17 +7,19 @@ module OpEnergy.Offer.Server.V1.OfferService
   , refundAndCloseOffer
   ) where
 
-import           Control.Monad.Trans.Reader(ReaderT, ask)
-import           Control.Monad.IO.Class(MonadIO, liftIO)
+import           Control.Monad(join)
+import           Control.Monad.Trans.Reader(ReaderT)
+import           Control.Monad.IO.Class(MonadIO)
 import           Control.Monad.Logger(logError)
 import           Data.Int(Int64)
 import           Data.Time.Clock(UTCTime)
 
 import           Database.Persist.Postgresql
+import           Prometheus(MonadMonitor)
 
 import           Data.OpEnergy.API.V1.Natural(fromNatural)
 import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
-import           OpEnergy.Offer.Server.V1.Class(AppT, State(..), runLogging)
+import           OpEnergy.Offer.Server.V1.Class(AppT, runLogging, withDBTransaction)
 import           OpEnergy.Offer.Server.V1.Offer
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
@@ -52,16 +54,17 @@ closeOfferIfOpenTx offerId newStatus now = do
 
 -- | Full refund-and-close: local flip then cross-service credit.
 -- Refunds @makerStakeSats * (totalContracts - matchedCount)@ — only
--- the unfilled portion of the offer.
+-- the unfilled portion of the offer. A failed DB transaction is logged and
+-- treated as "not closed", so the caller can retry later.
 refundAndCloseOffer
-  :: (MonadIO m)
+  :: (MonadIO m, MonadMonitor m)
   => OfferId
   -> OfferStatus
   -> UTCTime
   -> AppT m (Maybe Offer)
 refundAndCloseOffer offerId newStatus now = do
-  State{ offerDBPool = pool } <- ask
-  mClosed <- liftIO $ flip runSqlPersistMPool pool $ closeOfferIfOpenTx offerId newStatus now
+  mClosed <- join <$> withDBTransaction "closeOfferIfOpenTx"
+    (closeOfferIfOpenTx offerId newStatus now)
   case mClosed of
     Nothing -> return Nothing
     Just offerVal -> do
