@@ -32,6 +32,7 @@ type OfferWebSocketAPI
 -- | Combined API of the Offer service with Swagger documentation.
 type API
   = OfferSwaggerAPI
+  :<|> OfferWebSocketAPI
   :<|> OfferAPI
 
 -- | Swagger spec for the Offer API.
