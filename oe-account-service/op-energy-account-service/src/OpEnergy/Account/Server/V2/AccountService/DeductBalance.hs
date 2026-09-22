@@ -14,7 +14,7 @@ import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Logger(logError)
 import           Control.Monad.Trans (lift)
-import           Control.Monad.Trans.Except (throwE)
+import           Control.Monad.Trans.Except (ExceptT(..), runExceptT, throwE)
 import           Data.Int(Int64)
 import           Data.Text(Text)
 import           Data.Time.Clock(getCurrentTime)
@@ -59,7 +59,10 @@ deductBalanceHandler secret request =
       $ deductBalance secret request
 
 -- | business logic for V2 balance deduction. Uses updateWhereCount with
--- a balance guard to atomically reject underflow.
+-- a balance guard to atomically reject underflow. Returns the balance after
+-- the deduction, read in the same transaction as the update: the update
+-- holds the account's row lock until the transaction commits, so no other
+-- change of the balance can come in between.
 deductBalance
   :: Text
   -> BalanceAdjustRequest
@@ -70,17 +73,17 @@ deductBalance secret (BalanceAdjustRequest personUUIDV (Sats amountSats)) =
   checkInternalServiceSecret secret
   State{ accountDBPool = pool } <- lift ask
   let modelUUID = modelApiUUIDPerson personUUIDV
-  (Entity key person) <- exceptTMaybeT accountNotFound
+  (Entity key _) <- exceptTMaybeT accountNotFound
     $ liftIO $ flip runSqlPersistMPool pool
     $ selectFirst [ PersonUuid ==. modelUUID ] []
-  deducted <- liftIO $ flip runSqlPersistMPool pool $ do
+  balance <- ExceptT $ liftIO $ flip runSqlPersistMPool pool $ runExceptT $ do
     nowUTC <- liftIO getCurrentTime
     let now = utcTimeToPOSIXSeconds nowUTC
-    updateWhereCount
+    deducted <- lift $ updateWhereCount
       [ PersonId ==. key, PersonBalance >=. Sats amountSats ]
       [ PersonBalance -=. Sats amountSats
       , PersonLastUpdated =. now
       ]
-  when (deducted /= (1 :: Int64)) $ throwE insufficientBalance
-  let Sats currentBalance = personBalance person
-  return $! BalanceAdjustResult (Sats (currentBalance - amountSats))
+    when (deducted /= (1 :: Int64)) $ throwE insufficientBalance
+    exceptTMaybeT accountNotFound $ fmap personBalance <$> get key
+  return $! BalanceAdjustResult balance
