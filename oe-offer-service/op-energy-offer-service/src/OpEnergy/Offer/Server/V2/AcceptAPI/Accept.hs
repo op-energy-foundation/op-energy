@@ -27,12 +27,15 @@ import           Data.OpEnergy.Offer.API.V1.OfferID(OfferID(..))
 import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
 import           Data.OpEnergy.Offer.API.V1.ContractStatus(ContractStatus(..))
 import           Data.OpEnergy.Offer.API.V1.ContractInfo(ContractInfo)
+import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 import qualified Control.Concurrent.STM.TVar as TVar
 
 import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           OpEnergy.Offer.Server.V1.Offer
+import           OpEnergy.Offer.Server.V1.LiveEvent(LiveEvent(..))
+import           OpEnergy.Offer.Server.V1.WebSocketService(publishLiveEvent)
 
 import           OpEnergy.Error
                    ( eitherThrowJSON, runExceptPrefixT
@@ -100,6 +103,7 @@ accept idText token =
   -- The CAS update prevents two concurrent accepts from overselling.
   let staleCount = offerMatchedCount offerVal
       newCount   = verifyNatural (fromNatural staleCount + 1)
+      isFilled   = fromNatural newCount >= fromNatural (offerTotalContracts offerVal)
   mContractKey <- liftIO $ flip runSqlPersistMPool pool $ do
     bumped <- updateWhereCount
       [ OfferId ==. key
@@ -111,7 +115,7 @@ accept idText token =
       then return Nothing
       else do
         cKey <- insert contractRow
-        when (fromNatural newCount >= fromNatural (offerTotalContracts offerVal)) $
+        when isFilled $
           update key [ OfferStatus =. Filled ]
         return (Just cKey)
 
@@ -126,5 +130,18 @@ accept idText token =
           <> " sats failed, needs manual reconciliation: " <> describeError err
           )
       throwE offerFilled
-    Just contractKey ->
+    Just contractKey -> do
+      lift $ publishLiveEvent $! LiveEvent
+        (LiveMessageContractCreated
+          (contractIDFromKey contractKey)
+          (OfferID idText)
+        )
+        [offerPersonUUID offerVal, takerUUIDV]
+      lift $ publishLiveEvent $! LiveEvent
+        (LiveMessageOfferChanged
+          (OfferID idText)
+          (if isFilled then Filled else Open)
+          (fromIntegral (fromNatural newCount))
+        )
+        []
       return $! contractInfoFromEntity (Just "taker") mTip (Entity contractKey contractRow)
