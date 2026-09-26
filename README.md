@@ -162,22 +162,22 @@ in
       db_user = "openergy";
       db_name = db;
       db_psk = op-energy-db-psk-mainnet;
+      credentials_location = {
+        DB_PASSWORD_SECRET =  "/etc/nixos/private/OP_ENERGY_BLOCKSPANS_MAINNET_DB_PASSWORD_SECRET";
+        BTC_PASSWORD_SECRET =  "/etc/nixos/private/OP_ENERGY_BLOCKSPANS_MAINNET_BTC_PASSWORD_SECRET";
+      };
+
       config = ''
-        {
           "DB_PORT": 5432,
           "DB_HOST": "127.0.0.1",
           "DB_USER": "\${db}",
           "DB_NAME": "\${db}",
-          "DB_PASSWORD": "\${op-energy-db-psk-mainnet}",
-          "SECRET_SALT": "\${op-energy-db-salt-mainnet}",
           "API_HTTP_PORT": 8999,
           "BTC_URL": "http://127.0.0.1:8332",
           "BTC_USER": "op-energy",
-          "BTC_PASSWORD": "\${bitcoind-mainnet-rpc-psk}",
           "BTC_POLL_RATE_SECS": 10,
           "PROMETHEUS_PORT": 7999,
-          "SCHEDULER_POLL_RATE_SECS": 10
-        }
+          "SCHEDULER_POLL_RATE_SECS": 10,
       '';
     };
   };
@@ -186,21 +186,21 @@ in
     enable = true;
     db_name = "openergyacc";
     db_user = "openergy";
-    db_psk = op-energy-db-psk-mainnet;
+    credentials_locations = {
+        DB_PASSWORD_SECRET =  "/etc/nixos/private/OP_ENERGY_ACCOUNT_DB_PASSWORD_SECRET";
+        ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY_SECRET = "/etc/nixos/private/OP_ENERGY_ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY_SECRET";
+        INTERNAL_SERVICE_SHARED_SECRET_SECRET = "/etc/nixos/private/INTERNAL_SERVICE_SHARED_SECRET";
+        SECRET_SALT_SECRET =  "/etc/nixos/private/OP_ENERGY_ACCOUNT_SECRET_SALT_SECRET";
+    };
     config = ''
-      {
         "DB_PORT": 5432,
         "DB_HOST": "127.0.0.1",
         "DB_USER": "openergy",
         "DB_NAME": "openergyacc",
-        "DB_PASSWORD": "\${op-energy-db-psk-mainnet}",
-        "SECRET_SALT": "\${op-energy-db-salt-mainnet}",
-        "ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY": "\${op-energy-account-token-encryption-key}",
         "API_HTTP_PORT": 8899,
         "PROMETHEUS_PORT": 7899,
         "LOG_LEVEL_MIN": "Debug",
-        "SCHEDULER_POLL_RATE_SECS": 10
-      }
+        "SCHEDULER_POLL_RATE_SECS": 10,
     '';
   };
 
