@@ -121,6 +121,7 @@ let
   opEnergyFrontendModule = import ./overlays/op-energy-frontend/frontend/module-frontend.nix { GIT_COMMIT_HASH = GIT_COMMIT_HASH OP_ENERGY_FRONTEND_REPO_LOCATION; };
   opEnergyBackendModule = import ./overlays/op-energy-blockspan-service/op-energy-backend/module-backend.nix { GIT_COMMIT_HASH = GIT_COMMIT_HASH OP_ENERGY_REPO_LOCATION; };
   opEnergyAccountServiceModule = import ./overlays/op-energy/oe-account-service/op-energy-account-service/module-backend.nix { GIT_COMMIT_HASH = GIT_COMMIT_HASH OP_ENERGY_ACCOUNT_REPO_LOCATION; };
+  opEnergyOfferServiceModule = import ./overlays/op-energy/oe-offer-service/op-energy-offer-service/module-backend.nix { GIT_COMMIT_HASH = GIT_COMMIT_HASH OP_ENERGY_ACCOUNT_REPO_LOCATION; };
 in
 {
   imports = [
@@ -128,6 +129,7 @@ in
     opEnergyFrontendModule
     opEnergyBackendModule
     opEnergyAccountServiceModule
+    opEnergyOfferServiceModule
   ];
   # bitcoind mainnet instance
   # if you are going to use aready existing node, then don't include this part of config
@@ -165,8 +167,6 @@ in
       config = ''
           "DB_PORT": 5432,
           "DB_HOST": "127.0.0.1",
-          "DB_USER": "\${db}",
-          "DB_NAME": "\${db}",
           "API_HTTP_PORT": 8999,
           "BTC_URL": "http://127.0.0.1:8332",
           "BTC_USER": "op-energy",
@@ -190,12 +190,31 @@ in
     config = ''
         "DB_PORT": 5432,
         "DB_HOST": "127.0.0.1",
-        "DB_USER": "openergy",
-        "DB_NAME": "openergyacc",
         "API_HTTP_PORT": 8899,
         "PROMETHEUS_PORT": 7899,
         "LOG_LEVEL_MIN": "Debug",
         "SCHEDULER_POLL_RATE_SECS": 10,
+    '';
+  };
+
+  services.op-energy-offer-service = {
+    enable = true;
+    db_name = "openergyoffer";
+    db_user = "openergy";
+    credentials_locations = {
+        DB_PASSWORD_SECRET =  "/etc/nixos/private/OP_ENERGY_OFFER_DB_PASSWORD_SECRET";
+        INTERNAL_SERVICE_SHARED_SECRET_SECRET = "/etc/nixos/private/INTERNAL_SERVICE_SHARED_SECRET";
+    };
+    config = ''
+        "DB_PORT": 5432,
+        "DB_HOST": "127.0.0.1",
+        "DB_USER": "openergy",
+        "DB_NAME": "openergyoffer",
+        "API_HTTP_PORT": 8909,
+        "PROMETHEUS_PORT": 7909,
+        "LOG_LEVEL_MIN": "Debug",
+        "SCHEDULER_POLL_RATE_SECS": 60,
+        "ACCOUNT_SERVICE_API_URL": "http://127.0.0.1:8899",
     '';
   };
 
