@@ -8,15 +8,22 @@ let
     $$
     begin
       if not exists (select * from pg_user where usename = '${cfg.db_user}') then
-        CREATE USER ${cfg.db_user} WITH PASSWORD '${cfg.db_psk}';
+        CREATE USER ${cfg.db_user} WITH PASSWORD 'DB_PASSWORD_SECRET';
       end if;
-      ALTER USER ${cfg.db_user} WITH PASSWORD '${cfg.db_psk}';
+      ALTER USER ${cfg.db_user} WITH PASSWORD 'DB_PASSWORD_SECRET';
       GRANT ALL PRIVILEGES ON DATABASE ${cfg.db_name} TO ${cfg.db_user};
       ALTER DATABASE ${cfg.db_name} OWNER TO ${cfg.db_user};
     end
     $$
     ;
   '';
+  inject_credentials = cfg: file: pkgs.writeScriptBin "inject_credentials" ''
+    cat >> ${file} <<EOF
+      "DB_PASSWORD": "$(cat $CREDENTIALS_DIRECTORY/DB_PASSWORD_SECRET)",
+      "INTERNAL_SERVICE_SHARED_SECRET": "$(cat $CREDENTIALS_DIRECTORY/INTERNAL_SERVICE_SHARED_SECRET_SECRET)"
+    }
+    EOF
+    '';
 
   cfg = config.services.op-energy-offer-service;
 in
@@ -48,34 +55,37 @@ in
     db_user = lib.mkOption {
       default = null;
       type = lib.types.str;
-      example = "openergy";
+      example = "openergyoffer";
       description = "Username to access instance's database";
     };
-    db_psk = lib.mkOption {
-      type = lib.types.str;
-      default = null;
-      example = "your-secret-from-out-of-git-store";
+    credentials_locations = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = {
+        DB_PASSWORD_SECRET = "/etc/nixos/private/OP_ENERGY_OFFER_DB_PASSWORD_SECRET";
+        INTERNAL_SERVICE_SHARED_SECRET_SECRET = "/etc/nixos/private/INTERNAL_SERVICE_SHARED_SECRET";
+      };
       description = ''
-        This value defines a password for database user, which will be used by op-energy offer service instance to access database.
-      '';
+        A set of credentials (by it's name) and file path containing it.
+        File path is expected to be only readable by the root user.
+        In the usage example, DB_PASSWORD_SECRET will be replaced within config located at
+        $OPENERGY_OFFER_SERVICE_CONFIG_FILE with a content of the /etc/nixos/private/DB_PASSWORD_SECRET
+        '';
+      example = {
+        DB_PASSWORD_SECRET = "/etc/nixos/private/OP_ENERGY_OFFER_DB_PASSWORD_SECRET";
+        INTERNAL_SERVICE_SHARED_SECRET_SECRET = "/etc/nixos/private/INTERNAL_SERVICE_SHARED_SECRET";
+      };
     };
     config = lib.mkOption {
       type = lib.types.str;
       default = "";
       example = ''
-        {
           "DB_PORT": 5432,
           "DB_HOST": "127.0.0.1",
-          "DB_USER": "openergy",
-          "DB_NAME": "openergyoffer",
-          "DB_PASSWORD": "password",
           "API_HTTP_PORT": 8909,
           "PROMETHEUS_PORT": 7909,
           "LOG_LEVEL_MIN": "Info",
           "SCHEDULER_POLL_RATE_SECS": 10,
           "ACCOUNT_SERVICE_API_URL": "http://127.0.0.1:8899",
-          "INTERNAL_SERVICE_SHARED_SECRET": "your-secret-from-out-of-git-store -- must match oe-account-service's own value"
-        }
       '';
     };
   };
@@ -92,6 +102,15 @@ in
         [ { name = "${cfg.db_user}"; }
         ];
     };
+    users.users.op-energy-offer =
+      {
+        isNormalUser = true;
+        group = "op-energy-offer";
+        createHome = true;
+      };
+    users.groups.op-energy-offer =
+      {
+      };
     systemd.services = {
       postgresql-op-energy-offer-users = {
         wantedBy = [ "multi-user.target" ];
@@ -103,23 +122,59 @@ in
         ];
         serviceConfig = {
           Type = "simple";
+          LoadCredential =
+            [ "DB_PASSWORD_SECRET:${cfg.credentials_locations.DB_PASSWORD_SECRET}"
+            ];
+          User = "postgres";
+          Group = "postgres";
         };
         path = with pkgs; [
-          postgresql sudo
+          gnused postgresql
         ];
-        preStart = ''
-          if [ ! "$(sudo -u postgres psql -l -x --csv | grep 'Name,${cfg.db_name}' --count)" == "1" ]; then
+        preStart = let
+          iteration = pkgs.writeScriptBin "iteration" ''
+          # create database if not exist. we can't use services.mysql.ensureDatabase/initialDatase here the latter
+          # will not use schema and the former will only affects the very first start of mariadb service, which is not idemponent
+          if [ ! "$(psql -l -x --csv | grep 'Name,${cfg.db_name}' --count)" == "1" ]; then
             ( echo 'CREATE DATABASE ${cfg.db_name};'
               echo '\c ${cfg.db_name};'
-            ) | sudo -u postgres psql || true
+            ) | psql
           fi
-          cat "${initial_script cfg}" | sudo -u postgres psql || true
+          cat "${initial_script cfg}" \
+            | sed "s|DB_PASSWORD_SECRET|$(cat $CREDENTIALS_DIRECTORY/DB_PASSWORD_SECRET)|g" \
+            | psql 2>/dev/null
+          for tbl in `psql -qAt -c "select tablename from pg_tables where schemaname = 'public';" ${cfg.db_name}` ; do
+            psql -c "alter table \"$tbl\" owner to ${cfg.db_user}" ${cfg.db_name}
+          done
+          for tbl in `psql -qAt -c "select sequence_name from information_schema.sequences where sequence_schema = 'public';" ${cfg.db_name}` ; do
+            psql -c "alter sequence \"$tbl\" owner to ${cfg.db_user}" ${cfg.db_name}
+          done
+          for tbl in `psql -qAt -c "select table_name from information_schema.views where table_schema = 'public';" ${cfg.db_name}` ; do
+            psql -c "alter view \"$tbl\" owner to ${cfg.db_user}" ${cfg.db_name}
+          done
+        '';
+        in ''
+          COUNT=0
+          MAX_COUNT=10
+          while [ "$COUNT" -lt "$MAX_COUNT" ]; do
+            ${iteration}/bin/iteration && exit 0 || {
+              sleep 1s
+              COUNT=$(( $COUNT + 1 ))
+            }
+          done
+          echo "was not able to update DB user and passwords"
+          exit 1
         '';
         script = "exit 0";
       };
       op-energy-offer-service =
       let
-        openergy_config = pkgs.writeText "op-energy-offer-service-config.json" cfg.config;
+        openergy_config = pkgs.writeText "op-energy-offer-service-config.json" ''
+        {
+          "DB_USER": "${cfg.db_user}",
+          "DB_NAME": "${cfg.db_name}",
+          ${cfg.config}
+        '';
       in {
         wantedBy = [ "multi-user.target" ];
         after = [
@@ -130,19 +185,32 @@ in
         requires = [
           "postgresql.service"
           "network-online.target"
+          "postgresql-op-energy-offer-users.service"
           ];
         serviceConfig = {
           Type = "simple";
           Restart = "always";
-          StartLimitIntervalSec = 0;
-          StartLimitBurst = 0;
+          RestartSec = "10s";
+          LoadCredential =
+            [ "DB_PASSWORD_SECRET:${cfg.credentials_locations.DB_PASSWORD_SECRET}"
+              "INTERNAL_SERVICE_SHARED_SECRET_SECRET:${cfg.credentials_locations.INTERNAL_SERVICE_SHARED_SECRET_SECRET}"
+            ];
+          User =  "op-energy-offer";
+          Group = "op-energy-offer";
         };
         path = with pkgs; [
           pkgs.op-energy-offer-service
         ];
         script = ''
           set -ex
-          OPENERGY_OFFER_SERVICE_CONFIG_FILE="${openergy_config}" op-energy-offer-service +RTS -c -N -s
+          mkdir -p ~/.op-energy-offer || true
+          rm -f ~/.op-energy-offer/config.json || true
+          cp ${openergy_config} ~/.op-energy-offer/config.json
+          chmod u+w ~/.op-energy-offer/config.json
+          chmod og-rwx ~/.op-energy-offer/config.json
+          ${inject_credentials cfg "~/.op-energy-offer/config.json"}/bin/inject_credentials
+          OPENERGY_OFFER_SERVICE_CONFIG_FILE=~/.op-energy-offer/config.json \
+            op-energy-offer-service +RTS -c -N -s
         '';
       };
     };
