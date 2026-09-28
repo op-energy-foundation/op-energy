@@ -200,7 +200,7 @@ in
   services.op-energy-offer-service = {
     enable = true;
     db_name = "openergyoffer";
-    db_user = "openergy";
+    db_user = "openergyoffer";
     credentials_locations = {
         DB_PASSWORD_SECRET =  "/etc/nixos/private/OP_ENERGY_OFFER_DB_PASSWORD_SECRET";
         INTERNAL_SERVICE_SHARED_SECRET_SECRET = "/etc/nixos/private/INTERNAL_SERVICE_SHARED_SECRET";
@@ -208,8 +208,6 @@ in
     config = ''
         "DB_PORT": 5432,
         "DB_HOST": "127.0.0.1",
-        "DB_USER": "openergy",
-        "DB_NAME": "openergyoffer",
         "API_HTTP_PORT": 8909,
         "PROMETHEUS_PORT": 7909,
         "LOG_LEVEL_MIN": "Debug",
