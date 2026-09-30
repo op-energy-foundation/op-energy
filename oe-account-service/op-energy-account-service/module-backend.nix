@@ -31,22 +31,6 @@ in
 {
   options.services.op-energy-account-service = {
     enable = lib.mkEnableOption "op-energy account service";
-    api_port = lib.mkOption {
-      type = lib.types.int;
-      example = 8899;
-      default = 8899;
-      description = ''
-        defines API port for an account service
-      '';
-    };
-    metrics_port = lib.mkOption {
-      type = lib.types.int;
-      example = 7899;
-      default = 7899;
-      description = ''
-        defines METRICS port for an account service
-      '';
-    };
     db_name = lib.mkOption {
       default = "openergyacc";
       type = lib.types.str;
@@ -193,19 +177,19 @@ in
           }
           location /api/v2/account {
                   limit_req zone=api burst=10 nodelay;
-                  proxy_pass http://127.0.0.1:${toString cfg.api_port}/api/v2/account;
+                  proxy_pass http://127.0.0.1:${toString cfg.extraConfig.API_HTTP_PORT}/api/v2/account;
           }
           location /api/v1/account {
                   limit_req zone=api burst=10 nodelay;
-                  proxy_pass http://127.0.0.1:${toString cfg.api_port}/api/v1/account;
+                  proxy_pass http://127.0.0.1:${toString cfg.extraConfig.API_HTTP_PORT}/api/v1/account;
           }
           location /api/v1/blocktime {
                   limit_req zone=api burst=10 nodelay;
-                  proxy_pass http://127.0.0.1:${toString cfg.api_port}/api/v1/blocktime;
+                  proxy_pass http://127.0.0.1:${toString cfg.extraConfig.API_HTTP_PORT}/api/v1/blocktime;
           }
           location /api/v2/strikes/blockrate {
                   limit_req zone=api burst=10 nodelay;
-                  proxy_pass http://127.0.0.1:${toString cfg.api_port}/api/v2/strikes/blockrate;
+                  proxy_pass http://127.0.0.1:${toString cfg.extraConfig.API_HTTP_PORT}/api/v2/strikes/blockrate;
           }
         '';
       };
