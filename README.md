@@ -164,16 +164,16 @@ in
         BTC_PASSWORD_SECRET =  "/etc/nixos/private/OP_ENERGY_BLOCKSPANS_MAINNET_BTC_PASSWORD_SECRET";
       };
 
-      config = ''
-          "DB_PORT": 5432,
-          "DB_HOST": "127.0.0.1",
-          "API_HTTP_PORT": 8999,
-          "BTC_URL": "http://127.0.0.1:8332",
-          "BTC_USER": "op-energy",
-          "BTC_POLL_RATE_SECS": 10,
-          "PROMETHEUS_PORT": 7999,
-          "SCHEDULER_POLL_RATE_SECS": 10,
-      '';
+      extraConfig = {
+        DB_PORT = 5432;
+        DB_HOST = "127.0.0.1";
+        API_HTTP_PORT = 8999;
+        BTC_URL = "http://127.0.0.1:8332";
+        BTC_USER = "op-energy";
+        BTC_POLL_RATE_SECS = 10;
+        PROMETHEUS_PORT = 7999;
+        SCHEDULER_POLL_RATE_SECS = 10;
+      };
     };
   };
 
@@ -187,14 +187,14 @@ in
         INTERNAL_SERVICE_SHARED_SECRET_SECRET = "/etc/nixos/private/INTERNAL_SERVICE_SHARED_SECRET";
         SECRET_SALT_SECRET =  "/etc/nixos/private/OP_ENERGY_ACCOUNT_SECRET_SALT_SECRET";
     };
-    config = ''
-        "DB_PORT": 5432,
-        "DB_HOST": "127.0.0.1",
-        "API_HTTP_PORT": 8899,
-        "PROMETHEUS_PORT": 7899,
-        "LOG_LEVEL_MIN": "Debug",
-        "SCHEDULER_POLL_RATE_SECS": 10,
-    '';
+    extraConfig = {
+      DB_PORT = 5432;
+      DB_HOST = "127.0.0.1";
+      API_HTTP_PORT = 8899;
+      PROMETHEUS_PORT = 7899;
+      LOG_LEVEL_MIN = "Debug";
+      SCHEDULER_POLL_RATE_SECS = 10;
+    };
   };
 
   services.op-energy-offer-service = {
@@ -205,15 +205,15 @@ in
         DB_PASSWORD_SECRET =  "/etc/nixos/private/OP_ENERGY_OFFER_DB_PASSWORD_SECRET";
         INTERNAL_SERVICE_SHARED_SECRET_SECRET = "/etc/nixos/private/INTERNAL_SERVICE_SHARED_SECRET";
     };
-    config = ''
-        "DB_PORT": 5432,
-        "DB_HOST": "127.0.0.1",
-        "API_HTTP_PORT": 8909,
-        "PROMETHEUS_PORT": 7909,
-        "LOG_LEVEL_MIN": "Debug",
-        "SCHEDULER_POLL_RATE_SECS": 60,
-        "ACCOUNT_SERVICE_API_URL": "http://127.0.0.1:8899",
-    '';
+    extraConfig = {
+      DB_PORT = 5432;
+      DB_HOST = "127.0.0.1";
+      API_HTTP_PORT = 8909;
+      PROMETHEUS_PORT = 7909;
+      LOG_LEVEL_MIN = "Debug";
+      SCHEDULER_POLL_RATE_SECS = 60;
+      ACCOUNT_SERVICE_API_URL = "http://127.0.0.1:8899";
+    };
   };
 
   # enable op-energy-frontend service
