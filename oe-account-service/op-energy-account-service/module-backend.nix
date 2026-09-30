@@ -17,14 +17,13 @@ let
     $$
     ;
   '';
-  inject_credentials = cfg: file: pkgs.writeScriptBin "inject_credentials" ''
-    cat >> ${file} <<EOF
-      "DB_PASSWORD": "$(cat $CREDENTIALS_DIRECTORY/DB_PASSWORD_SECRET)",
-      "SECRET_SALT": "$(cat $CREDENTIALS_DIRECTORY/SECRET_SALT_SECRET)",
-      "ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY": "$(cat $CREDENTIALS_DIRECTORY/ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY_SECRET)",
-      "INTERNAL_SERVICE_SHARED_SECRET": "$(cat $CREDENTIALS_DIRECTORY/INTERNAL_SERVICE_SHARED_SECRET_SECRET)"
-    }
-    EOF
+  inject_credentials = src_file: file: pkgs.writeScriptBin "inject_credentials" ''
+    cat ${src_file} | jq " \
+        .DB_PASSWORD = \"$(cat $CREDENTIALS_DIRECTORY/DB_PASSWORD_SECRET)\" \
+      | .SECRET_SALT = \"$(cat $CREDENTIALS_DIRECTORY/SECRET_SALT_SECRET)\" \
+      | .ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY = \"$(cat $CREDENTIALS_DIRECTORY/ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY_SECRET)\" \
+      | .INTERNAL_SERVICE_SHARED_SECRET = \"$(cat $CREDENTIALS_DIRECTORY/INTERNAL_SERVICE_SHARED_SECRET_SECRET)\"
+      " > ${file}
     '';
 
   cfg = config.services.op-energy-account-service;
@@ -81,17 +80,27 @@ in
         SECRET_SALT_SECRET =  "/etc/nixos/private/SECRET_SALT_SECRET";
       };
     };
-    config = lib.mkOption {
-      type = lib.types.str;
-      default = "";
-      example = ''
-          "DB_PORT": 5432,
-          "DB_HOST": "127.0.0.1",
-          "API_HTTP_PORT": 8899,
-          "PROMETHEUS_PORT": 7899,
-          "LOG_LEVEL_MIN": "Info",
-          "SCHEDULER_POLL_RATE_SECS": 10,
+    extraConfig = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.oneOf [ lib.types.str lib.types.int ]);
+      description = ''
+        additional options to include into config file
       '';
+      default = {
+        DB_PORT = 5432;
+        DB_HOST = "127.0.0.1";
+        API_HTTP_PORT = 8899;
+        PROMETHEUS_PORT = 7899;
+        LOG_LEVEL_MIN = "Info";
+        SCHEDULER_POLL_RATE_SECS = 10;
+      };
+      example = {
+        DB_PORT = 5432;
+        DB_HOST = "127.0.0.1";
+        API_HTTP_PORT = 8899;
+        PROMETHEUS_PORT = 7899;
+        LOG_LEVEL_MIN = "Info";
+        SCHEDULER_POLL_RATE_SECS = 10;
+      };
     };
   };
 
@@ -281,12 +290,12 @@ in
       };
       op-energy-account-service =
       let
-        openergy_config = pkgs.writeText "op-energy-account-service-config.json" ''
-        {
-          "DB_USER": "${cfg.db_user}",
-          "DB_NAME": "${cfg.db_name}",
-          ${cfg.config}
-        ''; # this renders config and stores in /nix/store
+        composed_config = cfg.extraConfig // {
+          DB_USER = cfg.db_user;
+          DB_NAME = cfg.db_name;
+        };
+        openergy_config = pkgs.writeText "op-energy-account-service-config.json"
+                          (builtins.toJSON composed_config);
       in {
         wantedBy = [ "multi-user.target" ];
         after = [
@@ -314,16 +323,14 @@ in
           Group = "op-energy-account";
         };
         path = with pkgs; [
-          pkgs.op-energy-account-service
+          pkgs.op-energy-account-service jq
         ];
         script = ''
           set -ex
           mkdir -p ~/.op-energy-account || true
           rm -f ~/.op-energy-account/config.json || true
-          cp ${openergy_config} ~/.op-energy-account/config.json
-          chmod u+w ~/.op-energy-account/config.json
+          ${inject_credentials openergy_config "~/.op-energy-account/config.json"}/bin/inject_credentials
           chmod og-rwx ~/.op-energy-account/config.json
-          ${inject_credentials cfg "~/.op-energy-account/config.json"}/bin/inject_credentials
           OPENERGY_ACCOUNT_SERVICE_CONFIG_FILE=~/.op-energy-account/config.json \
             op-energy-account-service +RTS -c -N -s
         '';
