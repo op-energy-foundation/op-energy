@@ -17,12 +17,11 @@ let
     $$
     ;
   '';
-  inject_credentials = cfg: file: pkgs.writeScriptBin "inject_credentials" ''
-    cat >> ${file} <<EOF
-      "DB_PASSWORD": "$(cat $CREDENTIALS_DIRECTORY/DB_PASSWORD_SECRET)",
-      "INTERNAL_SERVICE_SHARED_SECRET": "$(cat $CREDENTIALS_DIRECTORY/INTERNAL_SERVICE_SHARED_SECRET_SECRET)"
-    }
-    EOF
+  inject_credentials = src_file: file: pkgs.writeScriptBin "inject_credentials" ''
+    cat ${src_file} | jq "\
+      .DB_PASSWORD = \"$(cat $CREDENTIALS_DIRECTORY/DB_PASSWORD_SECRET)\" \
+      | .INTERNAL_SERVICE_SHARED_SECRET = \"$(cat $CREDENTIALS_DIRECTORY/INTERNAL_SERVICE_SHARED_SECRET_SECRET)\" \
+      " > ${file}
     '';
 
   cfg = config.services.op-energy-offer-service;
@@ -75,18 +74,29 @@ in
         INTERNAL_SERVICE_SHARED_SECRET_SECRET = "/etc/nixos/private/INTERNAL_SERVICE_SHARED_SECRET";
       };
     };
-    config = lib.mkOption {
-      type = lib.types.str;
-      default = "";
-      example = ''
-          "DB_PORT": 5432,
-          "DB_HOST": "127.0.0.1",
-          "API_HTTP_PORT": 8909,
-          "PROMETHEUS_PORT": 7909,
-          "LOG_LEVEL_MIN": "Info",
-          "SCHEDULER_POLL_RATE_SECS": 10,
-          "ACCOUNT_SERVICE_API_URL": "http://127.0.0.1:8899",
+    extraConfig = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.oneOf [ lib.types.str lib.types.int ]);
+      description = ''
+        additional options to include into config file
       '';
+      default = {
+          DB_PORT = 5432;
+          DB_HOST = "127.0.0.1";
+          API_HTTP_PORT = 8909;
+          PROMETHEUS_PORT = 7909;
+          LOG_LEVEL_MIN = "Info";
+          SCHEDULER_POLL_RATE_SECS = 10;
+          ACCOUNT_SERVICE_API_URL = "http://127.0.0.1:8899";
+      };
+      example = {
+          DB_PORT = 5432;
+          DB_HOST = "127.0.0.1";
+          API_HTTP_PORT = 8909;
+          PROMETHEUS_PORT = 7909;
+          LOG_LEVEL_MIN = "Info";
+          SCHEDULER_POLL_RATE_SECS = 10;
+          ACCOUNT_SERVICE_API_URL = "http://127.0.0.1:8899";
+      };
     };
   };
 
@@ -169,12 +179,12 @@ in
       };
       op-energy-offer-service =
       let
-        openergy_config = pkgs.writeText "op-energy-offer-service-config.json" ''
-        {
-          "DB_USER": "${cfg.db_user}",
-          "DB_NAME": "${cfg.db_name}",
-          ${cfg.config}
-        '';
+        composed_config = cfg.extraConfig // {
+          DB_USER = cfg.db_user;
+          DB_NAME = cfg.db_name;
+        };
+        openergy_config = pkgs.writeText "op-energy-offer-service-config.json"
+                            (builtins.toJSON composed_config);
       in {
         wantedBy = [ "multi-user.target" ];
         after = [
@@ -199,16 +209,14 @@ in
           Group = "op-energy-offer";
         };
         path = with pkgs; [
-          pkgs.op-energy-offer-service
+          pkgs.op-energy-offer-service jq
         ];
         script = ''
           set -ex
           mkdir -p ~/.op-energy-offer || true
           rm -f ~/.op-energy-offer/config.json || true
-          cp ${openergy_config} ~/.op-energy-offer/config.json
-          chmod u+w ~/.op-energy-offer/config.json
+          ${inject_credentials openergy_config "~/.op-energy-offer/config.json"}/bin/inject_credentials
           chmod og-rwx ~/.op-energy-offer/config.json
-          ${inject_credentials cfg "~/.op-energy-offer/config.json"}/bin/inject_credentials
           OPENERGY_OFFER_SERVICE_CONFIG_FILE=~/.op-energy-offer/config.json \
             op-energy-offer-service +RTS -c -N -s
         '';
