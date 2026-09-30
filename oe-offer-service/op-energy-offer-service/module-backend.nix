@@ -29,22 +29,6 @@ in
 {
   options.services.op-energy-offer-service = {
     enable = lib.mkEnableOption "op-energy offer service";
-    api_port = lib.mkOption {
-      type = lib.types.int;
-      example = 8909;
-      default = 8909;
-      description = ''
-        defines API port for the offer service
-      '';
-    };
-    metrics_port = lib.mkOption {
-      type = lib.types.int;
-      example = 7909;
-      default = 7909;
-      description = ''
-        defines METRICS port for the offer service
-      '';
-    };
     db_name = lib.mkOption {
       default = "openergyoffer";
       type = lib.types.str;
