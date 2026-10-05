@@ -33,6 +33,7 @@ import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLog
 import           OpEnergy.Offer.Server.V1.Config(Config(..))
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
+import           Data.OpEnergy.Account.API.V2.LedgerReason(LedgerReason(..))
 import           OpEnergy.Offer.Server.V1.Offer(Offer(..), offerInfoFromEntity)
 import           OpEnergy.Offer.Server.V1.LiveEvent(LiveEvent(..))
 import           OpEnergy.Offer.Server.V1.WebSocketService
@@ -82,6 +83,7 @@ post token PostOfferRequest{..} =
         takerStakeSatsV = C.totalPotSats - makerStakeSats
     Sats makerBalance <-
       ExceptT $ AccountClient.deductBalance personUUIDV (Sats totalStake)
+        Stake Nothing -- the offer has no id until it is inserted below
 
     now <- getCurrentTimeDB
     State{ offerDBPool = pool } <- lift ask
@@ -116,7 +118,7 @@ post token PostOfferRequest{..} =
           { offers = [ offerInfo ] }
       Left insertErr -> do
         ecredited <- lift
-          $ AccountClient.creditBalance personUUIDV (Sats totalStake)
+          $ AccountClient.creditBalance personUUIDV (Sats totalStake) Refund Nothing
         lift $ runLogging $ $(logError)
           ( "post: failed to persist offer row after staking "
           <> tshow totalStake

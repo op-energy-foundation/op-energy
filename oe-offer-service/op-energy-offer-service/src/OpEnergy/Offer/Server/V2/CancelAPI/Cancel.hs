@@ -42,6 +42,7 @@ import           OpEnergy.Offer.Server.V1.Class
                    )
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
+import           Data.OpEnergy.Account.API.V2.LedgerReason(LedgerReason(..))
 import           OpEnergy.Offer.Server.V1.Offer
 import           OpEnergy.Offer.Server.V1.LiveEvent
                    ( LiveEvent(..)
@@ -84,7 +85,8 @@ cancel idText token =
 
     -- refund unfilled stake
     ecredited <- lift
-      $ AccountClient.creditBalance personUUIDV (Sats refundAmount)
+      $ AccountClient.creditBalance personUUIDV (Sats refundAmount) Refund
+        (Just (offerReference key))
     case ecredited of
       Right _ -> return ()
       Left err -> lift $ runLogging $ $(logError)
