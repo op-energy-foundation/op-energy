@@ -2,11 +2,15 @@
 module OpEnergy.Account.Server.V1.Config where
 
 import           Data.Text (Text)
-import           Data.Word (Word64)
+import           Data.Word (Word32, Word64)
 import qualified Data.Text.Encoding as Text
 import           Data.Maybe
 import qualified Data.ByteString.Char8 as BS
 import qualified System.Environment as E
+import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
+import           Data.OpEnergy.Account.API.V2.WalletMode
+                 ( WalletMode(..)
+                 )
 import           Data.OpEnergy.API.V1.Positive
 import           Control.Monad.Catch
 import           Control.Monad.Logger(LogLevel(..))
@@ -76,6 +80,22 @@ data Config = Config
     -- any caller (e.g. oe-offer-service).
   , configStartingBalanceSats :: Word64
     -- ^ sandbox wallet balance assigned to newly registered accounts
+  , configWalletBackend :: WalletMode
+    -- ^ which wallet the service talks to: "mock" keeps invoices and
+    -- payments in this service's own database, "lnbits" talks to an LNBits
+    -- instance in front of a lightning node
+  , configWalletMinInvoiceSats :: Sats
+    -- ^ smallest amount an invoice may be created for
+  , configWalletMaxInvoiceSats :: Sats
+    -- ^ largest amount an invoice may be created for
+  , configWalletMaxWithdrawalSats :: Sats
+    -- ^ largest amount one payment may send out of an account
+  , configWalletInvoiceExpirySecs :: Word64
+    -- ^ how long an invoice is advertised as payable. It is recorded and
+    -- reported to the client; refusing an expired invoice is the lightning
+    -- node's job, so the mock wallet, which has none, does not
+  , configWalletRecordsPerPage :: Word32
+    -- ^ how many movements one page of the wallet history holds
   }
   deriving Show
 instance FromJSON Config where
@@ -103,6 +123,12 @@ instance FromJSON Config where
     <*> ( v .:? "BLOCKSPAN_DEFAULT_SIZE" .!= (configBlockSpanDefaultSize defaultConfig))
     <*> ( v .:? "INTERNAL_SERVICE_SHARED_SECRET" .!= (configInternalServiceSharedSecret defaultConfig))
     <*> ( v .:? "STARTING_BALANCE_SATS" .!= (configStartingBalanceSats defaultConfig))
+    <*> ( v .:? "WALLET_BACKEND" .!= (configWalletBackend defaultConfig))
+    <*> ( v .:? "WALLET_MIN_INVOICE_SATS" .!= (configWalletMinInvoiceSats defaultConfig))
+    <*> ( v .:? "WALLET_MAX_INVOICE_SATS" .!= (configWalletMaxInvoiceSats defaultConfig))
+    <*> ( v .:? "WALLET_MAX_WITHDRAWAL_SATS" .!= (configWalletMaxWithdrawalSats defaultConfig))
+    <*> ( v .:? "WALLET_INVOICE_EXPIRY_SECS" .!= (configWalletInvoiceExpirySecs defaultConfig))
+    <*> ( v .:? "WALLET_RECORDS_PER_PAGE" .!= (configWalletRecordsPerPage defaultConfig))
 
 -- need to get Key from json, which represented as base64-encoded string
 instance FromJSON Key where
@@ -137,6 +163,12 @@ defaultConfig = Config
   , configBlockSpanDefaultSize = verifyPositive 24
   , configInternalServiceSharedSecret = error "defaultConfig: you are missing INTERNAL_SERVICE_SHARED_SECRET from config. Generate with \"dd if=/dev/urandom bs=1 count=32 2>/dev/null | base64 -w 0\" command"
   , configStartingBalanceSats = 300000
+  , configWalletBackend = WalletModeMock
+  , configWalletMinInvoiceSats = Sats 1
+  , configWalletMaxInvoiceSats = Sats 10000000
+  , configWalletMaxWithdrawalSats = Sats 10000000
+  , configWalletInvoiceExpirySecs = 3600
+  , configWalletRecordsPerPage = 10
   }
 
 getConfigFromEnvironment :: IO Config

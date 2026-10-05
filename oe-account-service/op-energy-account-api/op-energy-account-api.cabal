@@ -75,6 +75,9 @@ library
                    , Data.OpEnergy.Account.API.V2.WhoAmIResult
                    , Data.OpEnergy.Account.API.V2.WhoAmIAPI
                    , Data.OpEnergy.Account.API.V2.LedgerReason
+                   , Data.OpEnergy.Account.API.V2.PaymentHash
+                   , Data.OpEnergy.Account.API.V2.Bolt11Invoice
+                   , Data.OpEnergy.Account.API.V2.WalletMode
                    , Data.OpEnergy.Account.API.V2.BalanceAdjustRequest
                    , Data.OpEnergy.Account.API.V2.BalanceAdjustResult
                    , Data.OpEnergy.Account.API.V2.InternalBalanceAPI
