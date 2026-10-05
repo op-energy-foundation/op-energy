@@ -16,6 +16,7 @@ import           Servant
 
 import           Data.OpEnergy.Account.API.V2
                  ( AccountV2API
+                 , AccountV2PublicAPI
                  )
 import           Data.OpEnergy.Account.API.V2.LoginAPI
                  ( LoginAPI
@@ -56,6 +57,14 @@ import qualified OpEnergy.Account.Server.V2.InternalBalanceAPI
 -- | V2 account server wiring
 accountServer :: ServerT AccountV2API (AppT Handler)
 accountServer
+  = accountPublicServer
+  :<|> ( InternalBalanceAPIHandlers.handlers
+         :: ServerT InternalBalanceAPI (AppT Handler)
+       )
+
+-- | handlers of the endpoints, which browser clients may call
+accountPublicServer :: ServerT AccountV2PublicAPI (AppT Handler)
+accountPublicServer
   = ( LoginHandlers.loginHandler
       :: ServerT LoginAPI (AppT Handler)
     )
@@ -78,8 +87,4 @@ accountServer
 
   :<|> ( WhoAmIAPIHandlers.handlers
          :: ServerT WhoAmIAPI (AppT Handler)
-       )
-
-  :<|> ( InternalBalanceAPIHandlers.handlers
-         :: ServerT InternalBalanceAPI (AppT Handler)
        )
