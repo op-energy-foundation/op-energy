@@ -19,6 +19,7 @@ import           Prometheus (MonadMonitor)
 import           Data.OpEnergy.API.V1.Block (BlockHeight)
 import           Data.OpEnergy.API.V1.Natural (verifyNatural, fromNatural)
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
+import           Data.OpEnergy.Account.API.V2.LedgerReason(LedgerReason(..))
 import           Data.OpEnergy.Offer.API.V1.ContractStatus (ContractStatus(..))
 import           Data.OpEnergy.Offer.API.V1.OfferSide (OfferSide(..))
 import qualified Data.OpEnergy.Offer.API.V1.Constants as C
@@ -146,7 +147,8 @@ settleContract (Entity contractId contract@Contract{..}) =
       return $! updated == 1
     when settled $ do
       ecredited <- lift
-        $ AccountClient.creditBalance winnerUUID (Sats payoutSats)
+        $ AccountClient.creditBalance winnerUUID (Sats payoutSats) Winnings
+          (Just (contractReference contractId))
       lift $ runLogging $ case ecredited of
         Right _ -> $(logInfo)
           ( "contract " <> tshow (fromSqlKey contractId) <> " settled: "

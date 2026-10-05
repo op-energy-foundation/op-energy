@@ -57,6 +57,8 @@ library
                    , OpEnergy.Account.Server.V1.WebSocketService.Message
                    , OpEnergy.Account.Server.V1.AccountService
                    , OpEnergy.Account.Server.V1.Person
+                   , OpEnergy.Account.Server.V1.LedgerEntry
+                   , OpEnergy.Account.Server.V1.DB.Migrations.BackfillLedgerOpeningBalance.Migration
                    , OpEnergy.Account.Server.V2
                    , OpEnergy.Account.Server.V2.AccountService.Login
                    , OpEnergy.Account.Server.V2.AccountService.SetPassword

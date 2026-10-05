@@ -39,6 +39,11 @@ import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.Account.Server.V1.DB.Migrations
 import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrike
 import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
+import           OpEnergy.Account.Server.V1.LedgerEntry
+                 ( migrateLedgerEntry
+                 )
+import qualified OpEnergy.Account.Server.V1.DB.Migrations.BackfillLedgerOpeningBalance.Migration
+                 as BackfillLedgerOpeningBalance
 import           OpEnergy.Account.Server.V1.Person
 import           OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.SplitBlockTimeStrikeObservedFromBlockTimeStrike
                    ( transformBlockTimeStrikeGuessGuessFromTextToBool
@@ -67,9 +72,14 @@ getConnection config = do
   liftIO $ flip runSqlPersistMPool pool $ do
     -- print migrations to stdout just for information to get of schema difference
     printMigration migrateAccount
+    printMigration migrateLedgerEntry
     printMigration migrateBlockTimeStrike
     printMigration migrateBlockTimeStrikeGuess
     printMigration migrateBlockTimeStrikeDB
+
+    -- the ledger table is created before the custom migrations, as the
+    -- backfill of opening balances reads it
+    runMigration migrateLedgerEntry
 
     -- at this point we start to run our custom migrations, that can't be handled by persisten itself
     migrateAccountDBSchema config
@@ -114,6 +124,7 @@ accountDBMigrations :: [( Config -> ReaderT
                                ]
 accountDBMigrations =
   [ (\_-> return ()) -- dummy, for compatibility reasons
+  , BackfillLedgerOpeningBalance.migration
   ]
 
 -- | custom migration procedure

@@ -32,6 +32,7 @@ import           OpEnergy.Offer.Server.V1.Time(getCurrentTimeDB)
 import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
+import           Data.OpEnergy.Account.API.V2.LedgerReason(LedgerReason(..))
 import           OpEnergy.Offer.Server.V1.Offer
 import           OpEnergy.Offer.Server.V1.OfferService(isOfferAcceptableAt)
 import           OpEnergy.Offer.Server.V1.LiveEvent(LiveEvent(..))
@@ -84,7 +85,7 @@ accept idText token =
   -- change's events are published in the order of the changes
   withLiveEventOrderE $ do
     Sats takerBalance <- ExceptT $ AccountClient.deductBalance takerUUIDV
-      (Sats (offerTakerStakeSats offerVal))
+      (Sats (offerTakerStakeSats offerVal)) Stake (Just (offerReference key))
 
     now <- getCurrentTimeDB
     let contractRow = Contract
@@ -142,7 +143,7 @@ accept idText token =
     -- the expiry sweep changed the offer first -- refund and report which
     when (isNothing mcontractKey) $ do
       _ <- lift $ AccountClient.creditBalance takerUUIDV
-        (Sats (offerTakerStakeSats offerVal))
+        (Sats (offerTakerStakeSats offerVal)) Refund (Just (offerReference key))
       mlatest <- liftIO $ flip runSqlPersistMPool pool $ get key
       throwE $ case offerStatus <$> mlatest of
         Just Open -> offerChanged -- another accept took a slot: try again
