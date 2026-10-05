@@ -78,6 +78,17 @@ library
                    , Data.OpEnergy.Account.API.V2.PaymentHash
                    , Data.OpEnergy.Account.API.V2.Bolt11Invoice
                    , Data.OpEnergy.Account.API.V2.WalletMode
+                   , Data.OpEnergy.Account.API.V2.WalletInfo
+                   , Data.OpEnergy.Account.API.V2.WalletTransaction
+                   , Data.OpEnergy.Account.API.V2.WalletTransactionsResult
+                   , Data.OpEnergy.Account.API.V2.CreateInvoiceRequest
+                   , Data.OpEnergy.Account.API.V2.CreateInvoiceResult
+                   , Data.OpEnergy.Account.API.V2.PayInvoiceRequest
+                   , Data.OpEnergy.Account.API.V2.PayInvoiceResult
+                   , Data.OpEnergy.Account.API.V2.SettleInvoiceRequest
+                   , Data.OpEnergy.Account.API.V2.SettleInvoiceResult
+                   , Data.OpEnergy.Account.API.V2.WalletAPI
+                   , Data.OpEnergy.Account.API.V2.WalletMockAPI
                    , Data.OpEnergy.Account.API.V2.BalanceAdjustRequest
                    , Data.OpEnergy.Account.API.V2.BalanceAdjustResult
                    , Data.OpEnergy.Account.API.V2.InternalBalanceAPI

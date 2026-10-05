@@ -16,7 +16,14 @@ import           Servant
 
 import           Data.OpEnergy.Account.API.V2
                  ( AccountV2API
+                 , AccountV2MockAPI
                  , AccountV2PublicAPI
+                 )
+import           Data.OpEnergy.Account.API.V2.WalletAPI
+                 ( WalletAPI
+                 )
+import           Data.OpEnergy.Account.API.V2.WalletMockAPI
+                 ( WalletMockAPI
                  )
 import           Data.OpEnergy.Account.API.V2.LoginAPI
                  ( LoginAPI
@@ -53,14 +60,30 @@ import qualified OpEnergy.Account.Server.V2.WhoAmIAPI
                  as WhoAmIAPIHandlers
 import qualified OpEnergy.Account.Server.V2.InternalBalanceAPI
                  as InternalBalanceAPIHandlers
+import qualified OpEnergy.Account.Server.V2.WalletAPI
+                 as WalletAPIHandlers
+import qualified OpEnergy.Account.Server.V2.WalletMockAPI
+                 as WalletMockAPIHandlers
 
 -- | V2 account server wiring
 accountServer :: ServerT AccountV2API (AppT Handler)
 accountServer
   = accountPublicServer
+  :<|> ( accountMockServer
+         :: ServerT AccountV2MockAPI (AppT Handler)
+       )
   :<|> ( InternalBalanceAPIHandlers.handlers
          :: ServerT InternalBalanceAPI (AppT Handler)
        )
+
+-- | handlers of the mock wallet, which are served but not published in the
+-- swagger. The service can only answer them while the mock wallet is in
+-- use: a real wallet offers no way to mark an invoice paid
+accountMockServer :: ServerT AccountV2MockAPI (AppT Handler)
+accountMockServer
+  = ( WalletMockAPIHandlers.handlers
+      :: ServerT WalletMockAPI (AppT Handler)
+    )
 
 -- | handlers of the endpoints, which browser clients may call
 accountPublicServer :: ServerT AccountV2PublicAPI (AppT Handler)
@@ -87,4 +110,8 @@ accountPublicServer
 
   :<|> ( WhoAmIAPIHandlers.handlers
          :: ServerT WhoAmIAPI (AppT Handler)
+       )
+
+  :<|> ( WalletAPIHandlers.handlers
+         :: ServerT WalletAPI (AppT Handler)
        )
