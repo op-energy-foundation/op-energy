@@ -9,6 +9,15 @@ let
 in
 {
   locations = {
+    "${URL_BASE}api/v1/offer/ws" = {
+      proxyPass = "${API_HOST}/api/v1/offer/ws";
+      proxyWebsockets = true;
+      extraConfig = if zones_enabled
+        then ''
+          limit_conn websocket 100;
+        ''
+        else "";
+    };
     "${URL_BASE}api/v1/offer" = {
       proxyPass = "${API_HOST}/api/v1/offer";
       extraConfig = if zones_enabled

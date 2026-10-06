@@ -27,10 +27,13 @@ import           Data.OpEnergy.Offer.API.V1.OfferInfo
 import           Data.OpEnergy.Offer.API.V1.ContractInfo
                  ( ContractInfo
                  )
+import           Data.OpEnergy.Offer.API.V1.OfferDetails
+                 ( OfferDetails
+                 )
 
 -- | all offer endpoints in one API type
 --
--- Route order: post, cancel, accept, mine, list, getById
+-- Route order: post, cancel, accept, mine, list, getById, getDetails
 type OffersAPI
   = "post"
     :> Header'
@@ -126,3 +129,10 @@ type OffersAPI
   :<|> Capture "id" OfferID
     :> Description "Full details for a single offer by id."
     :> Get '[JSON] OfferInfo
+
+  :<|> Capture "id" OfferID
+    :> "details"
+    :> Description "One offer by id with all its contracts, oldest first, \
+                   \whatever the offer's status. 400 for an invalid id, 404 \
+                   \for an unknown offer."
+    :> Get '[JSON] OfferDetails

@@ -171,7 +171,7 @@ in
       '';
       virtualHosts.op-energy = {
         extraConfig = ''
-          location /api/v2/account/internal/ {
+          location ^~ /api/v2/account/internal {
                   deny all;
                   return 403;
           }

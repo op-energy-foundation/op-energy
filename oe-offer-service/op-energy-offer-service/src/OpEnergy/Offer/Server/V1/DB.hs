@@ -36,6 +36,7 @@ import           Data.OpEnergy.API.V1.Natural(verifyNatural, fromNatural)
 import           OpEnergy.Offer.Server.V1.Config
 import           OpEnergy.Offer.Server.V1.DB.Migrations
 import           OpEnergy.Offer.Server.V1.Offer
+import           OpEnergy.Offer.Server.V1.PlatformStats(migratePlatformStats)
 
 -- | connect to DB. Returns connection pool
 getConnection
@@ -54,6 +55,15 @@ getConnection config = do
     migrateOfferDBSchema config
     printMigration migrateOffer
     runMigration migrateOffer
+    -- the offer list reads the contracts of its offers by offer_id, and
+    -- persistent creates no index for a foreign key. For both new and
+    -- existing DBs
+    rawExecute
+      "CREATE INDEX IF NOT EXISTS contract_offer_id_idx ON contract (offer_id)"
+      []
+    -- creates platform_stats table, for both new and existing DBs
+    printMigration migratePlatformStats
+    runMigration migratePlatformStats
 
   return pool
   where
@@ -94,10 +104,8 @@ migration0_addOfferV2ColumnsAndContractTable _config = do
   rawExecute "ALTER TABLE offer ADD COLUMN IF NOT EXISTS total_contracts INT8 NOT NULL DEFAULT 1" []
   rawExecute "ALTER TABLE offer ADD COLUMN IF NOT EXISTS matched_count INT8 NOT NULL DEFAULT 0" []
   rawExecute "ALTER TABLE offer ADD COLUMN IF NOT EXISTS created_at_block INT8 NOT NULL DEFAULT 0" []
-  -- set takerStakeSats = totalPot - makerStakeSats, clamped to [1, totalPot-1]
-  rawExecute "UPDATE offer SET taker_stake_sats = GREATEST(1, 100000 - LEAST(maker_stake_sats, 99999))" []
-  -- clamp any out-of-range maker stakes to [1, 99999]
-  rawExecute "UPDATE offer SET maker_stake_sats = LEAST(GREATEST(maker_stake_sats, 1), 99999)" []
+  -- set takerStakeSats = totalPot - makerStakeSats for all existing rows
+  rawExecute "UPDATE offer SET taker_stake_sats = 100000 - maker_stake_sats" []
   -- map old statuses that now belong to ContractStatus
   rawExecute "UPDATE offer SET status = 'filled' WHERE status IN ('accepted', 'confirming', 'settled')" []
   transactionSave

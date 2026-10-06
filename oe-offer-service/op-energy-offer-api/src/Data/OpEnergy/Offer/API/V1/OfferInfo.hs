@@ -42,7 +42,8 @@ import           Data.OpEnergy.Offer.API.V1.ContractInfo
                  ( ContractInfo, defaultContractInfo
                  )
 
--- | one offer group, as returned by post/mine/list/:id/cancel
+-- | one offer group, as returned by post/mine/list/:id/cancel and
+-- /:id/details, and sent in the websocket's offer notifications
 data OfferInfo = OfferInfo
   { offerId            :: OfferID
   , creatorDisplayName :: DisplayName
@@ -61,7 +62,7 @@ data OfferInfo = OfferInfo
   , refundedAt         :: Maybe UTCTime
   , created            :: UTCTime
   }
-  deriving (Show, Generic, Typeable)
+  deriving (Show, Eq, Generic, Typeable)
 instance ToJSON   OfferInfo
 instance FromJSON OfferInfo
 instance ToSchema OfferInfo where
