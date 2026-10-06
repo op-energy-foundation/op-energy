@@ -13,14 +13,16 @@ import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Logger(logError)
 import           Control.Monad.Trans (lift)
+import           Control.Monad.Trans.Except (ExceptT(..))
+import           Data.Maybe(fromMaybe)
 import           Data.Text(Text)
 import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
 
 import           Database.Persist.Postgresql
 
-import           Data.OpEnergy.Account.API.V1.Sats
-                 ( Sats(..)
+import           Data.OpEnergy.Account.API.V2.LedgerReason
+                 ( LedgerReason(..)
                  )
 import           Data.OpEnergy.Account.API.V2.BalanceAdjustRequest
                  ( BalanceAdjustRequest(..)
@@ -31,6 +33,9 @@ import           Data.OpEnergy.Account.API.V2.BalanceAdjustResult
 
 import           OpEnergy.Account.Server.V1.Class
                  ( AppM, State(..), runLogging, profile)
+import           OpEnergy.Account.Server.V1.LedgerEntry
+                 ( LedgerDirection(..), adjustBalanceTx
+                 )
 import           OpEnergy.Account.Server.V1.Person
 
 import           OpEnergy.Error
@@ -55,26 +60,31 @@ creditBalanceHandler secret request =
       ( runLogging . $(logError))
       $ creditBalance secret request
 
--- | business logic for V2 balance credit
+-- | business logic for V2 balance credit. Credits through
+-- 'adjustBalanceTx', which records why the balance changed and returns the
+-- balance after the credit, read in the same transaction as the update. A
+-- request without a reason records a refund, which is what a caller
+-- predating the ledger credits for.
 creditBalance
   :: Text
   -> BalanceAdjustRequest
   -> AppM (Either CallstackError BalanceAdjustResult)
-creditBalance secret (BalanceAdjustRequest personUUIDV (Sats amountSats)) =
+creditBalance secret request =
     let name = "V2.creditBalance"
     in profile name $ runExceptPrefixT name $ do
   checkInternalServiceSecret secret
   State{ accountDBPool = pool } <- lift ask
-  let modelUUID = modelApiUUIDPerson personUUIDV
-  (Entity key person) <- exceptTMaybeT accountNotFound
+  let modelUUID = modelApiUUIDPerson (personUUID request)
+  (Entity key _) <- exceptTMaybeT accountNotFound
     $ liftIO $ flip runSqlPersistMPool pool
     $ selectFirst [ PersonUuid ==. modelUUID ] []
-  liftIO $ flip runSqlPersistMPool pool $ do
-    nowUTC <- liftIO getCurrentTime
-    let now = utcTimeToPOSIXSeconds nowUTC
-    update key
-      [ PersonBalance +=. Sats amountSats
-      , PersonLastUpdated =. now
-      ]
-  let Sats currentBalance = personBalance person
-  return $! BalanceAdjustResult (Sats (currentBalance + amountSats))
+  nowUTC <- liftIO getCurrentTime
+  balance <- ExceptT $ liftIO $ flip runSqlPersistMPool pool
+    $ adjustBalanceTx
+        key
+        Credit
+        (amountSats request)
+        (fromMaybe Refund (reason request))
+        (reference request)
+        (utcTimeToPOSIXSeconds nowUTC)
+  return $! BalanceAdjustResult balance

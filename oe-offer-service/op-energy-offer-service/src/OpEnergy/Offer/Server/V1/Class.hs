@@ -7,8 +7,13 @@ module OpEnergy.Offer.Server.V1.Class where
 import           Data.Text(Text)
 import qualified Data.Text as Text
 import           Data.Map(Map)
+import           Data.Word (Word64)
 import qualified Control.Concurrent.STM.TVar as TVar
 import           Control.Concurrent.STM.TVar (TVar)
+import qualified Control.Concurrent.STM.TChan as TChan
+import           Control.Concurrent.STM.TChan (TChan)
+import qualified Control.Concurrent.MVar as MVar
+import           Control.Concurrent.MVar (MVar)
 import           Control.Monad.Trans.Reader (runReaderT, ReaderT, ask, asks, local)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Trans(lift)
@@ -26,6 +31,7 @@ import qualified Control.Exception.Safe as E
 import           Data.OpEnergy.API.V1.Block(BlockHeight)
 import           OpEnergy.Offer.Server.V1.Config
 import           OpEnergy.Offer.Server.V1.Metrics
+import           OpEnergy.Offer.Server.V1.LiveEvent (LiveEvent)
 
 instance MonadMonitor Handler where
   doIO = liftIO
@@ -40,8 +46,26 @@ data State = State
   , logLevel :: TVar LogLevel
   , metrics :: MetricsState
   , currentTip :: TVar (Maybe BlockHeight)
-    -- ^ best-effort current chain tip. Never populated by this port --
-    -- wiring a live tip source is future work.
+    -- ^ chain tip height (blockspan service's newest confirmed block plus the
+    -- amount of blocks it waits for confirmation), followed from its
+    -- websocket by "OpEnergy.Offer.Server.V1.BlockspanClient". 'Nothing'
+    -- until the first tip arrives
+  , currentTipMediantime :: TVar (Maybe Word64)
+    -- ^ mediantime of the block at 'currentTip', 'Nothing' while blockspan
+    -- service has not reported that block's header. Written and read
+    -- together with 'currentTip', in one transaction
+  , liveEvents :: TChan (Word64, LiveEvent)
+    -- ^ broadcast channel of published live events with their sequence
+    -- numbers: every websocket connection reads its own copy of it. Events
+    -- written while there are no connections are dropped
+  , liveEventSeq :: TVar Word64
+    -- ^ sequence number of the last published live event, 0 before the
+    -- first one. Changed only together with a write to 'liveEvents', in one
+    -- transaction, see "OpEnergy.Offer.Server.V1.WebSocketService"
+  , liveEventOrder :: MVar ()
+    -- ^ held by every change of offers, contracts or balances while it is
+    -- made and its live events are published, see
+    -- 'OpEnergy.Offer.Server.V1.WebSocketService.withLiveEventOrder'
   , callStack :: Text
   }
 
@@ -53,6 +77,10 @@ defaultState :: (MonadLoggerIO m ) => Config-> MetricsState-> LogFunc-> Pool Sql
 defaultState config metrics logFunc offerDBPool = do
   logLevelV <- liftIO $ TVar.newTVarIO (configLogLevelMin config)
   currentTipV <- liftIO $ TVar.newTVarIO Nothing
+  currentTipMediantimeV <- liftIO $ TVar.newTVarIO Nothing
+  liveEventsV <- liftIO $ TChan.newBroadcastTChanIO
+  liveEventSeqV <- liftIO $ TVar.newTVarIO 0
+  liveEventOrderV <- liftIO $ MVar.newMVar ()
   return $ State
     { config = config
     , offerDBPool = offerDBPool
@@ -60,6 +88,10 @@ defaultState config metrics logFunc offerDBPool = do
     , logLevel = logLevelV
     , metrics = metrics
     , currentTip = currentTipV
+    , currentTipMediantime = currentTipMediantimeV
+    , liveEvents = liveEventsV
+    , liveEventSeq = liveEventSeqV
+    , liveEventOrder = liveEventOrderV
     , callStack = ""
     }
 

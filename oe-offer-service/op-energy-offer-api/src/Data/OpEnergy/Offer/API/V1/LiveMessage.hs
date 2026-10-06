@@ -1,0 +1,143 @@
+{-- | Messages of the offer service's websocket: requests from the frontend
+ - and live notifications about offers, contracts, new blocks and the
+ - authenticated account's balance.
+ -
+ - Offer and contract notifications carry the whole offer or contract, as
+ - the offer API's public list returns it; a contract's @yourRole@ is
+ - @null@. A new block's notification carries the chain tip's height and
+ - mediantime.
+ -
+ - Notifications sent to every connection are numbered 1, 2, ... from the
+ - start of the service. Every connection first receives 'LiveMessageHello'
+ - with the number of the last notification sent before it opened, and
+ - afterwards every later notification in order, so a gap in the numbers
+ - means that one was missed. Messages to one connection only have no
+ - number. The numbers start again when the service restarts, so they can
+ - only be compared within one connection: after a reconnect, the frontend
+ - has to reload its data.
+ -}
+{-# LANGUAGE OverloadedStrings          #-}
+module Data.OpEnergy.Offer.API.V1.LiveMessage
+  ( LiveRequest(..)
+  , LiveMessage(..)
+  , SequencedMessage(..)
+  ) where
+
+import           Data.Aeson
+import           Data.Aeson.Types           (Pair)
+import           Data.Text                  (Text)
+import qualified Data.Text                  as Text
+import           Data.Word                  (Word64)
+
+import           Data.OpEnergy.API.V1.Block (BlockHeight)
+import           Data.OpEnergy.Account.API.V1.Account
+                 ( AccountToken
+                 , everifyAccountToken
+                 )
+import           Data.OpEnergy.Offer.API.V1.OfferInfo (OfferInfo)
+import           Data.OpEnergy.Offer.API.V1.ContractInfo (ContractInfo)
+
+-- | request from the frontend
+data LiveRequest
+  = LiveRequestInit
+    -- ^ @{"action": "init"}@: accepted and ignored. The chain tip, if it is
+    -- known, is sent right after 'LiveMessageHello', when the connection
+    -- opens
+  | LiveRequestAuth AccountToken
+    -- ^ @{"action": "auth", "token": "..."}@: also receive the account's
+    -- new balance as 'LiveMessageMyBalance' whenever the offer service
+    -- changes it
+  | LiveRequestPing
+    -- ^ @{"action": "ping"}@: keepalive, answered with 'LiveMessagePong'
+  deriving (Eq, Show)
+
+instance FromJSON LiveRequest where
+  parseJSON = withObject "LiveRequest" $ \v-> do
+    action <- v .: "action"
+    case (action :: Text) of
+      "init" -> return LiveRequestInit
+      "auth" -> do
+        rawToken <- v .: "token"
+        either (fail . Text.unpack) (return . LiveRequestAuth)
+          (everifyAccountToken rawToken)
+      "ping" -> return LiveRequestPing
+      other -> fail ("LiveRequest: unknown action: " <> show other)
+
+-- | live notification to the frontend
+data LiveMessage
+  = LiveMessageOfferCreated OfferInfo
+    -- ^ an offer has been posted. Contains the offer as the offer API
+    -- returns it
+  | LiveMessageOfferChanged OfferInfo
+    -- ^ an offer has been accepted, cancelled or has expired. Contains the
+    -- offer as it is after the change
+  | LiveMessageContractCreated ContractInfo
+    -- ^ an offer has been accepted, which created a contract. Contains the
+    -- contract; its @yourRole@ is @null@
+  | LiveMessageContractSettled ContractInfo
+    -- ^ a contract has been settled. Contains the contract after
+    -- settlement, with its winning side and the actual mediantime of its
+    -- target block; its @yourRole@ is @null@
+  | LiveMessageBlockNew BlockHeight (Maybe Word64)
+    -- ^ new chain tip, or a newly known mediantime of the same tip: its
+    -- height and the mediantime of the block at that height, @null@ while
+    -- the offer service does not know it. On a new tip, confirmations of
+    -- live contracts have changed
+  | LiveMessageMyBalance Word64
+    -- ^ new balance, in sats, of the account given in a successful
+    -- 'LiveRequestAuth'. Sent to that connection only, right after the
+    -- notification of the change that caused it
+  | LiveMessagePong
+    -- ^ answer to 'LiveRequestPing'
+  | LiveMessageHello
+    -- ^ the first message of every connection, sent with the number of the
+    -- last notification published before the connection opened
+  deriving (Eq, Show)
+
+-- | a message as it is sent to a connection: with its sequence number
+-- (@"seq"@) if it is a notification sent to every connection or
+-- 'LiveMessageHello', without one if it is sent to this connection only:
+-- the chain tip right after 'LiveMessageHello', 'LiveMessageMyBalance' and
+-- 'LiveMessagePong'. Unnumbered messages never cause a gap
+data SequencedMessage = SequencedMessage (Maybe Word64) LiveMessage
+  deriving (Eq, Show)
+
+instance ToJSON SequencedMessage where
+  toJSON (SequencedMessage mseqNo message) = object
+    ( maybe id (\seqNo -> (("seq" .= seqNo) :)) mseqNo
+      (liveMessagePairs message)
+    )
+
+-- | JSON fields of the given notification
+liveMessagePairs :: LiveMessage -> [Pair]
+liveMessagePairs (LiveMessageOfferCreated offer) =
+  [ "type" .= ("offer.created" :: Text)
+  , "offer" .= offer
+  ]
+liveMessagePairs (LiveMessageOfferChanged offer) =
+  [ "type" .= ("offer.changed" :: Text)
+  , "offer" .= offer
+  ]
+liveMessagePairs (LiveMessageContractCreated contract) =
+  [ "type" .= ("contract.created" :: Text)
+  , "contract" .= contract
+  ]
+liveMessagePairs (LiveMessageContractSettled contract) =
+  [ "type" .= ("contract.settled" :: Text)
+  , "contract" .= contract
+  ]
+liveMessagePairs (LiveMessageBlockNew height mmediantime) =
+  [ "type" .= ("block.new" :: Text)
+  , "height" .= height
+  , "mediantime" .= mmediantime
+  ]
+liveMessagePairs (LiveMessageMyBalance balance) =
+  [ "type" .= ("my.balance" :: Text)
+  , "balance" .= balance
+  ]
+liveMessagePairs LiveMessagePong =
+  [ "type" .= ("pong" :: Text)
+  ]
+liveMessagePairs LiveMessageHello =
+  [ "type" .= ("hello" :: Text)
+  ]

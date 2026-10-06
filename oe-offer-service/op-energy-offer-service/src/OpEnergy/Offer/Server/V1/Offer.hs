@@ -23,7 +23,10 @@
 module OpEnergy.Offer.Server.V1.Offer
   where
 
+import           Data.Int(Int64)
 import           Data.Text(Text)
+import qualified Data.Text as T
+import qualified Data.Text.Read as TR
 import           Data.Word(Word64)
 import           Data.Time.Clock(UTCTime)
 
@@ -154,6 +157,14 @@ offerInfoFrom idText Offer{..} = API.OfferInfo
 offerInfoFromEntity :: Entity Offer -> API.OfferInfo
 offerInfoFromEntity (Entity key offerVal) = offerInfoFrom (tshow (fromSqlKey key)) offerVal
 
+-- | how an offer is referred to in an account's ledger, eg @"offer:42"@
+offerReference :: OfferId -> Text
+offerReference key = "offer:" <> tshow (fromSqlKey key)
+
+-- | how a contract is referred to in an account's ledger, eg @"contract:17"@
+contractReference :: ContractId -> Text
+contractReference key = "contract:" <> tshow (fromSqlKey key)
+
 -- | Model -> API glue for Contract.
 -- @mYourRole@ is @Just "maker"@ or @Just "taker"@ when the
 -- requesting user is a party; @Nothing@ for unauthenticated views.
@@ -167,10 +178,10 @@ contractInfoFromEntity mYourRole mTip (Entity key Contract{..}) =
   let idText = tshow (fromSqlKey key)
       offerIdText = tshow (fromSqlKey contractOfferId)
       confs = case (contractStatus, mTip) of
-        (Live, Just tip) ->
+        (Live, Just tip) -> -- the blocks mined after the target block
           let tipInt = fromNatural tip
               tgtInt = fromNatural contractTargetBlock
-          in fromIntegral (max 0 (tipInt - tgtInt + 1))
+          in fromIntegral (max 0 (tipInt - tgtInt))
         (Settled, _) -> C.settlementConfirmations
         _ -> 0
   in CAPI.ContractInfo
@@ -193,3 +204,12 @@ contractInfoFromEntity mYourRole mTip (Entity key Contract{..}) =
     , CAPI.matchedAt = contractMatchedAt
     , CAPI.settledAt = contractSettledAt
     }
+
+-- | DB key of the offer with the given id from a request's URL: 'Nothing'
+-- unless the id is an unsigned decimal number, which fits an 'OfferId'
+offerKeyFromIDText :: Text -> Maybe OfferId
+offerKeyFromIDText idText = case TR.decimal idText of
+  Right (n, rest)
+    | T.null rest && n <= toInteger (maxBound :: Int64) ->
+      Just (toSqlKey (fromInteger n))
+  _ -> Nothing

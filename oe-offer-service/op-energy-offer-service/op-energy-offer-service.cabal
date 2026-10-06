@@ -31,7 +31,12 @@ library
                    , OpEnergy.Offer.Server.V1.DB
                    , OpEnergy.Offer.Server.V1.DB.Migrations
                    , OpEnergy.Offer.Server.V1.AccountClient
+                   , OpEnergy.Offer.Server.V1.BlockspanClient
+                   , OpEnergy.Offer.Server.V1.PlatformStats
+                   , OpEnergy.Offer.Server.V1.LiveEvent
+                   , OpEnergy.Offer.Server.V1.WebSocketService
                    , OpEnergy.Offer.Server.V1.OfferService
+                   , OpEnergy.Offer.Server.V1.Time
                    , OpEnergy.Offer.Server.V2
                    , OpEnergy.Offer.Server.V2.PostOfferAPI
                    , OpEnergy.Offer.Server.V2.PostOfferAPI.Post
@@ -39,11 +44,13 @@ library
                    , OpEnergy.Offer.Server.V2.OffersAPI.GetMine
                    , OpEnergy.Offer.Server.V2.OffersAPI.GetList
                    , OpEnergy.Offer.Server.V2.OffersAPI.GetById
+                   , OpEnergy.Offer.Server.V2.OffersAPI.GetDetails
                    , OpEnergy.Offer.Server.V2.CancelAPI
                    , OpEnergy.Offer.Server.V2.CancelAPI.Cancel
                    , OpEnergy.Offer.Server.V2.AcceptAPI
                    , OpEnergy.Offer.Server.V2.AcceptAPI.Accept
                    , OpEnergy.Offer.Server.V2.Expiry
+                   , OpEnergy.Offer.Server.V2.Settlement
 
                    , Data.Text.Show
                    , OpEnergy.Error
@@ -79,6 +86,8 @@ library
                     , async
                     , unliftio-core
                     , resourcet
+                    , websockets
+                    , servant-websockets
     ghc-options:    -O2 -Wall -Werror -Wno-unticked-promoted-constructors -fno-warn-name-shadowing -Wno-orphans
     default-extensions:       OverloadedStrings
                             , ScopedTypeVariables

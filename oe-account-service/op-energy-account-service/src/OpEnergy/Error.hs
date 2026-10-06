@@ -5,6 +5,7 @@ module OpEnergy.Error
   , runExceptPrefixT
   , eitherException
   , CallstackError
+  , describeError
 
   , unspecified
   , latestUnconfirmedBlockHeightMissing
@@ -25,6 +26,14 @@ module OpEnergy.Error
   , secretNotRecoverable
   , insufficientBalance
   , invalidServiceSecret
+
+  , walletInvoiceNotFound
+  , walletInvoiceAlreadyPaid
+  , walletSelfPaymentNotAllowed
+  , walletSimulationNotSupported
+  , walletAmountRequired
+  , walletAmountBelowMinimum
+  , walletAmountAboveMaximum
   ) where
 
 import           Data.Text(Text)
@@ -52,6 +61,13 @@ data BadRequestError
   | SecretNotRecoverable
   | InsufficientBalance
   | InvalidServiceSecret
+  | WalletInvoiceNotFound
+  | WalletInvoiceAlreadyPaid
+  | WalletSelfPaymentNotAllowed
+  | WalletSimulationNotSupported
+  | WalletAmountRequired
+  | WalletAmountBelowMinimum
+  | WalletAmountAboveMaximum
 instance Show BadRequestError where
   show CalculatedGuessesCountNotFound = "calculated guesses count not found"
   show SecretNotRecoverable = "account was registered before recoverable secrets; use regenerate"
@@ -65,6 +81,13 @@ instance Show BadRequestError where
   show DisplayNameAlreadyTaken = "display name already taken"
   show InsufficientBalance = "insufficient balance"
   show InvalidServiceSecret = "invalid service secret"
+  show WalletInvoiceNotFound = "invoice not found"
+  show WalletInvoiceAlreadyPaid = "invoice has already been paid"
+  show WalletSelfPaymentNotAllowed = "an account can not pay its own invoice"
+  show WalletSimulationNotSupported = "this wallet can not mark an invoice paid"
+  show WalletAmountRequired = "amount is required for an invoice of another wallet"
+  show WalletAmountBelowMinimum = "amount is below the smallest allowed"
+  show WalletAmountAboveMaximum = "amount is above the largest allowed"
 
 data InternalError
   = Unspecified Text
@@ -120,6 +143,25 @@ insufficientBalance :: CallstackError
 insufficientBalance = CallstackError "" $! BadRequest InsufficientBalance
 invalidServiceSecret :: CallstackError
 invalidServiceSecret = CallstackError "" $! BadRequest InvalidServiceSecret
+walletInvoiceNotFound :: CallstackError
+walletInvoiceNotFound = CallstackError "" $! BadRequest WalletInvoiceNotFound
+walletInvoiceAlreadyPaid :: CallstackError
+walletInvoiceAlreadyPaid = CallstackError "" $! BadRequest WalletInvoiceAlreadyPaid
+walletSelfPaymentNotAllowed :: CallstackError
+walletSelfPaymentNotAllowed = CallstackError "" $! BadRequest WalletSelfPaymentNotAllowed
+walletSimulationNotSupported :: CallstackError
+walletSimulationNotSupported = CallstackError "" $! BadRequest WalletSimulationNotSupported
+walletAmountRequired :: CallstackError
+walletAmountRequired = CallstackError "" $! BadRequest WalletAmountRequired
+walletAmountBelowMinimum :: CallstackError
+walletAmountBelowMinimum = CallstackError "" $! BadRequest WalletAmountBelowMinimum
+walletAmountAboveMaximum :: CallstackError
+walletAmountAboveMaximum = CallstackError "" $! BadRequest WalletAmountAboveMaximum
+
+-- | renders an error for a log line, as its callstack and its reason
+describeError :: CallstackError -> Text
+describeError (CallstackError callstack err) =
+  callstack <> ": " <> snd (errorToServerError err)
 
 -- | converts Error into printable version
 errorToServerError :: Error -> (ServerError, Text)

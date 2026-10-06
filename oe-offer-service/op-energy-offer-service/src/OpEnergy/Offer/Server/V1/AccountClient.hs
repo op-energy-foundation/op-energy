@@ -22,6 +22,7 @@ import qualified Data.OpEnergy.Account.API.V1.UUID as AccountAPI
 import           Data.OpEnergy.Account.API.V2.WhoAmIResult (WhoAmIResult)
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
 import           Data.OpEnergy.Account.API.V2.BalanceAdjustRequest (BalanceAdjustRequest(..))
+import           Data.OpEnergy.Account.API.V2.LedgerReason (LedgerReason)
 import           Data.OpEnergy.Account.API.V2.BalanceAdjustResult (BalanceAdjustResult(..))
 import qualified Data.OpEnergy.Account.Client as Client
 
@@ -47,9 +48,18 @@ verifyAccountToken token = do
     classifyWhoAmI (ConnectionError err) = Left (accountServiceUnavailable (Text.pack (show err)))
     classifyWhoAmI _clientErr = Left authenticationFailure
 
-deductBalance :: (MonadIO m) => AccountAPI.UUID AccountAPI.Person -> Sats -> AppT m (Either CallstackError Sats)
-deductBalance personUUIDV amountSats =
+-- | takes sats off an account's balance, telling the account service why,
+-- so the change shows up in that account's wallet history
+deductBalance
+  :: (MonadIO m)
+  => AccountAPI.UUID AccountAPI.Person
+  -> Sats
+  -> LedgerReason
+  -> Maybe Text.Text
+  -> AppT m (Either CallstackError Sats)
+deductBalance personUUIDV amountSats reasonV referenceV =
   adjustBalance Client.deductBalance classifyDeduct personUUIDV amountSats
+    reasonV referenceV
   where
     classifyDeduct :: ClientError -> CallstackError
     classifyDeduct (ConnectionError err) = accountServiceUnavailable (Text.pack (show err))
@@ -57,9 +67,17 @@ deductBalance personUUIDV amountSats =
       | statusCode (responseStatusCode response) == 400 = insufficientBalance
     classifyDeduct err = accountServiceUnavailable (Text.pack (show err))
 
-creditBalance :: (MonadIO m) => AccountAPI.UUID AccountAPI.Person -> Sats -> AppT m (Either CallstackError Sats)
-creditBalance personUUIDV amountSats =
-  adjustBalance Client.creditBalance (accountServiceUnavailable . Text.pack . show) personUUIDV amountSats
+-- | adds sats to an account's balance, telling the account service why
+creditBalance
+  :: (MonadIO m)
+  => AccountAPI.UUID AccountAPI.Person
+  -> Sats
+  -> LedgerReason
+  -> Maybe Text.Text
+  -> AppT m (Either CallstackError Sats)
+creditBalance personUUIDV amountSats reasonV referenceV =
+  adjustBalance Client.creditBalance (accountServiceUnavailable . Text.pack . show)
+    personUUIDV amountSats reasonV referenceV
 
 adjustBalance
   :: (MonadIO m)
@@ -67,12 +85,14 @@ adjustBalance
   -> (ClientError -> CallstackError)
   -> AccountAPI.UUID AccountAPI.Person
   -> Sats
+  -> LedgerReason
+  -> Maybe Text.Text
   -> AppT m (Either CallstackError Sats)
-adjustBalance clientCall classify personUUIDV amountSats = do
+adjustBalance clientCall classify personUUIDV amountSats reasonV referenceV = do
   State{ config = config } <- ask
   let url = configAccountServiceURL config
       secret = configInternalServiceSharedSecret config
-      request = BalanceAdjustRequest personUUIDV amountSats
+      request = BalanceAdjustRequest personUUIDV amountSats (Just reasonV) referenceV
   liftIO $! E.handle onConnectException $ do
     eclientResult <- Client.withClientEither url (clientCall secret request)
     return $! either (Left . classify) (Right . (\(BalanceAdjustResult b) -> b)) eclientResult

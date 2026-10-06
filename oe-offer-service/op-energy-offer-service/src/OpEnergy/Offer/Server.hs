@@ -14,6 +14,7 @@ module OpEnergy.Offer.Server where
 import           System.IO as IO
 import           Servant ( Application, Proxy(..), ServerT, serve, hoistServer, (:<|>)(..))
 import           Network.Wai.Handler.Warp(run)
+import           Control.Monad (when)
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Concurrent (threadDelay)
 import           Control.Monad.IO.Class(liftIO, MonadIO)
@@ -34,7 +35,9 @@ import           OpEnergy.Offer.Server.V1.Class (AppT, AppM, State(..), defaultS
 import           OpEnergy.Offer.Server.V1.DB
 import           OpEnergy.Offer.Server.V1.Metrics
 import           OpEnergy.Offer.Server.V2 (offerServer)
+import           OpEnergy.Offer.Server.V1.WebSocketService (webSocketConnection)
 import qualified OpEnergy.Offer.Server.V2.Expiry as Expiry
+import qualified OpEnergy.Offer.Server.V2.Settlement as Settlement
 
 -- required by prometheus-client
 instance MonadMonitor (LoggingT IO)
@@ -74,6 +77,7 @@ runServer = do
         serverSwaggerBackend :: ServerT API AppM
         serverSwaggerBackend
           = (return apiSwagger)
+          :<|> webSocketConnection
           :<|> offerServer
 
 -- | tasks, that should be running during start
@@ -91,9 +95,14 @@ schedulerMainLoop = do
   case mTip of
     Nothing -> return ()
     Just tip -> do
+      -- expiry goes first: it closes offers which should not be accepted
+      -- anymore, before settlement pays out contracts
       expiredCount <- Expiry.expireStaleOffers tip
       if expiredCount > 0
         then runLogging $ $(logDebug) (tshow expiredCount <> " offer(s) expired at tip " <> tshow tip)
         else return ()
+      settledCount <- Settlement.settleContracts tip
+      when (settledCount > 0) $
+        runLogging $ $(logDebug) (tshow settledCount <> " contract(s) settled at tip " <> tshow tip)
   liftIO $ threadDelay ((fromPositive delaySecs) * 1000000)
   schedulerMainLoop
