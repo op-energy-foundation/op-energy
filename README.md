@@ -90,11 +90,7 @@ env@{ GIT_COMMIT_HASH ? ""
 , OP_ENERGY_FRONTEND_REPO_LOCATION ? /etc/nixos/overlays/op-energy-frontend/.git
 , OP_ENERGY_ACCOUNT_REPO_LOCATION ? /etc/nixos/overlays/op-energy/.git
   # import psk from out-of-git file
-, bitcoind-mainnet-rpc-psk ? builtins.readFile ( "/etc/nixos/private/bitcoind-mainnet-rpc-psk.txt")
 , bitcoind-mainnet-rpc-pskhmac ? builtins.readFile ( "/etc/nixos/private/bitcoind-mainnet-rpc-pskhmac.txt")
-, op-energy-db-psk-mainnet ? builtins.readFile ( "/etc/nixos/private/op-energy-db-psk-mainnet.txt")
-, op-energy-db-salt-mainnet ? builtins.readFile ( "/etc/nixos/private/op-energy-db-salt-mainnet.txt")
-, op-energy-account-token-encryption-key ? builtins.readFile ( "/etc/nixos/private/op-energy-account-token-encryption-key.txt")
 , ...
 }:
 
@@ -125,6 +121,7 @@ let
   opEnergyFrontendModule = import ./overlays/op-energy-frontend/frontend/module-frontend.nix { GIT_COMMIT_HASH = GIT_COMMIT_HASH OP_ENERGY_FRONTEND_REPO_LOCATION; };
   opEnergyBackendModule = import ./overlays/op-energy-blockspan-service/op-energy-backend/module-backend.nix { GIT_COMMIT_HASH = GIT_COMMIT_HASH OP_ENERGY_REPO_LOCATION; };
   opEnergyAccountServiceModule = import ./overlays/op-energy/oe-account-service/op-energy-account-service/module-backend.nix { GIT_COMMIT_HASH = GIT_COMMIT_HASH OP_ENERGY_ACCOUNT_REPO_LOCATION; };
+  opEnergyOfferServiceModule = import ./overlays/op-energy/oe-offer-service/op-energy-offer-service/module-backend.nix { GIT_COMMIT_HASH = GIT_COMMIT_HASH OP_ENERGY_ACCOUNT_REPO_LOCATION; };
 in
 {
   imports = [
@@ -132,6 +129,7 @@ in
     opEnergyFrontendModule
     opEnergyBackendModule
     opEnergyAccountServiceModule
+    opEnergyOfferServiceModule
   ];
   # bitcoind mainnet instance
   # if you are going to use aready existing node, then don't include this part of config
@@ -161,24 +159,21 @@ in
       in {
       db_user = "openergy";
       db_name = db;
-      db_psk = op-energy-db-psk-mainnet;
-      config = ''
-        {
-          "DB_PORT": 5432,
-          "DB_HOST": "127.0.0.1",
-          "DB_USER": "\${db}",
-          "DB_NAME": "\${db}",
-          "DB_PASSWORD": "\${op-energy-db-psk-mainnet}",
-          "SECRET_SALT": "\${op-energy-db-salt-mainnet}",
-          "API_HTTP_PORT": 8999,
-          "BTC_URL": "http://127.0.0.1:8332",
-          "BTC_USER": "op-energy",
-          "BTC_PASSWORD": "\${bitcoind-mainnet-rpc-psk}",
-          "BTC_POLL_RATE_SECS": 10,
-          "PROMETHEUS_PORT": 7999,
-          "SCHEDULER_POLL_RATE_SECS": 10
-        }
-      '';
+      credentials_locations = {
+        DB_PASSWORD_SECRET =  "/etc/nixos/private/OP_ENERGY_BLOCKSPANS_MAINNET_DB_PASSWORD_SECRET";
+        BTC_PASSWORD_SECRET =  "/etc/nixos/private/OP_ENERGY_BLOCKSPANS_MAINNET_BTC_PASSWORD_SECRET";
+      };
+
+      extraConfig = {
+        DB_PORT = 5432;
+        DB_HOST = "127.0.0.1";
+        API_HTTP_PORT = 8999;
+        BTC_URL = "http://127.0.0.1:8332";
+        BTC_USER = "op-energy";
+        BTC_POLL_RATE_SECS = 10;
+        PROMETHEUS_PORT = 7999;
+        SCHEDULER_POLL_RATE_SECS = 10;
+      };
     };
   };
 
@@ -186,22 +181,39 @@ in
     enable = true;
     db_name = "openergyacc";
     db_user = "openergy";
-    db_psk = op-energy-db-psk-mainnet;
-    config = ''
-      {
-        "DB_PORT": 5432,
-        "DB_HOST": "127.0.0.1",
-        "DB_USER": "openergy",
-        "DB_NAME": "openergyacc",
-        "DB_PASSWORD": "\${op-energy-db-psk-mainnet}",
-        "SECRET_SALT": "\${op-energy-db-salt-mainnet}",
-        "ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY": "\${op-energy-account-token-encryption-key}",
-        "API_HTTP_PORT": 8899,
-        "PROMETHEUS_PORT": 7899,
-        "LOG_LEVEL_MIN": "Debug",
-        "SCHEDULER_POLL_RATE_SECS": 10
-      }
-    '';
+    credentials_locations = {
+        DB_PASSWORD_SECRET =  "/etc/nixos/private/OP_ENERGY_ACCOUNT_DB_PASSWORD_SECRET";
+        ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY_SECRET = "/etc/nixos/private/OP_ENERGY_ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY_SECRET";
+        INTERNAL_SERVICE_SHARED_SECRET_SECRET = "/etc/nixos/private/INTERNAL_SERVICE_SHARED_SECRET";
+        SECRET_SALT_SECRET =  "/etc/nixos/private/OP_ENERGY_ACCOUNT_SECRET_SALT_SECRET";
+    };
+    extraConfig = {
+      DB_PORT = 5432;
+      DB_HOST = "127.0.0.1";
+      API_HTTP_PORT = 8899;
+      PROMETHEUS_PORT = 7899;
+      LOG_LEVEL_MIN = "Debug";
+      SCHEDULER_POLL_RATE_SECS = 10;
+    };
+  };
+
+  services.op-energy-offer-service = {
+    enable = true;
+    db_name = "openergyoffer";
+    db_user = "openergyoffer";
+    credentials_locations = {
+        DB_PASSWORD_SECRET =  "/etc/nixos/private/OP_ENERGY_OFFER_DB_PASSWORD_SECRET";
+        INTERNAL_SERVICE_SHARED_SECRET_SECRET = "/etc/nixos/private/INTERNAL_SERVICE_SHARED_SECRET";
+    };
+    extraConfig = {
+      DB_PORT = 5432;
+      DB_HOST = "127.0.0.1";
+      API_HTTP_PORT = 8909;
+      PROMETHEUS_PORT = 7909;
+      LOG_LEVEL_MIN = "Debug";
+      SCHEDULER_POLL_RATE_SECS = 60;
+      ACCOUNT_SERVICE_API_URL = "http://127.0.0.1:8899";
+    };
   };
 
   # enable op-energy-frontend service
@@ -226,7 +238,6 @@ those options as you need:
 ```
 "BTC_URL": "http://127.0.0.1:8332", # in case of using another node, define it's address and credentials
 "BTC_USER": "op-energy", # and here
-"BTC_PASSWORD": "\${bitcoind-mainnet-rpc-psk}", # and here as well
 ```
 
 in this case you should disable local bitcoind instance as well by changing:

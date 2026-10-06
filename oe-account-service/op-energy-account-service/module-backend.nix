@@ -8,37 +8,29 @@ let
     $$
     begin
       if not exists (select * from pg_user where usename = '${cfg.db_user}') then
-        CREATE USER ${cfg.db_user} WITH PASSWORD '${cfg.db_psk}';
+        CREATE USER ${cfg.db_user} WITH PASSWORD 'DB_PASSWORD_SECRET';
       end if;
-      ALTER USER ${cfg.db_user} WITH PASSWORD '${cfg.db_psk}';
+      ALTER USER ${cfg.db_user} WITH PASSWORD 'DB_PASSWORD_SECRET';
       GRANT ALL PRIVILEGES ON DATABASE ${cfg.db_name} TO ${cfg.db_user};
       ALTER DATABASE ${cfg.db_name} OWNER TO ${cfg.db_user};
     end
     $$
     ;
   '';
+  inject_credentials = src_file: file: pkgs.writeScriptBin "inject_credentials" ''
+    cat ${src_file} | jq " \
+        .DB_PASSWORD = \"$(cat $CREDENTIALS_DIRECTORY/DB_PASSWORD_SECRET)\" \
+      | .SECRET_SALT = \"$(cat $CREDENTIALS_DIRECTORY/SECRET_SALT_SECRET)\" \
+      | .ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY = \"$(cat $CREDENTIALS_DIRECTORY/ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY_SECRET)\" \
+      | .INTERNAL_SERVICE_SHARED_SECRET = \"$(cat $CREDENTIALS_DIRECTORY/INTERNAL_SERVICE_SHARED_SECRET_SECRET)\"
+      " > ${file}
+    '';
 
   cfg = config.services.op-energy-account-service;
 in
 {
   options.services.op-energy-account-service = {
     enable = lib.mkEnableOption "op-energy account service";
-    api_port = lib.mkOption {
-      type = lib.types.int;
-      example = 8899;
-      default = 8899;
-      description = ''
-        defines API port for an account service
-      '';
-    };
-    metrics_port = lib.mkOption {
-      type = lib.types.int;
-      example = 7899;
-      default = 7899;
-      description = ''
-        defines METRICS port for an account service
-      '';
-    };
     db_name = lib.mkOption {
       default = "openergyacc";
       type = lib.types.str;
@@ -51,32 +43,48 @@ in
       example = "openergy";
       description = "Username to access instance's database";
     };
-    db_psk = lib.mkOption {
-      type = lib.types.str;
-      default = null;
-      example = "your-secret-from-out-of-git-store";
+    credentials_locations = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = {
+        DB_PASSWORD_SECRET =  "/etc/nixos/private/OP_ENERGY_ACCOUNT_DB_PASSWORD_SECRET";
+        ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY_SECRET = "/etc/nixos/private/OP_ENERGY_ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY_SECRET";
+        INTERNAL_SERVICE_SHARED_SECRET_SECRET = "/etc/nixos/private/INTERNAL_SERVICE_SHARED_SECRET";
+        SECRET_SALT_SECRET =  "/etc/nixos/private/OP_ENERGY_ACCOUNT_SECRET_SALT_SECRET";
+      };
       description = ''
-        This value defines a password for database user, which will be used by op-energy backend instance to access database.
-      '';
+        A set of credentials (by it's name) and file path containing it.
+        File path is expected to be only readable by the root user.
+        In the usage example, DB_PASSWORD_SECRET will be replaced within config located at
+        $OPENERGY_ACCOUNT_SERVICE_CONFIG_FILE with a content of the /etc/nixos/private/DB_PASSWORD_SECRET
+        '';
+      example = {
+        DB_PASSWORD_SECRET =  "/etc/nixos/private/OP_ENERGY_ACCOUNT_DB_PASSWORD_SECRET";
+        ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY_SECRET = "/etc/nixos/private/OP_ENERGY_ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY_SECRET";
+        INTERNAL_SERVICE_SHARED_SECRET_SECRET = "/etc/nixos/private/INTERNAL_SERVICE_SHARED_SECRET";
+        SECRET_SALT_SECRET =  "/etc/nixos/private/SECRET_SALT_SECRET";
+      };
     };
-    config = lib.mkOption {
-      type = lib.types.str;
-      default = "";
-      example = ''
-        {
-          "DB_PORT": 5432,
-          "DB_HOST": "127.0.0.1",
-          "DB_USER": "openergy",
-          "DB_NAME": "openergyacc",
-          "DB_PASSWORD": "password",
-          "SECRET_SALT": "salt",
-          "ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY": "",
-          "API_HTTP_PORT": 8899,
-          "PROMETHEUS_PORT": 7899,
-          "LOG_LEVEL_MIN": "Info",
-          "SCHEDULER_POLL_RATE_SECS": 10
-        }
+    extraConfig = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.oneOf [ lib.types.str lib.types.int ]);
+      description = ''
+        additional options to include into config file
       '';
+      default = {
+        DB_PORT = 5432;
+        DB_HOST = "127.0.0.1";
+        API_HTTP_PORT = 8899;
+        PROMETHEUS_PORT = 7899;
+        LOG_LEVEL_MIN = "Info";
+        SCHEDULER_POLL_RATE_SECS = 10;
+      };
+      example = {
+        DB_PORT = 5432;
+        DB_HOST = "127.0.0.1";
+        API_HTTP_PORT = 8899;
+        PROMETHEUS_PORT = 7899;
+        LOG_LEVEL_MIN = "Info";
+        SCHEDULER_POLL_RATE_SECS = 10;
+      };
     };
   };
 
@@ -169,19 +177,19 @@ in
           }
           location /api/v2/account {
                   limit_req zone=api burst=10 nodelay;
-                  proxy_pass http://127.0.0.1:${toString cfg.api_port}/api/v2/account;
+                  proxy_pass http://127.0.0.1:${toString cfg.extraConfig.API_HTTP_PORT}/api/v2/account;
           }
           location /api/v1/account {
                   limit_req zone=api burst=10 nodelay;
-                  proxy_pass http://127.0.0.1:${toString cfg.api_port}/api/v1/account;
+                  proxy_pass http://127.0.0.1:${toString cfg.extraConfig.API_HTTP_PORT}/api/v1/account;
           }
           location /api/v1/blocktime {
                   limit_req zone=api burst=10 nodelay;
-                  proxy_pass http://127.0.0.1:${toString cfg.api_port}/api/v1/blocktime;
+                  proxy_pass http://127.0.0.1:${toString cfg.extraConfig.API_HTTP_PORT}/api/v1/blocktime;
           }
           location /api/v2/strikes/blockrate {
                   limit_req zone=api burst=10 nodelay;
-                  proxy_pass http://127.0.0.1:${toString cfg.api_port}/api/v2/strikes/blockrate;
+                  proxy_pass http://127.0.0.1:${toString cfg.extraConfig.API_HTTP_PORT}/api/v2/strikes/blockrate;
           }
         '';
       };
@@ -199,6 +207,15 @@ in
         [ { name = "${cfg.db_user}"; }
         ];
     };
+    users.users.op-energy-account =
+      {
+        isNormalUser = true;
+        group = "op-energy-account";
+        createHome = true;
+      };
+    users.groups.op-energy-account =
+      {
+      };
     systemd.services = {
       postgresql-op-energy-account-users = {
         wantedBy = [ "multi-user.target" ];
@@ -210,25 +227,59 @@ in
         ];
         serviceConfig = {
           Type = "simple";
+          LoadCredential =
+            [ "DB_PASSWORD_SECRET:${cfg.credentials_locations.DB_PASSWORD_SECRET}"
+            ];
+          User = "postgres";
+          Group = "postgres";
         };
         path = with pkgs; [
-          postgresql sudo
+          gnused postgresql
         ];
-        preStart = ''
+        preStart = let
+          iteration = pkgs.writeScriptBin "iteration" ''
           # create database if not exist. we can't use services.mysql.ensureDatabase/initialDatase here the latter
           # will not use schema and the former will only affects the very first start of mariadb service, which is not idemponent
-          if [ ! "$(sudo -u postgres psql -l -x --csv | grep 'Name,${cfg.db_name}' --count)" == "1" ]; then
+          if [ ! "$(psql -l -x --csv | grep 'Name,${cfg.db_name}' --count)" == "1" ]; then
             ( echo 'CREATE DATABASE ${cfg.db_name};'
               echo '\c ${cfg.db_name};'
-            ) | sudo -u postgres psql || true # blockspans service can be running in parallel
+            ) | psql
           fi
-          cat "${initial_script cfg}" | sudo -u postgres psql || true # blockspans service can be running in parallel
+          cat "${initial_script cfg}" \
+            | sed "s|DB_PASSWORD_SECRET|$(cat $CREDENTIALS_DIRECTORY/DB_PASSWORD_SECRET)|g" \
+            | psql 2>/dev/null
+          for tbl in `psql -qAt -c "select tablename from pg_tables where schemaname = 'public';" ${cfg.db_name}` ; do
+            psql -c "alter table \"$tbl\" owner to ${cfg.db_user}" ${cfg.db_name}
+          done
+          for tbl in `psql -qAt -c "select sequence_name from information_schema.sequences where sequence_schema = 'public';" ${cfg.db_name}` ; do
+            psql -c "alter sequence \"$tbl\" owner to ${cfg.db_user}" ${cfg.db_name}
+          done
+          for tbl in `psql -qAt -c "select table_name from information_schema.views where table_schema = 'public';" ${cfg.db_name}` ; do
+            psql -c "alter view \"$tbl\" owner to ${cfg.db_user}" ${cfg.db_name}
+          done
+        '';
+        in ''
+          COUNT=0
+          MAX_COUNT=10
+          while [ "$COUNT" -lt "$MAX_COUNT" ]; do
+            ${iteration}/bin/iteration && exit 0 || {
+              sleep 1s
+              COUNT=$(( $COUNT + 1 ))
+            }
+          done
+          echo "was not able to update DB user and passwords"
+          exit 1
         '';
         script = "exit 0";
       };
       op-energy-account-service =
       let
-        openergy_config = pkgs.writeText "op-energy-account-service-config.json" cfg.config; # this renders config and stores in /nix/store
+        composed_config = cfg.extraConfig // {
+          DB_USER = cfg.db_user;
+          DB_NAME = cfg.db_name;
+        };
+        openergy_config = pkgs.writeText "op-energy-account-service-config.json"
+                          (builtins.toJSON composed_config);
       in {
         wantedBy = [ "multi-user.target" ];
         after = [
@@ -239,19 +290,33 @@ in
         requires = [
           "postgresql.service"
           "network-online.target"
+          "postgresql-op-energy-account-users.service"
           ];
         serviceConfig = {
           Type = "simple";
           Restart = "always"; # we want to keep service always running, especially, now development instance is relying on ssh tunnel which can restart as well leading to op-energy restart as well
-          StartLimitIntervalSec = 0;
-          StartLimitBurst = 0;
+          RestartSec = "10s";
+          LoadCredential =
+            # TODO: function: key:dir:file -> "key:dir/file"
+            [ "DB_PASSWORD_SECRET:${cfg.credentials_locations.DB_PASSWORD_SECRET}"
+              "ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY_SECRET:${cfg.credentials_locations.ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY_SECRET}"
+              "INTERNAL_SERVICE_SHARED_SECRET_SECRET:${cfg.credentials_locations.INTERNAL_SERVICE_SHARED_SECRET_SECRET}"
+              "SECRET_SALT_SECRET:${cfg.credentials_locations.SECRET_SALT_SECRET}"
+            ];
+          User =  "op-energy-account";
+          Group = "op-energy-account";
         };
         path = with pkgs; [
-          pkgs.op-energy-account-service
+          pkgs.op-energy-account-service jq
         ];
         script = ''
           set -ex
-          OPENERGY_ACCOUNT_SERVICE_CONFIG_FILE="${openergy_config}" op-energy-account-service +RTS -c -N -s
+          mkdir -p ~/.op-energy-account || true
+          rm -f ~/.op-energy-account/config.json || true
+          ${inject_credentials openergy_config "~/.op-energy-account/config.json"}/bin/inject_credentials
+          chmod og-rwx ~/.op-energy-account/config.json
+          OPENERGY_ACCOUNT_SERVICE_CONFIG_FILE=~/.op-energy-account/config.json \
+            op-energy-account-service +RTS -c -N -s
         '';
       };
     };
