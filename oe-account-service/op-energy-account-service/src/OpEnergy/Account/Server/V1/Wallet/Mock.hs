@@ -110,20 +110,42 @@ createInvoice pool params = do
 -- can not be read without a node
 resolveInvoice
   :: Pool SqlBackend
+  -> PersonId
   -> Bolt11Invoice
   -> IO (Either CallstackError (Maybe ResolvedInvoice))
-resolveInvoice pool invoiceV = do
-  mours <- flip runSqlPersistMPool pool $ selectFirst
-    [ WalletPaymentInvoice ==. invoiceV
-    , WalletPaymentDirection ==. Incoming
-    ]
-    [ Desc WalletPaymentId ]
+resolveInvoice pool asker invoiceV = do
+  (mours, mpaidByAsker) <- flip runSqlPersistMPool pool $ do
+    ours <- selectFirst
+      [ WalletPaymentInvoice ==. invoiceV
+      , WalletPaymentDirection ==. Incoming
+      ]
+      [ Desc WalletPaymentId ]
+    -- scoped to the account, which asked: what another account has paid is
+    -- not something this backend answers
+    paidByAsker <- selectFirst
+      [ WalletPaymentInvoice ==. invoiceV
+      , WalletPaymentDirection ==. Outgoing
+      , WalletPaymentPersonId ==. asker
+      ]
+      []
+    return (ours, paidByAsker)
+  let paidByAsker = maybe False (const True) mpaidByAsker
   return $! Right $! case mours of
-    Nothing -> Nothing
+    Nothing
+      -- not an invoice of this service, but this account has paid it, which
+      -- is enough for the caller to refuse it before taking the balance
+      | paidByAsker -> Just $! ResolvedInvoice
+          { resolvedInvoiceAmountSats = Sats 0
+          , resolvedInvoicePersonId = Nothing
+          , resolvedInvoicePayable = False
+          , resolvedInvoicePaidByAsker = True
+          }
+      | otherwise -> Nothing
     Just (Entity _ payment) -> Just $! ResolvedInvoice
       { resolvedInvoiceAmountSats = walletPaymentAmountSats payment
       , resolvedInvoicePersonId = Just (walletPaymentPersonId payment)
       , resolvedInvoicePayable = walletPaymentStatus payment == Pending
+      , resolvedInvoicePaidByAsker = paidByAsker
       }
 
 -- | pays an invoice: one this service issued for another account becomes a

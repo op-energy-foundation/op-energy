@@ -97,6 +97,10 @@ data ResolvedInvoice = ResolvedInvoice
   , resolvedInvoicePayable :: Bool
     -- ^ False once the invoice has been paid. An invoice is resolved either
     -- way, so the caller can refuse a paid one before it moves any balance
+  , resolvedInvoicePaidByAsker :: Bool
+    -- ^ True when the account, which asked, has paid this invoice already.
+    -- Reported here so the caller refuses it before it takes the balance,
+    -- rather than taking it and giving it straight back
   }
   deriving (Show, Generic)
 
@@ -111,7 +115,9 @@ data WalletBackend = WalletBackend
   , walletCreateInvoice
       :: CreateInvoiceParams -> IO (Either CallstackError CreatedInvoice)
   , walletResolveInvoice
-      :: Bolt11Invoice -> IO (Either CallstackError (Maybe ResolvedInvoice))
+      :: PersonId
+      -> Bolt11Invoice
+      -> IO (Either CallstackError (Maybe ResolvedInvoice))
     -- ^ what the wallet can tell about an invoice before paying it.
     -- 'Nothing' when it can not read it, and the amount then has to come
     -- from the client
