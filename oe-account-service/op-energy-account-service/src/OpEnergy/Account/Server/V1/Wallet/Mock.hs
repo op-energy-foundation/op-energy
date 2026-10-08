@@ -149,14 +149,21 @@ payInvoice pool params = do
               , paidInvoiceRecipientPersonId = Just (walletPaymentPersonId payment)
               }
     Nothing -> do
+      -- scoped to the payer, as this wallet can only honestly answer for
+      -- what this account has paid: a node refuses an invoice anyone has
+      -- paid, but it knows that from the chain, while this backend would be
+      -- reading somebody else's row. Asking globally let one account both
+      -- learn that another had paid a given invoice and, by paying any
+      -- string for the smallest allowed amount, leave a row, which refused
+      -- that string to everybody else
       malreadyPaid <- flip runSqlPersistMPool pool $ selectFirst
         [ WalletPaymentInvoice ==. invoiceV
         , WalletPaymentDirection ==. Outgoing
+        , WalletPaymentPersonId ==. payer
         ]
         []
       case (malreadyPaid, payInvoiceAmountSats params) of
-        -- a node would refuse an invoice it has already paid; this wallet
-        -- has no node, so its own record of the payment is what refuses it
+        -- this account has paid this invoice already
         (Just _, _) -> return $! Left walletInvoiceAlreadyPaid
         -- an invoice, which this service did not issue, can not be decoded
         -- without a node, so the amount has to be given and is checked
