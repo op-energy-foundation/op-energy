@@ -52,7 +52,8 @@ import           OpEnergy.Error
                  ( eitherThrowJSON, runExceptPrefixT
                  , CallstackError, accountNotFound, describeError
                  , walletAmountAboveMaximum, walletAmountRequired
-                 , walletInvoiceNotFound, walletSelfPaymentNotAllowed
+                 , walletInvoiceAlreadyPaid, walletInvoiceNotFound
+                 , walletSelfPaymentNotAllowed
                  )
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 
@@ -83,7 +84,13 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
   -- with, whatever the client believes; for any other invoice the client has
   -- to say, as the wallet can not read it
   now <- liftIO getPOSIXTime
-  mresolved <- ExceptT $ liftIO $ walletResolveInvoice walletV requestInvoice
+  mresolved <- ExceptT $ liftIO $ walletResolveInvoice walletV key requestInvoice
+  -- an invoice this account has paid before is refused here too, for the
+  -- same reason as the two checks below it: the wallet answers Left for it,
+  -- so each attempt took the balance and gave it straight back, which costs
+  -- the caller nothing and leaves two ledger entries every time
+  when (maybe False resolvedInvoicePaidByAsker mresolved)
+    $ throwE walletInvoiceAlreadyPaid
   -- an invoice of this service, which has been paid already, is refused
   -- here rather than after the balance has been taken and given back
   when (maybe False (not . resolvedInvoicePayable) mresolved)
@@ -119,6 +126,20 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
         ) erefunded
       throwE err
     Right paid -> do
+      -- nothing made the amount debited and the amount the wallet reports
+      -- paying agree, and the interface lets a backend report its own: a
+      -- difference is sats, which appeared or went with no ledger entry
+      -- for them, so it is written down rather than passing unnoticed. It
+      -- is not refused, as the payment has already happened by now. The
+      -- mock always reports the amount it was asked for, so this is silent
+      -- until a backend with a node does otherwise
+      when (paidInvoiceAmountSats paid /= amount)
+        $ lift $ runLogging $ $(logError)
+          ( "payInvoice: debited " <> tshow amount
+          <> " sats while the wallet reports having paid "
+          <> tshow (paidInvoiceAmountSats paid)
+          <> " sats, which differ and need manual reconciliation"
+          )
       -- an invoice of this service stays inside it: the account it was
       -- created for is credited, as nothing left over lightning
       mapM_
