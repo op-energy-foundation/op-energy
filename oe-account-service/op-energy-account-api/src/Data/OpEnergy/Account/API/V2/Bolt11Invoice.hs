@@ -8,6 +8,7 @@
 module Data.OpEnergy.Account.API.V2.Bolt11Invoice
   ( Bolt11Invoice(..)
   , defaultBolt11Invoice
+  , maxInvoiceLength
   , verifyBolt11Invoice
   , everifyBolt11Invoice
   ) where

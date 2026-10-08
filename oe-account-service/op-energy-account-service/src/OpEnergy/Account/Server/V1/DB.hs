@@ -45,6 +45,8 @@ import           OpEnergy.Account.Server.V1.LedgerEntry
 import           OpEnergy.Account.Server.V1.WalletPayment
                  ( migrateWalletPayment
                  )
+import qualified OpEnergy.Account.Server.V1.DB.Migrations.DropOversizedWalletPaymentInvoices.Migration
+                 as DropOversizedWalletPaymentInvoices
 import qualified OpEnergy.Account.Server.V1.DB.Migrations.BackfillLedgerOpeningBalance.Migration
                  as BackfillLedgerOpeningBalance
 import           OpEnergy.Account.Server.V1.Person
@@ -153,6 +155,7 @@ accountDBMigrations :: [( Config -> ReaderT
 accountDBMigrations =
   [ (\_-> return ()) -- dummy, for compatibility reasons
   , BackfillLedgerOpeningBalance.migration
+  , DropOversizedWalletPaymentInvoices.migration
   ]
 
 -- | custom migration procedure
