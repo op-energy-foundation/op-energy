@@ -52,7 +52,7 @@ import           OpEnergy.Error
                  ( eitherThrowJSON, runExceptPrefixT
                  , CallstackError, accountNotFound, describeError
                  , walletAmountAboveMaximum, walletAmountRequired
-                 , walletInvoiceNotFound
+                 , walletInvoiceNotFound, walletSelfPaymentNotAllowed
                  )
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 
@@ -88,6 +88,14 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
   -- here rather than after the balance has been taken and given back
   when (maybe False (not . resolvedInvoicePayable) mresolved)
     $ throwE walletInvoiceNotFound
+  -- an invoice of this account's own is refused here as well, for the same
+  -- reason: the wallet answers Left for it, so every attempt took the
+  -- balance and gave it straight back, which costs the caller nothing and
+  -- leaves two ledger entries and two writes to the account's row each
+  -- time. Both of those are in the account's own history, so repeating it
+  -- fills the history it is read from
+  when (maybe False ((== Just key) . resolvedInvoicePersonId) mresolved)
+    $ throwE walletSelfPaymentNotAllowed
   amount <- exceptTMaybeT walletAmountRequired
     $ return (fmap resolvedInvoiceAmountSats mresolved <|> requestAmountSats)
   when (amount > configWalletMaxWithdrawalSats config)
