@@ -18,7 +18,12 @@ import           Control.Monad.Trans.Reader (ask)
 import           Data.Int (Int64)
 import qualified Data.List as List
 import           Data.Maybe (fromMaybe)
+import           Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Data.Text.Encoding as TE
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Base16 as B16
+import qualified Crypto.Hash.SHA256 as SHA256
 import           Data.Word (Word32)
 import           Database.Persist
 import           Database.Persist.Postgresql (runSqlPersistMPool)
@@ -32,6 +37,7 @@ import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
 import           Data.OpEnergy.Account.API.V2.WalletTransaction
                  ( WalletTransaction(..)
                  )
+
 
 import           OpEnergy.Account.Server.V1.AccountService
                  ( mgetPersonByAccountToken
@@ -87,17 +93,28 @@ getWalletTransactions token mpage =
       ]
     return (totalV, entriesV)
   return $! WalletTransactionsResult
-    { results = List.map renderWalletTransaction entries
+    { results = List.map (renderWalletTransaction (configSalt config)) entries
     , page = fromIntegral requestedPage
     , pageSize = fromIntegral recordsPerReply
     , totalCount = fromIntegral total
     }
 
+-- | an identifier for a ledger entry, which says nothing about the ledger.
+--
+-- The row's own key was reported, and ledger_entry's sequence is shared by
+-- every account: from the gap between two of its own rows an account could
+-- read how many rows every other account had written in between, which is a
+-- platform-wide activity and volume oracle. Salted, so the small integers
+-- behind it can not simply be hashed back
+opaqueId :: Text -> Key LedgerEntry -> Text
+opaqueId salt key = TE.decodeUtf8 $ B16.encode $ BS.take 16 $ SHA256.hash
+  $ TE.encodeUtf8 (salt <> ":ledgerEntry:" <> Text.pack (show (fromSqlKey key)))
+
 -- | Model -> API glue: the ledger stores a positive amount and the direction
 -- it moved, while a client shows one signed number
-renderWalletTransaction :: Entity LedgerEntry -> WalletTransaction
-renderWalletTransaction (Entity key entry) = WalletTransaction
-  { walletTransactionId = Text.pack (show (fromSqlKey key))
+renderWalletTransaction :: Text -> Entity LedgerEntry -> WalletTransaction
+renderWalletTransaction salt (Entity key entry) = WalletTransaction
+  { walletTransactionId = opaqueId salt key
   , walletTransactionAmountSats = signed (ledgerEntryAmountSats entry)
   , walletTransactionReason = ledgerEntryReason entry
   , walletTransactionBalanceAfter = ledgerEntryBalanceAfter entry
