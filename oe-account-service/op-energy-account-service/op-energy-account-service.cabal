@@ -59,6 +59,7 @@ library
                    , OpEnergy.Account.Server.V1.Person
                    , OpEnergy.Account.Server.V1.LedgerEntry
                    , OpEnergy.Account.Server.V1.WalletPayment
+                   , OpEnergy.Account.Server.V1.WalletDeposits
                    , OpEnergy.Account.Server.V1.Wallet
                    , OpEnergy.Account.Server.V1.Wallet.Class
                    , OpEnergy.Account.Server.V1.Wallet.Mock

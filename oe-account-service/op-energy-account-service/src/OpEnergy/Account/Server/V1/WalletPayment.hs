@@ -91,6 +91,7 @@ WalletPayment
   invoice Bolt11Invoice
   note Text Maybe
   expiresAt POSIXTime Maybe -- incoming only: when the invoice stops being payable
+  creditedAt POSIXTime Maybe -- incoming only: when the balance was credited for it, so that happens exactly once
   createdAt POSIXTime
   updatedAt POSIXTime
   UniqueWalletPaymentHash paymentHash -- the same payment can never be recorded twice

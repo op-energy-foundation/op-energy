@@ -23,10 +23,6 @@ import           Database.Persist (Entity(..), get)
 import           Database.Persist.Postgresql (runSqlPersistMPool)
 
 import qualified Data.OpEnergy.Account.API.V1.Account as API
-import           Data.OpEnergy.Account.API.V2.LedgerReason (LedgerReason(..))
-import           Data.OpEnergy.Account.API.V2.PaymentHash
-                 ( PaymentHash(..)
-                 )
 import           Data.OpEnergy.Account.API.V2.SettleInvoiceRequest
                  ( SettleInvoiceRequest(..)
                  )
@@ -40,8 +36,8 @@ import           OpEnergy.Account.Server.V1.AccountService
 import           OpEnergy.Account.Server.V1.Class
                  ( AppM, State(..), profile, runLogging
                  )
-import           OpEnergy.Account.Server.V1.LedgerEntry
-                 ( LedgerDirection(..), adjustBalanceTx, ledgerReference
+import           OpEnergy.Account.Server.V1.WalletDeposits
+                 ( creditDepositOnce
                  )
 import           OpEnergy.Account.Server.V1.Person
 import           OpEnergy.Account.Server.V1.Wallet.Class
@@ -85,37 +81,23 @@ settleInvoice token (SettleInvoiceRequest requestPaymentHash) =
   -- kept as a second line of defence, so a backend, which ignores the
   -- account it was given, still settles nothing for the wrong one
   when (settledInvoicePersonId settled /= key) $ throwE walletInvoiceNotFound
-  if not (settledInvoiceWasPending settled)
-    then do
-      -- the balance is read again here rather than taken from the account
-      -- lookup at the start of this request. A settle, which finds the
-      -- invoice already settled, is normally a repeat of the one, which
-      -- credited it, and reporting the balance from before that credit
-      -- states the pre-deposit balance as though it were the balance the
-      -- deposit produced
-      currentBalance <- exceptTMaybeT accountNotFound
-        $ liftIO $ flip runSqlPersistMPool pool
-        $ fmap (fmap personBalance) $ get key
-      -- positional, as several wallet types share these field names
-      return $! SettleInvoiceResult
-        (settledInvoicePaymentHash settled)
-        (settledInvoiceAmountSats settled)
-        currentBalance
-    else do
-      now <- liftIO getPOSIXTime
-      -- the payment this credit is for, so a settled payment with no
-      -- matching entry can be found: the credit is a transaction of its own
-      -- after the invoice has been marked settled, and nothing re-runs it,
-      -- so the two can disagree and an operator needs to be able to join
-      -- them
-      balance <- ExceptT $ liftIO $ flip runSqlPersistMPool pool
-        $ adjustBalanceTx
-            key Credit (settledInvoiceAmountSats settled) Deposit
-            ( Just $ ledgerReference "payment"
-              $ unPaymentHash (settledInvoicePaymentHash settled)
-            )
-            now
-      return $! SettleInvoiceResult
-        (settledInvoicePaymentHash settled)
-        (settledInvoiceAmountSats settled)
-        balance
+  -- creditedAt, not whether this call was the one, which settled the
+  -- invoice, is what decides: a payment, which is settled but not yet
+  -- credited, is still waiting for its credit, so a retry of a settle whose
+  -- credit was lost between the two transactions credits it here rather
+  -- than reporting a balance, which never included it. Whichever caller
+  -- claims it first is the one, which credits
+  now <- liftIO getPOSIXTime
+  mbalance <- ExceptT $ liftIO $ flip runSqlPersistMPool pool
+    $ creditDepositOnce (settledInvoicePaymentHash settled) now
+  balance <- case mbalance of
+    Just credited -> return credited
+    -- somebody else had credited it, so the balance is read as it now is
+    Nothing -> exceptTMaybeT accountNotFound
+      $ liftIO $ flip runSqlPersistMPool pool
+      $ fmap (fmap personBalance) $ get key
+  -- positional, as several wallet types share these field names
+  return $! SettleInvoiceResult
+    (settledInvoicePaymentHash settled)
+    (settledInvoiceAmountSats settled)
+    balance
