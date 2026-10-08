@@ -7,7 +7,7 @@ module OpEnergy.Offer.Server.V2.AcceptAPI.Accept
   , acceptHandler
   ) where
 
-import           Control.Monad(when)
+import           Control.Monad(unless, when)
 import           Control.Monad.Trans.Reader(ask)
 import           Control.Monad.Trans(lift)
 import           Control.Monad.Trans.Except(ExceptT(..), throwE)
@@ -33,6 +33,7 @@ import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLog
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           OpEnergy.Offer.Server.V1.Offer
+import           OpEnergy.Offer.Server.V1.OfferService(isOfferAcceptableAt)
 import           OpEnergy.Offer.Server.V1.LiveEvent(LiveEvent(..))
 import           OpEnergy.Offer.Server.V1.WebSocketService
                    ( publishLiveEvent
@@ -44,7 +45,8 @@ import           OpEnergy.Error
                    , exceptTMaybeT, describeError
                    , CallstackError, invalidRequest
                    , offerNotFound, offerNotOpen, offerFilled
-                   , cannotAcceptOwnOffer
+                   , offerExpired, offerChanged, cannotAcceptOwnOffer
+                   , chainTipUnknown
                    )
 
 -- | Servant-facing handler
@@ -72,6 +74,11 @@ accept idText token =
   when (offerStatus offerVal /= Open) $ throwE offerNotOpen
   when (fromNatural (offerMatchedCount offerVal) >= fromNatural (offerTotalContracts offerVal)) $ throwE offerFilled
   when (offerPersonUUID offerVal == takerUUIDV) $ throwE cannotAcceptOwnOffer
+  -- The expiry sweep closes an offer, which can't be accepted anymore, but
+  -- it runs once per scheduler tick, so it may not have run since the tip
+  -- moved. Without a known tip, this can't be checked.
+  tip <- exceptTMaybeT chainTipUnknown $ liftIO $ TVar.readTVarIO currentTipV
+  unless (isOfferAcceptableAt tip offerVal) $ throwE offerExpired
 
   -- balances and offers change from here on: in withLiveEventOrder, so the
   -- change's events are published in the order of the changes
@@ -80,10 +87,6 @@ accept idText token =
       (Sats (offerTakerStakeSats offerVal))
 
     now <- liftIO getCurrentTime
-    mTip <- liftIO $ TVar.readTVarIO currentTipV
-    let takerCreatedAtBlock = case mTip of
-          Just tip -> tip
-          Nothing  -> offerCreatedAtBlock offerVal
     let contractRow = Contract
           { contractOfferId = key
           , contractTargetBlock = offerTargetBlock offerVal
@@ -99,7 +102,7 @@ accept idText token =
           , contractStatus = Live
           , contractActualMtpEpoch = Nothing
           , contractWinnerSide = Nothing
-          , contractCreatedAtBlock = takerCreatedAtBlock
+          , contractCreatedAtBlock = tip
           , contractMatchedAt = now
           , contractSettledAt = Nothing
           }
@@ -139,17 +142,26 @@ accept idText token =
             <> " but refund of " <> T.pack (show (offerTakerStakeSats offerVal))
             <> " sats failed, needs manual reconciliation: " <> describeError err
             )
-        throwE offerFilled
+        -- another accept, a cancel or the expiry sweep changed the offer
+        -- first: report which
+        mlatest <- liftIO $ flip runSqlPersistMPool pool $ get key
+        throwE $ case offerStatus <$> mlatest of
+          Just Open -> offerChanged -- another accept took a slot: try again
+          Just Filled -> offerFilled
+          Just Expired -> offerExpired
+          Just Cancelled -> offerNotOpen
+          Nothing -> offerNotFound
       Just contractKey -> do
         let contractEntity = Entity contractKey contractRow
         -- sent to every connection, so without yourRole
         lift $ publishLiveEvent $! LiveEvent
           (LiveMessageContractCreated
-            (contractInfoFromEntity Nothing mTip contractEntity)
+            (contractInfoFromEntity Nothing (Just tip) contractEntity)
           )
           -- the maker's balance does not change on accept
           [(takerUUIDV, takerBalance)]
         lift $ publishLiveEvent $! LiveEvent
           (LiveMessageOfferChanged (offerInfoFromEntity (Entity key acceptedVal)))
           []
-        return $! contractInfoFromEntity (Just "taker") mTip contractEntity
+        return $! contractInfoFromEntity (Just "taker") (Just tip)
+          contractEntity
