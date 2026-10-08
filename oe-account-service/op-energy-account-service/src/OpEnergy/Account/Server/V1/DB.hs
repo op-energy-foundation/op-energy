@@ -86,6 +86,18 @@ getConnection config = do
     runMigration migrateLedgerEntry
     runMigration migrateWalletPayment
 
+    -- an account's wallet history reads its entries by person_id, newest
+    -- first, and persistent creates no index for a foreign key. Without
+    -- this every page of the history, and the count beside it, scans the
+    -- whole ledger -- every account's rows, not the caller's -- and the
+    -- ledger grows by one row per balance change of every account. For both
+    -- new and existing DBs
+    rawExecute
+      ( "CREATE INDEX IF NOT EXISTS ledger_entry_person_id_id_idx"
+     <> " ON ledger_entry (person_id, id DESC)"
+      )
+      []
+
     -- at this point we start to run our custom migrations, that can't be handled by persisten itself
     migrateAccountDBSchema config
     migrateBlockTimeStrikeDBSchema config
