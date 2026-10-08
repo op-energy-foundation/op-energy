@@ -51,9 +51,9 @@ import           OpEnergy.Account.Server.V1.Wallet.Class
 import           OpEnergy.Error
                  ( eitherThrowJSON, runExceptPrefixT
                  , CallstackError, accountNotFound, describeError
-                 , walletAmountAboveMaximum, walletAmountRequired
-                 , walletInvoiceAlreadyPaid, walletInvoiceNotFound
-                 , walletSelfPaymentNotAllowed
+                 , walletAmountAboveMaximum, walletAmountBelowMinimum
+                 , walletAmountRequired, walletInvoiceAlreadyPaid
+                 , walletInvoiceNotFound, walletSelfPaymentNotAllowed
                  )
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 
@@ -105,6 +105,12 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
     $ throwE walletSelfPaymentNotAllowed
   amount <- exceptTMaybeT walletAmountRequired
     $ return (fmap resolvedInvoiceAmountSats mresolved <|> requestAmountSats)
+  -- the smallest amount the wallet handles applies to a payment as well as
+  -- to an invoice: a payment of less, in particular of nothing at all, moves
+  -- no balance, while it still records a payment and a ledger entry, so it
+  -- would let a caller write rows without spending anything
+  when (amount < configWalletMinInvoiceSats config)
+    $ throwE walletAmountBelowMinimum
   when (amount > configWalletMaxWithdrawalSats config)
     $ throwE walletAmountAboveMaximum
   balanceAfterDebit <- ExceptT $ liftIO $ flip runSqlPersistMPool pool
