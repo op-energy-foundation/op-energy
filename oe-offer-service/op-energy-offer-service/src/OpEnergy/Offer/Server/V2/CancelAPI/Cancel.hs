@@ -23,12 +23,14 @@ import           Control.Monad.Logger(logError)
 import           Data.Text(Text)
 import qualified Data.Text as T
 import qualified Data.Text.Read as TR
-import           Data.Time.Clock(getCurrentTime)
+import           Data.Time.Clock(UTCTime, getCurrentTime)
 import           Data.Int(Int64)
+import           Data.Word(Word64)
 
 import           Database.Persist.Postgresql
 
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountAPI
+import qualified Data.OpEnergy.Account.API.V1.UUID as AccountAPI
 import qualified Data.OpEnergy.Account.API.V2.WhoAmIResult as AccountV2
 import           Data.OpEnergy.API.V1.Natural(fromNatural)
 import           Data.OpEnergy.Offer.API.V1.OfferID(OfferID(..))
@@ -65,45 +67,8 @@ cancel idText token =
   (AccountV2.WhoAmIResult personUUIDV _displayName _balance) <-
     ExceptT $ AccountClient.verifyAccountToken token
 
-  State{ offerDBPool = pool } <- lift ask
-  offerVal <- exceptTMaybeT offerNotFound
-    $! liftIO $ flip runSqlPersistMPool pool $ get key
-  when (offerPersonUUID offerVal /= personUUIDV) $ throwE notOfferOwner
-  when (offerStatus offerVal /= Open) $ throwE offerNotOpen
-
   now <- liftIO getCurrentTime
-  let matched = offerMatchedCount offerVal
-      total   = offerTotalContracts offerVal
-      !unfilled = fromNatural (total - matched)
-      refundAmount = offerMakerStakeSats offerVal * fromIntegral unfilled
-
-  -- Atomic CAS: only update if status is still Open
-  (updatedVal, changed) <- if fromNatural matched == (0 :: Int)
-    then do
-      bumped <- liftIO $ flip runSqlPersistMPool pool $
-        updateWhereCount
-          [ OfferId ==. key, OfferStatus ==. Open ]
-          [ OfferStatus =. Cancelled
-          , OfferRefundedAt =. Just now
-          ]
-      return (offerVal { offerStatus = Cancelled, offerRefundedAt = Just now }, bumped)
-    else do
-      bumped <- liftIO $ flip runSqlPersistMPool pool $
-        updateWhereCount
-          [ OfferId ==. key, OfferStatus ==. Open ]
-          [ OfferTotalContracts =. matched
-          , OfferStatus =. Filled
-          , OfferRefundedAt =. Just now
-          ]
-      return ( offerVal
-               { offerTotalContracts = matched
-               , offerStatus = Filled
-               , offerRefundedAt = Just now
-               }
-             , bumped
-             )
-
-  when (changed /= (1 :: Int64)) $ throwE offerNotOpen
+  (updatedVal, refundAmount) <- closeForCancel key personUUIDV now cancelAttempts
 
   -- refund unfilled stake
   ecredited <- lift $ AccountClient.creditBalance personUUIDV (Sats refundAmount)
@@ -121,3 +86,61 @@ cancel idText token =
         )
 
   return $! offerInfoFrom idText updatedVal
+
+-- | how many times cancel reads the offer again, when a concurrent accept has
+-- changed its matchedCount between the read and the update
+cancelAttempts :: Int
+cancelAttempts = 3
+
+-- | closes the given account's open offer: fully when nothing is matched
+-- yet, otherwise down to its matched contracts. The update only succeeds if
+-- neither the expiry sweep nor an accept has changed the offer since it was
+-- read, so the refund is never paid twice and never covers a matched slot.
+-- If the offer is still open, it is read again, up to the given amount of
+-- attempts. Returns the closed offer and the refund due to its creator.
+closeForCancel
+  :: OfferId
+  -> AccountAPI.UUID AccountAPI.Person
+  -> UTCTime
+  -> Int
+  -> ExceptT CallstackError AppM (Offer, Word64)
+closeForCancel key personUUIDV now attemptsLeft = do
+  State{ offerDBPool = pool } <- lift ask
+  offerVal <- exceptTMaybeT offerNotFound
+    $! liftIO $ flip runSqlPersistMPool pool $ get key
+  when (offerPersonUUID offerVal /= personUUIDV) $ throwE notOfferOwner
+  when (offerStatus offerVal /= Open) $ throwE offerNotOpen
+  let matched = offerMatchedCount offerVal
+      total   = offerTotalContracts offerVal
+      !unfilled = fromNatural (total - matched)
+      refundAmount = offerMakerStakeSats offerVal * fromIntegral unfilled
+      (updates, updatedVal) = if fromNatural matched == (0 :: Int)
+        then -- full cancel
+          ( [ OfferStatus =. Cancelled
+            , OfferRefundedAt =. Just now
+            ]
+          , offerVal { offerStatus = Cancelled, offerRefundedAt = Just now }
+          )
+        else -- partial cancel: reduce totalContracts to matchedCount, mark Filled
+          ( [ OfferTotalContracts =. matched
+            , OfferStatus =. Filled
+            , OfferRefundedAt =. Just now
+            ]
+          , offerVal
+            { offerTotalContracts = matched
+            , offerStatus = Filled
+            , offerRefundedAt = Just now
+            }
+          )
+  -- Atomic CAS: only update if status and matchedCount are still as read
+  changed <- liftIO $ flip runSqlPersistMPool pool $ updateWhereCount
+    [ OfferId ==. key
+    , OfferStatus ==. Open
+    , OfferMatchedCount ==. matched
+    ]
+    updates
+  if changed == (1 :: Int64)
+    then return (updatedVal, refundAmount)
+    else do
+      when (attemptsLeft <= 1) $ throwE offerNotOpen
+      closeForCancel key personUUIDV now (attemptsLeft - 1)
