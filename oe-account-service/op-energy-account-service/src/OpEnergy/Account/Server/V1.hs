@@ -23,6 +23,9 @@ import           Data.OpEnergy.API.V1(GitHashResponse(..))
 import qualified OpEnergy.Account.Server.GitCommitHash as Server
 import           OpEnergy.Account.Server.V1.Class (AppT)
 import           OpEnergy.Account.Server.V1.AccountService
+import           OpEnergy.Account.Server.V1.WalletDeposits
+                 ( creditWaitingDeposits
+                 )
 
 import           Prometheus(MonadMonitor)
 
@@ -37,7 +40,7 @@ accountServer
 
 -- | one iteration that called from scheduler thread
 schedulerIteration :: (MonadIO m, MonadMonitor m) => AppT m ()
-schedulerIteration = return ()
+schedulerIteration = creditWaitingDeposits
 
 -- returns just commit hash, provided by build system
 oeGitHashGet :: AppT Handler GitHashResponse

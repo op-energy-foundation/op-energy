@@ -98,6 +98,17 @@ getConnection config = do
       )
       []
 
+    -- the scheduler asks each tick which incoming payments are settled and
+    -- not yet credited. Partial, so it holds only the rows still waiting --
+    -- normally none -- rather than every payment ever made, and matches
+    -- that query exactly. For both new and existing DBs
+    rawExecute
+      ( "CREATE INDEX IF NOT EXISTS wallet_payment_waiting_credit_idx"
+     <> " ON wallet_payment (direction, status, id)"
+     <> " WHERE credited_at IS NULL"
+      )
+      []
+
     -- at this point we start to run our custom migrations, that can't be handled by persisten itself
     migrateAccountDBSchema config
     migrateBlockTimeStrikeDBSchema config
