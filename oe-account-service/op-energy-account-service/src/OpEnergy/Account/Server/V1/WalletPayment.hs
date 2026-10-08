@@ -94,6 +94,7 @@ WalletPayment
   createdAt POSIXTime
   updatedAt POSIXTime
   UniqueWalletPaymentHash paymentHash -- the same payment can never be recorded twice
+  UniqueWalletPaymentPersonDirectionInvoice personId direction invoice -- one account pays one invoice once, whatever two requests race
   deriving Eq Show Generic
 |]
 

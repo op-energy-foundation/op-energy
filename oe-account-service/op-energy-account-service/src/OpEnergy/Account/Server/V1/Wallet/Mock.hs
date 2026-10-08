@@ -171,7 +171,13 @@ payInvoice pool params = do
         (Nothing, Nothing) -> return $! Left walletAmountRequired
         (Nothing, Just amount) -> do
           let paymentHashV = mockPaymentHash payer amount now entropy
-          _ <- flip runSqlPersistMPool pool $ insert $ WalletPayment
+          -- insertUnique rather than insert, as the lookup above and this
+          -- write are separate transactions: two requests, which arrive
+          -- together, both read no row and both reach here, and
+          -- UniqueWalletPaymentPersonDirectionInvoice is what refuses the
+          -- second rather than recording the same invoice as paid twice
+          minserted <- flip runSqlPersistMPool pool $ insertUnique
+            $ WalletPayment
             { walletPaymentPersonId = payer
             , walletPaymentDirection = Outgoing
             , walletPaymentStatus = Settled
@@ -184,12 +190,17 @@ payInvoice pool params = do
             , walletPaymentCreatedAt = now
             , walletPaymentUpdatedAt = now
             }
-          return $! Right $! PaidInvoice
-            { paidInvoicePaymentHash = paymentHashV
-            , paidInvoiceAmountSats = amount
-            , paidInvoiceFeeSats = Sats 0
-            , paidInvoiceRecipientPersonId = Nothing
-            }
+          case minserted of
+            -- the payment, which uniqueness refused, is this account's own
+            -- payment of this invoice, recorded by whichever request got
+            -- there first, so the caller is told what a second attempt is
+            Nothing -> return $! Left walletInvoiceAlreadyPaid
+            Just _ -> return $! Right $! PaidInvoice
+              { paidInvoicePaymentHash = paymentHashV
+              , paidInvoiceAmountSats = amount
+              , paidInvoiceFeeSats = Sats 0
+              , paidInvoiceRecipientPersonId = Nothing
+              }
 
 -- | marks an invoice of the given account paid, as a payer would. Reports
 -- whether this call was the one, which settled it, so its account is
