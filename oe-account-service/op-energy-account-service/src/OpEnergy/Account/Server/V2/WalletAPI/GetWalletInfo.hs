@@ -62,8 +62,8 @@ getWalletInfo token =
   return $! WalletInfo
     { balanceSats = personBalance person
     , mode = walletKind walletV
-    , canSend = True
-    , canReceive = True
+    , canSend = walletCanSend walletV
+    , canReceive = walletCanReceive walletV
     , minInvoiceSats = configWalletMinInvoiceSats config
     , maxInvoiceSats = configWalletMaxInvoiceSats config
     , maxWithdrawalSats = configWalletMaxWithdrawalSats config

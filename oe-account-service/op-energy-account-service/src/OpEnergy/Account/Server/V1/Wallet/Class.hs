@@ -103,6 +103,11 @@ data ResolvedInvoice = ResolvedInvoice
 -- | everything this service needs from a lightning wallet
 data WalletBackend = WalletBackend
   { walletKind :: WalletMode
+  , walletCanSend :: Bool
+    -- ^ whether this wallet can pay an invoice at all, so a client is told
+    -- what it may offer rather than being left to find out from a refusal
+  , walletCanReceive :: Bool
+    -- ^ whether this wallet can issue an invoice to be paid
   , walletCreateInvoice
       :: CreateInvoiceParams -> IO (Either CallstackError CreatedInvoice)
   , walletResolveInvoice

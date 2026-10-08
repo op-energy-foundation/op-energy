@@ -51,6 +51,10 @@ import           OpEnergy.Error
 mockWalletBackend :: Pool SqlBackend -> WalletBackend
 mockWalletBackend pool = WalletBackend
   { walletKind = WalletModeMock
+  -- this backend issues and pays invoices in its own database, so it can
+  -- do both; no sats move over lightning either way
+  , walletCanSend = True
+  , walletCanReceive = True
   , walletCreateInvoice = createInvoice pool
   , walletResolveInvoice = resolveInvoice pool
   , walletPayInvoice = payInvoice pool
