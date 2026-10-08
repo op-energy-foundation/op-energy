@@ -1,5 +1,6 @@
-{-- | Websocket with live notifications about offers, contracts and new
- - blocks, see 'Data.OpEnergy.Offer.API.V1.LiveMessage'.
+{-- | Websocket with live notifications about offers, contracts, new blocks
+ - and the authenticated account's balance, see
+ - 'Data.OpEnergy.Offer.API.V1.LiveMessage'.
  -}
 {-# LANGUAGE TemplateHaskell #-}
 module OpEnergy.Offer.Server.V1.WebSocketService
@@ -7,7 +8,7 @@ module OpEnergy.Offer.Server.V1.WebSocketService
   , publishLiveEvent
   ) where
 
-import           Control.Monad (forever, forM_, when)
+import           Control.Monad (forever, forM_)
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Logger (logDebug)
@@ -125,7 +126,7 @@ handleRequest state conn send personV = do
     Just (LiveRequestAuth token) -> authenticate state personV token
 
 -- | remembers the account of the given token, so the connection receives
--- 'LiveMessageMyChanged' for this account. An invalid token is ignored
+-- 'LiveMessageMyBalance' for this account. An invalid token is ignored
 authenticate
   :: State
   -> TVar (Maybe (AccountAPI.UUID AccountAPI.Person))
@@ -140,18 +141,18 @@ authenticate state personV token = runAppT state $ do
       ( "authenticate: ignoring invalid token: " <> describeError err )
 
 -- | waits for the next live event and sends it to the frontend with its
--- sequence number, followed by 'LiveMessageMyChanged' if the event affects
--- the connection's account
+-- sequence number, followed by 'LiveMessageMyBalance' if the event has
+-- changed the balance of the connection's account
 forwardEvent
   :: (SequencedMessage -> IO ())
   -> TVar (Maybe (AccountAPI.UUID AccountAPI.Person))
   -> TChan (Word64, LiveEvent)
   -> IO ()
 forwardEvent send personV eventsV = do
-  ((seqNo, LiveEvent message persons), mperson) <- STM.atomically $ do
+  ((seqNo, LiveEvent message balances), mperson) <- STM.atomically $ do
     event <- TChan.readTChan eventsV
     mperson <- TVar.readTVar personV
     return (event, mperson)
   send (SequencedMessage (Just seqNo) message)
-  when (maybe False (`elem` persons) mperson) $
-    send (SequencedMessage Nothing LiveMessageMyChanged)
+  forM_ (mperson >>= (`lookup` balances)) $ \balance ->
+    send (SequencedMessage Nothing (LiveMessageMyBalance balance))

@@ -74,7 +74,8 @@ post token PostOfferRequest{..} =
 
   let totalStake = makerStakeSats * totalContracts
       takerStakeSatsV = C.totalPotSats - makerStakeSats
-  _ <- ExceptT $ AccountClient.deductBalance personUUIDV (Sats totalStake)
+  Sats makerBalance <-
+    ExceptT $ AccountClient.deductBalance personUUIDV (Sats totalStake)
 
   now <- liftIO getCurrentTime
   State{ offerDBPool = pool } <- lift ask
@@ -103,7 +104,7 @@ post token PostOfferRequest{..} =
       let offerInfo = offerInfoFromEntity (Entity key offerRow)
       lift $ publishLiveEvent $! LiveEvent
         (LiveMessageOfferCreated offerInfo)
-        [personUUIDV]
+        [(personUUIDV, makerBalance)]
       return $! PostOfferResult
         { offers = [ offerInfo ] }
     Left insertErr -> do

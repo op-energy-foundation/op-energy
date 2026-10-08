@@ -23,7 +23,7 @@ import           OpEnergy.Offer.Server.V1.Class(AppT, runLogging, withDBTransact
 import           OpEnergy.Offer.Server.V1.Offer
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
-import           OpEnergy.Error(describeError)
+import           OpEnergy.Error(CallstackError, describeError)
 import           Data.Text.Show(tshow)
 
 -- | Idempotent, atomic, local-only status flip
@@ -55,13 +55,15 @@ closeOfferIfOpenTx offerId newStatus now = do
 -- | Full refund-and-close: local flip then cross-service credit.
 -- Refunds @makerStakeSats * (totalContracts - matchedCount)@ — only
 -- the unfilled portion of the offer. A failed DB transaction is logged and
--- treated as "not closed", so the caller can retry later.
+-- treated as "not closed", so the caller can retry later. Returns the closed
+-- offer with the result of the refund: the creator's new balance, or the
+-- (already logged) error.
 refundAndCloseOffer
   :: (MonadIO m, MonadMonitor m)
   => OfferId
   -> OfferStatus
   -> UTCTime
-  -> AppT m (Maybe Offer)
+  -> AppT m (Maybe (Offer, Either CallstackError Sats))
 refundAndCloseOffer offerId newStatus now = do
   mClosed <- join <$> withDBTransaction "closeOfferIfOpenTx"
     (closeOfferIfOpenTx offerId newStatus now)
@@ -79,4 +81,4 @@ refundAndCloseOffer offerId newStatus now = do
           <> " sats was NOT refunded -- "
           <> "creditBalance failed, needs manual reconciliation: " <> describeError err
           )
-      return $! Just offerVal
+      return $! Just (offerVal, ecredited)
