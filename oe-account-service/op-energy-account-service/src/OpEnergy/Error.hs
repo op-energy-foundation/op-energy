@@ -34,6 +34,7 @@ module OpEnergy.Error
   , walletAmountRequired
   , walletAmountBelowMinimum
   , walletAmountAboveMaximum
+  , ledgerReasonMismatch
   ) where
 
 import           Data.Text(Text)
@@ -68,6 +69,7 @@ data BadRequestError
   | WalletAmountRequired
   | WalletAmountBelowMinimum
   | WalletAmountAboveMaximum
+  | LedgerReasonMismatch
 instance Show BadRequestError where
   show CalculatedGuessesCountNotFound = "calculated guesses count not found"
   show SecretNotRecoverable = "account was registered before recoverable secrets; use regenerate"
@@ -88,6 +90,7 @@ instance Show BadRequestError where
   show WalletAmountRequired = "amount is required for an invoice of another wallet"
   show WalletAmountBelowMinimum = "amount is below the smallest allowed"
   show WalletAmountAboveMaximum = "amount is above the largest allowed"
+  show LedgerReasonMismatch = "reason does not describe this direction"
 
 data InternalError
   = Unspecified Text
@@ -157,6 +160,8 @@ walletAmountBelowMinimum :: CallstackError
 walletAmountBelowMinimum = CallstackError "" $! BadRequest WalletAmountBelowMinimum
 walletAmountAboveMaximum :: CallstackError
 walletAmountAboveMaximum = CallstackError "" $! BadRequest WalletAmountAboveMaximum
+ledgerReasonMismatch :: CallstackError
+ledgerReasonMismatch = CallstackError "" $! BadRequest LedgerReasonMismatch
 
 -- | renders an error for a log line, as its callstack and its reason
 describeError :: CallstackError -> Text
