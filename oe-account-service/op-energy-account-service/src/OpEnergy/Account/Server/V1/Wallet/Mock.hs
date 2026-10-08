@@ -16,6 +16,7 @@ module OpEnergy.Account.Server.V1.Wallet.Mock
 
 import qualified Crypto.Hash.SHA256 as SHA256
 import qualified Data.ByteString.Base16 as B16
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
 import           Data.Int (Int64)
 import           Data.Pool (Pool)
@@ -23,7 +24,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TE
 import           Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
 import           Data.Word (Word64)
-import qualified System.Random as Random
+import qualified System.IO as IO
 
 import           Database.Persist
 import           Database.Persist.Sql (SqlBackend, fromSqlKey, updateWhereCount)
@@ -70,7 +71,7 @@ createInvoice
   -> CreateInvoiceParams
   -> IO (Either CallstackError CreatedInvoice)
 createInvoice pool params = do
-  entropy <- Random.randomIO :: IO Word64
+  entropy <- secureEntropy
   let personKey = createInvoicePersonId params
       amount = createInvoiceAmountSats params
       now = createInvoiceNow params
@@ -81,8 +82,7 @@ createInvoice pool params = do
   -- insertUnique rather than insert: a payment hash, which is already
   -- recorded, would otherwise raise a constraint violation out of this
   -- procedure as an exception rather than an error value, and answer the
-  -- request with a bare 500. Two processes seed System.Random from the
-  -- clock, so two, which start together, can draw the same entropy
+  -- request with a bare 500
   minserted <- flip runSqlPersistMPool pool $ insertUnique $ WalletPayment
     { walletPaymentPersonId = personKey
     , walletPaymentDirection = Incoming
@@ -157,7 +157,7 @@ payInvoiceOrThrow
   -> PayInvoiceParams
   -> IO (Either CallstackError PaidInvoice)
 payInvoiceOrThrow pool params = do
-  entropy <- Random.randomIO :: IO Word64
+  entropy <- secureEntropy
   let payer = payInvoicePersonId params
       invoiceV = payInvoiceBolt11 params
       now = payInvoiceNow params
@@ -278,6 +278,20 @@ settleInvoice pool personKey paymentHashV = do
             , settledInvoiceAmountSats = walletPaymentAmountSats payment
             , settledInvoiceWasPending = settled == (1 :: Int64)
             }
+
+-- | eight bytes from the system's own random source.
+--
+-- System.Random's global generator was used here, which is SplitMix seeded
+-- from the clock: its output inverts to its state, so one payment hash of
+-- an attacker's own is enough to follow the sequence, and two processes
+-- starting together draw the same one. A payment hash is what stands
+-- between an invoice and somebody who wants to learn it exists, so it is
+-- drawn from /dev/urandom instead. No new dependency: bytestring is
+-- already one
+secureEntropy :: IO Word64
+secureEntropy = IO.withBinaryFile "/dev/urandom" IO.ReadMode $ \handle -> do
+  bytes <- BS.hGet handle 8
+  return $! BS.foldl' (\acc byte -> acc * 256 + fromIntegral byte) 0 bytes
 
 -- | payment hash of a mock payment: the hash of what the payment is, so two
 -- payments never share one
