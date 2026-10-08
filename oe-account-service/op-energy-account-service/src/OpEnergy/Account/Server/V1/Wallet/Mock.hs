@@ -73,7 +73,12 @@ createInvoice pool params = do
         now + fromIntegral (createInvoiceExpirySecs params)
       paymentHashV = mockPaymentHash personKey amount now entropy
       invoiceV = mockInvoice paymentHashV
-  _ <- flip runSqlPersistMPool pool $ insert $ WalletPayment
+  -- insertUnique rather than insert: a payment hash, which is already
+  -- recorded, would otherwise raise a constraint violation out of this
+  -- procedure as an exception rather than an error value, and answer the
+  -- request with a bare 500. Two processes seed System.Random from the
+  -- clock, so two, which start together, can draw the same entropy
+  minserted <- flip runSqlPersistMPool pool $ insertUnique $ WalletPayment
     { walletPaymentPersonId = personKey
     , walletPaymentDirection = Incoming
     , walletPaymentStatus = Pending
@@ -86,12 +91,14 @@ createInvoice pool params = do
     , walletPaymentCreatedAt = now
     , walletPaymentUpdatedAt = now
     }
-  return $! Right $! CreatedInvoice
-    { createdInvoicePaymentHash = paymentHashV
-    , createdInvoiceBolt11 = invoiceV
-    , createdInvoiceAmountSats = amount
-    , createdInvoiceExpiresAt = expiresAt
-    }
+  return $! case minserted of
+    Nothing -> Left walletInvoiceAlreadyPaid
+    Just _ -> Right $! CreatedInvoice
+      { createdInvoicePaymentHash = paymentHashV
+      , createdInvoiceBolt11 = invoiceV
+      , createdInvoiceAmountSats = amount
+      , createdInvoiceExpiresAt = expiresAt
+      }
 
 -- | an invoice this service issued is known by its own row; anything else
 -- can not be read without a node
