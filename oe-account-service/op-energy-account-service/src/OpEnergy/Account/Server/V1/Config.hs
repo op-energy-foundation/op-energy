@@ -1,6 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 module OpEnergy.Account.Server.V1.Config where
 
+import           Data.Int (Int64)
+import qualified Data.List as List
 import           Data.Text (Text)
 import           Data.Word (Word32, Word64)
 import qualified Data.Text.Encoding as Text
@@ -171,10 +173,60 @@ defaultConfig = Config
   , configWalletRecordsPerPage = 10
   }
 
+-- | the largest amount, which survives a round trip through the DB:
+-- PersistField Sats stores a Word64 as an Int64, so a configured bound
+-- above this is stored as a negative amount and compares the wrong way
+maxStorableSats :: Sats
+maxStorableSats = Sats (fromIntegral (maxBound :: Int64))
+
+-- | checks the wallet options against each other, so a config, which can
+-- not work, stops the service at startup instead of at the first request it
+-- breaks. Every problem is reported at once, rather than one per restart.
+--
+-- Example:
+--
+-- > everifyWalletConfig defaultConfig == Right ()
+everifyWalletConfig :: Config -> Either String ()
+everifyWalletConfig config
+  | List.null problems = Right ()
+  | otherwise = Left (List.intercalate "; " problems)
+  where
+    problems = catMaybes
+      [ require (configWalletRecordsPerPage config > 0)
+          "WALLET_RECORDS_PER_PAGE must be above 0: a page of no rows is \
+          \queried without a limit, which answers with the whole history"
+      , require (configWalletMinInvoiceSats config > Sats 0)
+          "WALLET_MIN_INVOICE_SATS must be above 0: an amount of nothing \
+          \moves no balance, while it still records a payment and a ledger \
+          \entry"
+      , require
+          (configWalletMinInvoiceSats config
+            <= configWalletMaxInvoiceSats config)
+          "WALLET_MIN_INVOICE_SATS must not be above WALLET_MAX_INVOICE_SATS: \
+          \no amount would be accepted, while the wallet still reports the \
+          \range as the one it takes"
+      , require (configWalletMaxInvoiceSats config <= maxStorableSats)
+          "WALLET_MAX_INVOICE_SATS must not be above the largest amount the \
+          \DB stores"
+      , require (configWalletMaxWithdrawalSats config > Sats 0)
+          "WALLET_MAX_WITHDRAWAL_SATS must be above 0: no payment would be \
+          \accepted"
+      , require (configWalletMaxWithdrawalSats config <= maxStorableSats)
+          "WALLET_MAX_WITHDRAWAL_SATS must not be above the largest amount \
+          \the DB stores"
+      , require (configWalletInvoiceExpirySecs config > 0)
+          "WALLET_INVOICE_EXPIRY_SECS must be above 0: an invoice would be \
+          \advertised as expired as soon as it is created"
+      ]
+    require holds message = if holds then Nothing else Just message
+
 getConfigFromEnvironment :: IO Config
 getConfigFromEnvironment = do
   configFilePath <- E.lookupEnv "OPENERGY_ACCOUNT_SERVICE_CONFIG_FILE" >>= pure . fromMaybe "./op-energy-account-service-config.json"
   configStr <- BS.readFile configFilePath
   case A.eitherDecodeStrict configStr of
     Left some -> error $ configFilePath ++ " is not a valid config: " ++ some
-    Right config -> return config
+    Right config -> case everifyWalletConfig config of
+      Left problem ->
+        error $ configFilePath ++ " is not a usable config: " ++ problem
+      Right () -> return config
