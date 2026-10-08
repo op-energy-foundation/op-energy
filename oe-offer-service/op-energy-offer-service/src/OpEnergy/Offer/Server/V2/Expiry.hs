@@ -5,7 +5,7 @@ module OpEnergy.Offer.Server.V2.Expiry
   ( expireStaleOffers
   ) where
 
-import           Control.Monad(forM)
+import           Control.Monad(forM, forM_)
 import           Control.Monad.IO.Class(liftIO, MonadIO)
 import           Data.Maybe(fromMaybe)
 import           Data.Time.Clock(getCurrentTime)
@@ -14,11 +14,15 @@ import           Database.Persist.Postgresql
 import           Prometheus(MonadMonitor)
 
 import           Data.OpEnergy.API.V1.Block(BlockHeight)
+import           Data.OpEnergy.API.V1.Natural(fromNatural)
 import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
+import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 
 import           OpEnergy.Offer.Server.V1.Class(AppT, profile, withDBTransaction)
 import           OpEnergy.Offer.Server.V1.Offer
 import           OpEnergy.Offer.Server.V1.OfferService(refundAndCloseOffer)
+import           OpEnergy.Offer.Server.V1.LiveEvent(LiveEvent(..))
+import           OpEnergy.Offer.Server.V1.WebSocketService(publishLiveEvent)
 
 expireStaleOffers :: (MonadIO m, MonadMonitor m) => BlockHeight -> AppT m Int
 expireStaleOffers tipHeight =
@@ -31,5 +35,14 @@ expireStaleOffers tipHeight =
       [ OfferStatus ==. Open, OfferTargetBlock <=. tipHeight ]
       []
     )
-  results <- forM staleOfferIds $ \offerId -> refundAndCloseOffer offerId Expired now
+  results <- forM staleOfferIds $ \offerId -> do
+    mclosed <- refundAndCloseOffer offerId Expired now
+    forM_ mclosed $ \offerVal -> publishLiveEvent $! LiveEvent
+      (LiveMessageOfferChanged
+        (offerIDFromKey offerId)
+        Expired
+        (fromIntegral (fromNatural (offerMatchedCount offerVal)))
+      )
+      [offerPersonUUID offerVal]
+    return mclosed
   return $! length [ () | Just _ <- results ]
