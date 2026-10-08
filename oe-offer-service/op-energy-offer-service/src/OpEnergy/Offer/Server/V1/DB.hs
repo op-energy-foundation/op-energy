@@ -36,6 +36,7 @@ import           Data.OpEnergy.API.V1.Natural(verifyNatural, fromNatural)
 import           OpEnergy.Offer.Server.V1.Config
 import           OpEnergy.Offer.Server.V1.DB.Migrations
 import           OpEnergy.Offer.Server.V1.Offer
+import           OpEnergy.Offer.Server.V1.PlatformStats(migratePlatformStats)
 
 -- | connect to DB. Returns connection pool
 getConnection
@@ -54,6 +55,9 @@ getConnection config = do
     migrateOfferDBSchema config
     printMigration migrateOffer
     runMigration migrateOffer
+    -- creates platform_stats table, for both new and existing DBs
+    printMigration migratePlatformStats
+    runMigration migratePlatformStats
 
   return pool
   where

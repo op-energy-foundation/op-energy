@@ -1,8 +1,11 @@
-{-- | Follows the chain tip announced by the blockspan service's websocket.
+{-- | Everything this service needs from the blockspan service: the chain tip,
+ - followed over the blockspan websocket, and the mediantime of a given block,
+ - requested over HTTP.
  -}
 {-# LANGUAGE TemplateHaskell #-}
 module OpEnergy.Offer.Server.V1.BlockspanClient
   ( runBlockspanTipClient
+  , getBlockMediantime
   ) where
 
 import           Control.Concurrent (threadDelay)
@@ -17,15 +20,18 @@ import           Control.Exception (evaluate)
 import           Data.Text (Text)
 import qualified Data.Text.Encoding as Text
 import qualified Data.ByteString.Lazy as BS
+import           Data.Word (Word64)
 import qualified Data.Aeson as Aeson
 
 import qualified Network.WebSockets as WS
 import           Servant.Client (BaseUrl(..))
 
+import           Data.OpEnergy.API.V1.Block (BlockHeight, BlockHeader(..))
 import           Data.OpEnergy.API.V1.WebSocketService.Message
                  ( Message(..)
                  , WebsocketRequest(..)
                  )
+import qualified Data.OpEnergy.Client as Blockspan
 import           Data.Text.Show (tshow)
 
 import           OpEnergy.Offer.Server.V1.Class
@@ -35,6 +41,7 @@ import           OpEnergy.Offer.Server.V1.Class
                  , runLogging
                  )
 import           OpEnergy.Offer.Server.V1.Config (Config(..))
+import           OpEnergy.Error (CallstackError, blockspanRequestFailed)
 
 -- | delay between attempts to (re)connect to the blockspan websocket
 reconnectDelayMicroseconds :: Int
@@ -94,3 +101,21 @@ handleMessage (MessageNewestBlockHeader _confirmedBlock !tipHeight _mTipBlock) =
   previousTip <- liftIO $ STM.atomically $ TVar.swapTVar currentTipV (Just tipHeight)
   when (previousTip /= Just tipHeight) $ runLogging $ $(logInfo)
     ( "handleMessage: new chain tip " <> tshow tipHeight )
+
+-- | returns mediantime of the block with the given height, as reported by
+-- blockspan service's HTTP API
+getBlockMediantime
+  :: MonadIO m
+  => BlockHeight
+  -> AppT m (Either CallstackError Word64)
+getBlockMediantime height = do
+  State{ config = Config{ configBlockspanURL = burl } } <- ask
+  liftIO $! E.handle onException $ do
+    eheader <- Blockspan.withClientEither burl (Blockspan.getBlockByHeight height)
+    return $! either
+      (Left . blockspanRequestFailed . tshow)
+      (Right . fromIntegral . blockHeaderMediantime)
+      eheader
+  where
+    onException :: E.SomeException -> IO (Either CallstackError Word64)
+    onException err = return $! Left (blockspanRequestFailed (tshow err))
