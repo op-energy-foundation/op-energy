@@ -1,10 +1,10 @@
 {-- | Messages of the offer service's websocket: requests from the frontend
  - and live notifications about offers, contracts and new blocks.
  -
- - Notifications about offers and contracts only say what has changed.
- - The frontend is expected to reload the affected data with the offer API.
- - A new block's notification carries the chain tip's height and
- - mediantime.
+ - Offer notifications carry the whole offer, as the offer API returns it.
+ - Contract notifications only say what has changed: the frontend is
+ - expected to reload the affected data with the offer API. A new block's
+ - notification carries the chain tip's height and mediantime.
  -
  - Notifications sent to every connection are numbered 1, 2, ... from the
  - start of the service. Every connection first receives 'LiveMessageHello'
@@ -34,9 +34,9 @@ import           Data.OpEnergy.Account.API.V1.Account
                  , everifyAccountToken
                  )
 import           Data.OpEnergy.Offer.API.V1.OfferID (OfferID)
+import           Data.OpEnergy.Offer.API.V1.OfferInfo (OfferInfo)
 import           Data.OpEnergy.Offer.API.V1.ContractInfo (ContractID)
 import           Data.OpEnergy.Offer.API.V1.OfferSide (OfferSide)
-import           Data.OpEnergy.Offer.API.V1.OfferStatus (OfferStatus)
 
 -- | request from the frontend
 data LiveRequest
@@ -66,11 +66,12 @@ instance FromJSON LiveRequest where
 
 -- | live notification to the frontend
 data LiveMessage
-  = LiveMessageOfferCreated OfferID
-    -- ^ an offer has been posted
-  | LiveMessageOfferChanged OfferID OfferStatus Word64
+  = LiveMessageOfferCreated OfferInfo
+    -- ^ an offer has been posted. Contains the offer as the offer API
+    -- returns it
+  | LiveMessageOfferChanged OfferInfo
     -- ^ an offer has been accepted, cancelled or has expired. Contains the
-    -- offer's new status and matched count
+    -- offer as it is after the change
   | LiveMessageContractCreated ContractID OfferID
     -- ^ an offer has been accepted, which created a contract
   | LiveMessageContractSettled ContractID OfferSide Word64
@@ -107,15 +108,13 @@ instance ToJSON SequencedMessage where
 
 -- | JSON fields of the given notification
 liveMessagePairs :: LiveMessage -> [Pair]
-liveMessagePairs (LiveMessageOfferCreated offerId) =
+liveMessagePairs (LiveMessageOfferCreated offer) =
   [ "type" .= ("offer.created" :: Text)
-  , "offerId" .= offerId
+  , "offer" .= offer
   ]
-liveMessagePairs (LiveMessageOfferChanged offerId status matchedCount) =
+liveMessagePairs (LiveMessageOfferChanged offer) =
   [ "type" .= ("offer.changed" :: Text)
-  , "offerId" .= offerId
-  , "status" .= status
-  , "matchedCount" .= matchedCount
+  , "offer" .= offer
   ]
 liveMessagePairs (LiveMessageContractCreated contractId offerId) =
   [ "type" .= ("contract.created" :: Text)
