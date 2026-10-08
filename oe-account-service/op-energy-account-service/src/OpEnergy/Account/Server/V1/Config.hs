@@ -179,6 +179,12 @@ defaultConfig = Config
 maxStorableSats :: Sats
 maxStorableSats = Sats (fromIntegral (maxBound :: Int64))
 
+-- | the most rows one page of the wallet history may hold. A page is read
+-- with an OFFSET of the requested page times this, and the page a client
+-- asks for is a Word32, so this also keeps that product inside an Int
+maxWalletRecordsPerPage :: Word32
+maxWalletRecordsPerPage = 1000
+
 -- | checks the wallet options against each other, so a config, which can
 -- not work, stops the service at startup instead of at the first request it
 -- breaks. Every problem is reported at once, rather than one per restart.
@@ -195,6 +201,13 @@ everifyWalletConfig config
       [ require (configWalletRecordsPerPage config > 0)
           "WALLET_RECORDS_PER_PAGE must be above 0: a page of no rows is \
           \queried without a limit, which answers with the whole history"
+      , require (configWalletRecordsPerPage config <= maxWalletRecordsPerPage)
+          ( "WALLET_RECORDS_PER_PAGE must not be above "
+         <> show maxWalletRecordsPerPage
+         <> ": a page of more rows than that answers with as much of the \
+            \history as a single reply can carry, which is what bounding \
+            \it at all is for"
+          )
       , require (configWalletMinInvoiceSats config > Sats 0)
           "WALLET_MIN_INVOICE_SATS must be above 0: an amount of nothing \
           \moves no balance, while it still records a payment and a ledger \
