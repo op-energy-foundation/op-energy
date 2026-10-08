@@ -42,7 +42,8 @@ import           OpEnergy.Account.Server.V1.Person (PersonId)
 import           OpEnergy.Account.Server.V1.Wallet.Class
 import           OpEnergy.Account.Server.V1.WalletPayment
 import           OpEnergy.Error
-                 ( CallstackError, walletAmountRequired
+                 ( CallstackError, dbQueryError, eitherException
+                 , walletAmountRequired
                  , walletInvoiceAlreadyPaid, walletInvoiceNotFound
                  , walletSelfPaymentNotAllowed
                  )
@@ -132,7 +133,30 @@ payInvoice
   :: Pool SqlBackend
   -> PayInvoiceParams
   -> IO (Either CallstackError PaidInvoice)
-payInvoice pool params = do
+payInvoice pool params =
+  -- every way this can fail is reported as an error value, including one,
+  -- which would otherwise leave as an exception. The caller has already
+  -- taken the balance by the time it calls this, and it gives it back on a
+  -- Left: an exception instead skips that, so the balance is gone, no
+  -- payment was recorded and nothing is written down. This backend can say
+  -- so honestly, as a payment of its own, which did not reach its database,
+  -- did not happen -- a backend with a node can not assume that and brings
+  -- its own answer.
+  --
+  -- The exception's own text is deliberately not carried into the error: it
+  -- is a SqlError naming tables and constraints, and the caller is answered
+  -- with whatever this returns. dbQueryError says as much as a client needs,
+  -- and the callstack the handler prepends says which procedure it came from
+  fmap (either (const (Left dbQueryError)) id)
+    $ eitherException $ payInvoiceOrThrow pool params
+
+-- | 'payInvoice' without the guard: every failure here is either an error
+-- value already or an exception, which 'payInvoice' turns into one
+payInvoiceOrThrow
+  :: Pool SqlBackend
+  -> PayInvoiceParams
+  -> IO (Either CallstackError PaidInvoice)
+payInvoiceOrThrow pool params = do
   entropy <- Random.randomIO :: IO Word64
   let payer = payInvoicePersonId params
       invoiceV = payInvoiceBolt11 params
