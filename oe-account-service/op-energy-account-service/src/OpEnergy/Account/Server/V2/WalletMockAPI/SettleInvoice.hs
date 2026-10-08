@@ -75,9 +75,12 @@ settleInvoice token (SettleInvoiceRequest requestPaymentHash) =
   State{ accountDBPool = pool, wallet = walletV } <- lift ask
   settleV <- exceptTMaybeT walletSimulationNotSupported
     $ return (walletSettleInvoice walletV)
-  settled <- ExceptT $ liftIO $ settleV requestPaymentHash
-  -- an account may only settle an invoice of its own, so a payment hash of
-  -- somebody else tells the caller nothing
+  -- the account is given to the wallet rather than checked afterwards, so an
+  -- invoice of somebody else is not found and stays untouched: checking after
+  -- the call would already have settled it
+  settled <- ExceptT $ liftIO $ settleV key requestPaymentHash
+  -- kept as a second line of defence, so a backend, which ignores the
+  -- account it was given, still settles nothing for the wrong one
   when (settledInvoicePersonId settled /= key) $ throwE walletInvoiceNotFound
   if not (settledInvoiceWasPending settled)
     -- positional, as several wallet types share these field names

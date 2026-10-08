@@ -184,15 +184,26 @@ payInvoice pool params = do
             , paidInvoiceRecipientPersonId = Nothing
             }
 
--- | marks an invoice paid, as a payer would. Reports whether this call was
--- the one, which settled it, so its account is credited exactly once
+-- | marks an invoice of the given account paid, as a payer would. Reports
+-- whether this call was the one, which settled it, so its account is
+-- credited exactly once.
+--
+-- The invoice is looked up by its payment hash together with the account,
+-- which asks, so an invoice of another account matches nothing: a payment
+-- hash of somebody else can not settle their invoice, nor tell the caller
+-- that it exists
 settleInvoice
   :: Pool SqlBackend
+  -> PersonId
   -> PaymentHash
   -> IO (Either CallstackError SettledInvoice)
-settleInvoice pool paymentHashV = do
+settleInvoice pool personKey paymentHashV = do
   mpayment <- flip runSqlPersistMPool pool
-    $ selectFirst [ WalletPaymentPaymentHash ==. paymentHashV ] []
+    $ selectFirst
+      [ WalletPaymentPaymentHash ==. paymentHashV
+      , WalletPaymentPersonId ==. personKey
+      ]
+      []
   case mpayment of
     Nothing -> return $! Left walletInvoiceNotFound
     Just (Entity key payment)
@@ -201,7 +212,10 @@ settleInvoice pool paymentHashV = do
       | otherwise -> do
           now <- getPOSIXTime
           settled <- flip runSqlPersistMPool pool $ updateWhereCount
-            [ WalletPaymentId ==. key, WalletPaymentStatus ==. Pending ]
+            [ WalletPaymentId ==. key
+            , WalletPaymentPersonId ==. personKey
+            , WalletPaymentStatus ==. Pending
+            ]
             [ WalletPaymentStatus =. Settled, WalletPaymentUpdatedAt =. now ]
           return $! Right $! SettledInvoice
             { settledInvoicePersonId = walletPaymentPersonId payment

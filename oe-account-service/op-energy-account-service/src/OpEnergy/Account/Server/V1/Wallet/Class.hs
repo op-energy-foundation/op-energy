@@ -113,8 +113,11 @@ data WalletBackend = WalletBackend
   , walletPayInvoice
       :: PayInvoiceParams -> IO (Either CallstackError PaidInvoice)
   , walletSettleInvoice
-      :: Maybe (PaymentHash -> IO (Either CallstackError SettledInvoice))
+      :: Maybe
+         (PersonId -> PaymentHash -> IO (Either CallstackError SettledInvoice))
     -- ^ 'Just' only for the mock backend, which has no real payer: marking
     -- an invoice paid is impossible against a real wallet, so the endpoint
-    -- offering it can not be served at all once this is 'Nothing'
+    -- offering it can not be served at all once this is 'Nothing'.
+    -- The 'PersonId' is the account, which asks: an invoice of any other
+    -- account is not found, so no call can reach one
   }
