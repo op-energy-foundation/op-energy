@@ -58,8 +58,8 @@ post token PostOfferRequest{..} =
   (AccountV2.WhoAmIResult personUUIDV displayNameV _balance) <-
     ExceptT $ AccountClient.verifyAccountToken token
 
-  State{ currentTip = currentTipV } <- lift ask
-  mTip <- liftIO $ TVar.readTVarIO currentTipV
+  State{ currentUnconfirmedTip = currentUnconfirmedTipV } <- lift ask
+  mTip <- liftIO $ TVar.readTVarIO currentUnconfirmedTipV
   case mTip of
     Just tip | targetBlock <= tip ->
       throwE $ invalidRequest ("targetBlock must be in the future (current tip: " <> tshow tip <> ")")

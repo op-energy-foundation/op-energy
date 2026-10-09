@@ -61,7 +61,9 @@ accept idText token =
   (AccountV2.WhoAmIResult takerUUIDV takerDisplayNameV _balance) <-
     ExceptT $ AccountClient.verifyAccountToken token
 
-  State{ offerDBPool = pool, currentTip = currentTipV } <- lift ask
+  State{ offerDBPool = pool
+       , currentUnconfirmedTip = currentUnconfirmedTipV
+       } <- lift ask
   offerVal <- exceptTMaybeT offerNotFound
     $! liftIO $ flip runSqlPersistMPool pool $ get key
 
@@ -72,7 +74,7 @@ accept idText token =
   _ <- ExceptT $ AccountClient.deductBalance takerUUIDV (Sats (offerTakerStakeSats offerVal))
 
   now <- liftIO getCurrentTime
-  mTip <- liftIO $ TVar.readTVarIO currentTipV
+  mTip <- liftIO $ TVar.readTVarIO currentUnconfirmedTipV
   let takerCreatedAtBlock = case mTip of
         Just tip -> tip
         Nothing  -> offerCreatedAtBlock offerVal
