@@ -40,7 +40,7 @@ data State = State
   , logFunc :: LogFunc
   , logLevel :: TVar LogLevel
   , metrics :: MetricsState
-  , currentTip :: TVar (Maybe BlockHeight)
+  , currentUnconfirmedTip :: TVar (Maybe BlockHeight)
     -- ^ chain tip height (blockspan service's newest confirmed block plus the
     -- amount of blocks it waits for confirmation), followed from its
     -- websocket by "OpEnergy.Offer.Server.V1.BlockspanClient". 'Nothing'
@@ -55,14 +55,14 @@ type AppM = ReaderT State Handler
 defaultState :: (MonadLoggerIO m ) => Config-> MetricsState-> LogFunc-> Pool SqlBackend-> m State
 defaultState config metrics logFunc offerDBPool = do
   logLevelV <- liftIO $ TVar.newTVarIO (configLogLevelMin config)
-  currentTipV <- liftIO $ TVar.newTVarIO Nothing
+  currentUnconfirmedTipV <- liftIO $ TVar.newTVarIO Nothing
   return $ State
     { config = config
     , offerDBPool = offerDBPool
     , logFunc = logFunc
     , logLevel = logLevelV
     , metrics = metrics
-    , currentTip = currentTipV
+    , currentUnconfirmedTip = currentUnconfirmedTipV
     , callStack = ""
     }
 

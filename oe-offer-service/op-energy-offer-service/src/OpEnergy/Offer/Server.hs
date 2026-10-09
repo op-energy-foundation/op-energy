@@ -85,10 +85,12 @@ bootstrapTasks s = runAppT s $ do
 -- | main loop of the scheduler
 schedulerMainLoop :: (MonadIO m, MonadMonitor m) => AppT m ()
 schedulerMainLoop = do
-  State{ config = Config{ configSchedulerPollRateSecs = delaySecs }, currentTip = currentTipV } <- ask
+  State{ config = Config{ configSchedulerPollRateSecs = delaySecs }
+       , currentUnconfirmedTip = currentUnconfirmedTipV
+       } <- ask
   runLogging $ $(logDebug) "scheduler main loop"
   liftIO $ IO.hFlush stdout
-  mTip <- liftIO $ TVar.readTVarIO currentTipV
+  mTip <- liftIO $ TVar.readTVarIO currentUnconfirmedTipV
   case mTip of
     Nothing -> return ()
     Just tip -> do

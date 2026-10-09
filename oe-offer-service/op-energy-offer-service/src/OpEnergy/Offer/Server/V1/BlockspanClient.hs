@@ -41,10 +41,11 @@ reconnectDelayMicroseconds :: Int
 reconnectDelayMicroseconds = 5 * 1000000
 
 -- | Follows the chain tip announced by blockspan service's websocket and
--- stores it in 'currentTip'. Any failure of the connection is logged and the
--- connection is re-established after 'reconnectDelayMicroseconds', so this
--- function never returns and never throws a synchronous exception. Until the
--- first tip arrives, 'currentTip' stays 'Nothing'.
+-- stores it in 'currentUnconfirmedTip'. Any failure of the connection is
+-- logged and the connection is re-established after
+-- 'reconnectDelayMicroseconds', so this function never returns and never
+-- throws a synchronous exception. Until the first tip arrives,
+-- 'currentUnconfirmedTip' stays 'Nothing'.
 runBlockspanTipClient :: MonadIO m => AppT m ()
 runBlockspanTipClient = do
   state@State{ config = Config{ configBlockspanWebsocketURL = burl } } <- ask
@@ -88,9 +89,10 @@ receiveTipInLoop state conn = do
 handleMessage :: MonadIO m => Message -> AppT m ()
 handleMessage MessagePong = return ()
 -- The tip height is forced before it is stored: its parser throws on invalid
--- values, and an unevaluated error must not end up in 'currentTip'.
+-- values, and an unevaluated error must not end up in 'currentUnconfirmedTip'.
 handleMessage (MessageNewestBlockHeader _confirmedBlock !tipHeight _mTipBlock) = do
-  State{ currentTip = currentTipV } <- ask
-  previousTip <- liftIO $ STM.atomically $ TVar.swapTVar currentTipV (Just tipHeight)
+  State{ currentUnconfirmedTip = currentUnconfirmedTipV } <- ask
+  previousTip <- liftIO $ STM.atomically
+    $ TVar.swapTVar currentUnconfirmedTipV (Just tipHeight)
   when (previousTip /= Just tipHeight) $ runLogging $ $(logInfo)
     ( "handleMessage: new chain tip " <> tshow tipHeight )
