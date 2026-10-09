@@ -24,6 +24,7 @@ import           Control.Exception.Safe (SomeException)
 import qualified Control.Exception.Safe as E
 
 import           Data.OpEnergy.API.V1.Block(BlockHeight)
+import           OpEnergy.Error(CallstackError, dbQueryError)
 import           OpEnergy.Offer.Server.V1.Config
 import           OpEnergy.Offer.Server.V1.Metrics
 
@@ -113,12 +114,15 @@ withDBTransactionIO
   :: State
   -> Text
   -> (ReaderT SqlBackend (Control.Monad.Logger.NoLoggingT (ResourceT IO))) r
-  -> IO (Maybe r)
+  -> IO (Either CallstackError r)
 withDBTransactionIO state header next = profileM newHeader metricsV $ do
+  -- E is Control.Exception.Safe, so an asynchronous exception -- the
+  -- cancellation a scheduler is shut down with -- passes through rather
+  -- than being reported here as a failed query
   E.handle (\(err::SomeException) -> do
                runLoggingIO state $ $(logError) (newHeader <> ": " <> Text.pack (show err))
-               return Nothing
-           ) $ flip runSqlPersistMPool pool (Just <$> next)
+               return $! Left dbQueryError
+           ) $ flip runSqlPersistMPool pool (Right <$> next)
   where
     newHeader = header <> ".DBT"
     metricsV = dynamicHistograms (metrics state)
@@ -130,7 +134,7 @@ withDBTransaction
      )
   => Text
   -> (ReaderT SqlBackend (Control.Monad.Logger.NoLoggingT (ResourceT IO))) r
-  -> AppT m (Maybe r)
+  -> AppT m (Either CallstackError r)
 withDBTransaction name next = profile name $ do
   header <- asks callStack
   state <- ask
