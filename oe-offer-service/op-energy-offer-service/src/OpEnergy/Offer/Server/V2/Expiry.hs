@@ -6,8 +6,11 @@ module OpEnergy.Offer.Server.V2.Expiry
   ) where
 
 import           Control.Monad(forM, forM_)
-import           Control.Monad.IO.Class(MonadIO)
-import           Data.Maybe(fromMaybe)
+import           Control.Monad.IO.Class(liftIO, MonadIO)
+import           Control.Monad.Logger(logError)
+import           Control.Monad.Trans(lift)
+import           Control.Monad.Trans.Except(ExceptT(..))
+import           Data.Time.Clock(getCurrentTime)
 
 import           Database.Persist.Postgresql
 import           Prometheus(MonadMonitor)
@@ -18,6 +21,14 @@ import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 
 import           OpEnergy.Offer.Server.V1.Time(getCurrentTimeDB)
 import           OpEnergy.Offer.Server.V1.Class(AppT, profile, withDBTransaction)
+import           Data.Text.Show(tshow)
+
+import           OpEnergy.Error
+                 ( CallstackError, describeError, runExceptPrefixT
+                 )
+import           OpEnergy.Offer.Server.V1.Class
+                 ( AppT, profile, runLogging, withDBTransaction
+                 )
 import           OpEnergy.Offer.Server.V1.Offer
 import           OpEnergy.Offer.Server.V1.OfferService
                    ( refundAndCloseOffer
@@ -32,21 +43,24 @@ import           OpEnergy.Offer.Server.V1.WebSocketService
                    , withLiveEventOrder
                    )
 
--- | Expires the open offers, which can not be accepted anymore at the given
--- chain tip (see 'notAcceptableAtFilter'): once the tip has passed an
--- offer's validTillBlock or has reached its target block. Each is closed
--- with the matchedCount it has when it is closed, and its creator refunded
--- the stake of its unmatched contracts. An offer, whose matchedCount an
--- accept changes while it is being closed, is left to the next call; a
--- cancelled one is not expired; a failed refund is logged by
--- 'refundAndCloseOffer'. Returns the number of offers closed by this call.
-expireStaleOffers :: (MonadIO m, MonadMonitor m) => BlockHeight -> AppT m Int
+-- | Closes every offer, whose target block the chain tip has passed, and
+-- answers with the number closed.
+--
+-- A failure is returned rather than counted as nothing to do: the sweep
+-- runs again on the next tick either way, but the scheduler is told the
+-- difference between a tick, which found no stale offers, and a tick,
+-- which could not look.
+expireStaleOffers
+  :: (MonadIO m, MonadMonitor m)
+  => BlockHeight
+  -> AppT m (Either CallstackError Int)
 expireStaleOffers tipHeight =
-  let name = "V2.Expiry.expireStaleOffers"
-  in profile name $ do
-  now <- getCurrentTimeDB
-  -- a failed query is logged by withDBTransaction; the sweep retries next tick
-  staleOfferIds <- fromMaybe [] <$> withDBTransaction "selectKeysList"
+    let name = "V2.Expiry.expireStaleOffers"
+    in profile name $ runExceptPrefixT name $ do
+  now <- liftIO getCurrentTime
+  -- the sweep has nothing to work from when this fails, so it stops here
+  -- instead of reading a failed query as "no offer is stale"
+  staleOfferIds <- ExceptT $ withDBTransaction "selectKeysList"
     ( selectKeysList
       ( [ OfferStatus ==. Open ] ++ notAcceptableAtFilter tipHeight )
       []
