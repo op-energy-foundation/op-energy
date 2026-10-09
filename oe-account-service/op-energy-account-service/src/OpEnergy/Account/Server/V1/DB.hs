@@ -45,6 +45,8 @@ import           OpEnergy.Account.Server.V1.LedgerEntry
 import           OpEnergy.Account.Server.V1.WalletPayment
                  ( migrateWalletPayment
                  )
+import qualified OpEnergy.Account.Server.V1.DB.Migrations.DropOversizedWalletPaymentInvoices.Migration
+                 as DropOversizedWalletPaymentInvoices
 import qualified OpEnergy.Account.Server.V1.DB.Migrations.BackfillLedgerOpeningBalance.Migration
                  as BackfillLedgerOpeningBalance
 import           OpEnergy.Account.Server.V1.Person
@@ -85,6 +87,29 @@ getConnection config = do
     -- backfill of opening balances reads them
     runMigration migrateLedgerEntry
     runMigration migrateWalletPayment
+
+    -- an account's wallet history reads its entries by person_id, newest
+    -- first, and persistent creates no index for a foreign key. Without
+    -- this every page of the history, and the count beside it, scans the
+    -- whole ledger -- every account's rows, not the caller's -- and the
+    -- ledger grows by one row per balance change of every account. For both
+    -- new and existing DBs
+    rawExecute
+      ( "CREATE INDEX IF NOT EXISTS ledger_entry_person_id_id_idx"
+     <> " ON ledger_entry (person_id, id DESC)"
+      )
+      []
+
+    -- the scheduler asks each tick which incoming payments are settled and
+    -- not yet credited. Partial, so it holds only the rows still waiting --
+    -- normally none -- rather than every payment ever made, and matches
+    -- that query exactly. For both new and existing DBs
+    rawExecute
+      ( "CREATE INDEX IF NOT EXISTS wallet_payment_waiting_credit_idx"
+     <> " ON wallet_payment (direction, status, id)"
+     <> " WHERE credited_at IS NULL"
+      )
+      []
 
     -- at this point we start to run our custom migrations, that can't be handled by persisten itself
     migrateAccountDBSchema config
@@ -130,6 +155,7 @@ accountDBMigrations :: [( Config -> ReaderT
 accountDBMigrations =
   [ (\_-> return ()) -- dummy, for compatibility reasons
   , BackfillLedgerOpeningBalance.migration
+  , DropOversizedWalletPaymentInvoices.migration
   ]
 
 -- | custom migration procedure

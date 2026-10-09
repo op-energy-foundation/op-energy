@@ -51,8 +51,9 @@ import           OpEnergy.Account.Server.V1.Wallet.Class
 import           OpEnergy.Error
                  ( eitherThrowJSON, runExceptPrefixT
                  , CallstackError, accountNotFound, describeError
-                 , walletAmountAboveMaximum, walletAmountRequired
-                 , walletInvoiceNotFound
+                 , walletAmountAboveMaximum, walletAmountBelowMinimum
+                 , walletAmountRequired, walletInvoiceAlreadyPaid
+                 , walletInvoiceNotFound, walletSelfPaymentNotAllowed
                  )
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 
@@ -83,13 +84,33 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
   -- with, whatever the client believes; for any other invoice the client has
   -- to say, as the wallet can not read it
   now <- liftIO getPOSIXTime
-  mresolved <- ExceptT $ liftIO $ walletResolveInvoice walletV requestInvoice
+  mresolved <- ExceptT $ liftIO $ walletResolveInvoice walletV key requestInvoice
+  -- an invoice this account has paid before is refused here too, for the
+  -- same reason as the two checks below it: the wallet answers Left for it,
+  -- so each attempt took the balance and gave it straight back, which costs
+  -- the caller nothing and leaves two ledger entries every time
+  when (maybe False resolvedInvoicePaidByAsker mresolved)
+    $ throwE walletInvoiceAlreadyPaid
   -- an invoice of this service, which has been paid already, is refused
   -- here rather than after the balance has been taken and given back
   when (maybe False (not . resolvedInvoicePayable) mresolved)
     $ throwE walletInvoiceNotFound
+  -- an invoice of this account's own is refused here as well, for the same
+  -- reason: the wallet answers Left for it, so every attempt took the
+  -- balance and gave it straight back, which costs the caller nothing and
+  -- leaves two ledger entries and two writes to the account's row each
+  -- time. Both of those are in the account's own history, so repeating it
+  -- fills the history it is read from
+  when (maybe False ((== Just key) . resolvedInvoicePersonId) mresolved)
+    $ throwE walletSelfPaymentNotAllowed
   amount <- exceptTMaybeT walletAmountRequired
     $ return (fmap resolvedInvoiceAmountSats mresolved <|> requestAmountSats)
+  -- the smallest amount the wallet handles applies to a payment as well as
+  -- to an invoice: a payment of less, in particular of nothing at all, moves
+  -- no balance, while it still records a payment and a ledger entry, so it
+  -- would let a caller write rows without spending anything
+  when (amount < configWalletMinInvoiceSats config)
+    $ throwE walletAmountBelowMinimum
   when (amount > configWalletMaxWithdrawalSats config)
     $ throwE walletAmountAboveMaximum
   balanceAfterDebit <- ExceptT $ liftIO $ flip runSqlPersistMPool pool
@@ -111,6 +132,20 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
         ) erefunded
       throwE err
     Right paid -> do
+      -- nothing made the amount debited and the amount the wallet reports
+      -- paying agree, and the interface lets a backend report its own: a
+      -- difference is sats, which appeared or went with no ledger entry
+      -- for them, so it is written down rather than passing unnoticed. It
+      -- is not refused, as the payment has already happened by now. The
+      -- mock always reports the amount it was asked for, so this is silent
+      -- until a backend with a node does otherwise
+      when (paidInvoiceAmountSats paid /= amount)
+        $ lift $ runLogging $ $(logError)
+          ( "payInvoice: debited " <> tshow amount
+          <> " sats while the wallet reports having paid "
+          <> tshow (paidInvoiceAmountSats paid)
+          <> " sats, which differ and need manual reconciliation"
+          )
       -- an invoice of this service stays inside it: the account it was
       -- created for is credited, as nothing left over lightning
       mapM_

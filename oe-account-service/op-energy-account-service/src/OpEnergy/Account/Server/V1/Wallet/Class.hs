@@ -97,24 +97,38 @@ data ResolvedInvoice = ResolvedInvoice
   , resolvedInvoicePayable :: Bool
     -- ^ False once the invoice has been paid. An invoice is resolved either
     -- way, so the caller can refuse a paid one before it moves any balance
+  , resolvedInvoicePaidByAsker :: Bool
+    -- ^ True when the account, which asked, has paid this invoice already.
+    -- Reported here so the caller refuses it before it takes the balance,
+    -- rather than taking it and giving it straight back
   }
   deriving (Show, Generic)
 
 -- | everything this service needs from a lightning wallet
 data WalletBackend = WalletBackend
   { walletKind :: WalletMode
+  , walletCanSend :: Bool
+    -- ^ whether this wallet can pay an invoice at all, so a client is told
+    -- what it may offer rather than being left to find out from a refusal
+  , walletCanReceive :: Bool
+    -- ^ whether this wallet can issue an invoice to be paid
   , walletCreateInvoice
       :: CreateInvoiceParams -> IO (Either CallstackError CreatedInvoice)
   , walletResolveInvoice
-      :: Bolt11Invoice -> IO (Either CallstackError (Maybe ResolvedInvoice))
+      :: PersonId
+      -> Bolt11Invoice
+      -> IO (Either CallstackError (Maybe ResolvedInvoice))
     -- ^ what the wallet can tell about an invoice before paying it.
     -- 'Nothing' when it can not read it, and the amount then has to come
     -- from the client
   , walletPayInvoice
       :: PayInvoiceParams -> IO (Either CallstackError PaidInvoice)
   , walletSettleInvoice
-      :: Maybe (PaymentHash -> IO (Either CallstackError SettledInvoice))
+      :: Maybe
+         (PersonId -> PaymentHash -> IO (Either CallstackError SettledInvoice))
     -- ^ 'Just' only for the mock backend, which has no real payer: marking
     -- an invoice paid is impossible against a real wallet, so the endpoint
-    -- offering it can not be served at all once this is 'Nothing'
+    -- offering it can not be served at all once this is 'Nothing'.
+    -- The 'PersonId' is the account, which asks: an invoice of any other
+    -- account is not found, so no call can reach one
   }

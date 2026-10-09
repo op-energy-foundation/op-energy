@@ -8,6 +8,7 @@
 module Data.OpEnergy.Account.API.V2.Bolt11Invoice
   ( Bolt11Invoice(..)
   , defaultBolt11Invoice
+  , maxInvoiceLength
   , verifyBolt11Invoice
   , everifyBolt11Invoice
   ) where
@@ -18,7 +19,7 @@ import qualified Data.Text as Text
 import           Data.Typeable              (Typeable)
 import           GHC.Generics
 import           Control.Lens               ((&), (?~))
-import           Data.Char                  (isAlphaNum, toLower)
+import           Data.Char                  (isAlphaNum, isAscii, toLower)
 import           Data.Swagger
 import           Servant.API                (FromHttpApiData(..), ToHttpApiData(..))
 
@@ -32,7 +33,12 @@ defaultBolt11Invoice :: Bolt11Invoice
 defaultBolt11Invoice = Bolt11Invoice "lntbs1u1pnmockinvoice0example"
 
 -- | shortest and longest invoice accepted, so neither an empty string nor an
--- unbounded one reaches the wallet backend
+-- unbounded one reaches the wallet backend.
+--
+-- Only ASCII is accepted, so a character is a byte and this is a bound on
+-- the stored size as well as on the length. It has to stay below what an
+-- index entry of wallet_payment.invoice may hold, as a longer value is
+-- refused by the DB rather than by this check
 minInvoiceLength, maxInvoiceLength :: Int
 minInvoiceLength = 20
 maxInvoiceLength = 2048
@@ -49,10 +55,17 @@ everifyBolt11Invoice raw
       Left "Bolt11Invoice: too long to be an invoice"
   | not ("ln" `Text.isPrefixOf` cleaned) =
       Left "Bolt11Invoice: expected an invoice starting with ln"
-  | not (Text.all isAlphaNum cleaned) =
-      Left "Bolt11Invoice: expected letters and digits only"
+  | not (Text.all isAsciiAlphaNum cleaned) =
+      Left "Bolt11Invoice: expected ASCII letters and digits only"
   | otherwise = Right (Bolt11Invoice cleaned)
   where
+    -- a bolt11 string is bech32, so it is ASCII. isAlphaNum alone also
+    -- accepts every other alphanumeric Unicode has, which is both wider
+    -- than an invoice can be and multi-byte: 'maxInvoiceLength' characters
+    -- of those are several times as many bytes, which overflows the index
+    -- entry of wallet_payment.invoice and fails the insert in the DB rather
+    -- than here
+    isAsciiAlphaNum c = isAscii c && isAlphaNum c
     -- wallets copy invoices with a "lightning:" scheme and in upper case
     cleaned = maybe lowered id (Text.stripPrefix "lightning:" lowered)
     lowered = Text.map toLower (Text.strip raw)

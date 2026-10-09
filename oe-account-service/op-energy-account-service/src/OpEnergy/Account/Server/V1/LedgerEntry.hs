@@ -24,7 +24,7 @@
 module OpEnergy.Account.Server.V1.LedgerEntry
   where
 
-import           Control.Monad (when)
+import           Control.Monad (unless, when)
 import           Control.Monad.IO.Class (MonadIO)
 import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Except (runExceptT, throwE)
@@ -52,6 +52,7 @@ import           Data.OpEnergy.Account.API.V2.LedgerReason
 import           OpEnergy.Account.Server.V1.Person
 import           OpEnergy.Error
                  ( CallstackError, accountNotFound, insufficientBalance
+                 , ledgerReasonMismatch
                  )
 import           OpEnergy.ExceptMaybe (exceptTMaybeT)
 
@@ -122,6 +123,7 @@ adjustBalanceTx
   -> POSIXTime
   -> ReaderT SqlBackend m (Either CallstackError Sats)
 adjustBalanceTx key direction amountSats reason reference now = runExceptT $ do
+  unless (reasonDescribes direction reason) $ throwE ledgerReasonMismatch
   changed <- lift $ case direction of
     Debit -> updateWhereCount
       [ PersonId ==. key, PersonBalance >=. amountSats ]
@@ -147,6 +149,31 @@ adjustBalanceTx key direction amountSats reason reference now = runExceptT $ do
     , ledgerEntryCreatedAt = now
     }
   return balanceAfter
+
+-- | whether a reason can describe a movement in the given direction.
+--
+-- The two were taken as unrelated, so a caller could record a credit as a
+-- Withdrawal or a debit as Winnings: the balance moved correctly, while the
+-- entry explaining it said the opposite, and the wallet history renders the
+-- kind of a row from its reason and the sign from its direction -- a credit
+-- reasoned Withdrawal shows as money sent, in the colour of money sent,
+-- carrying a positive number.
+--
+-- Written out per pair rather than with a catch-all, so a reason added
+-- later does not silently inherit an answer
+reasonDescribes :: LedgerDirection -> LedgerReason -> Bool
+reasonDescribes Credit OpeningBalance = True
+reasonDescribes Credit Deposit        = True
+reasonDescribes Credit Refund         = True
+reasonDescribes Credit Winnings       = True
+reasonDescribes Credit Withdrawal     = False
+reasonDescribes Credit Stake          = False
+reasonDescribes Debit  Withdrawal     = True
+reasonDescribes Debit  Stake          = True
+reasonDescribes Debit  OpeningBalance = False
+reasonDescribes Debit  Deposit        = False
+reasonDescribes Debit  Refund         = False
+reasonDescribes Debit  Winnings       = False
 
 -- | reference of an entry, which relates to a record of another service,
 -- eg @ledgerReference "offer" "42"@ is @"offer:42"@

@@ -34,7 +34,7 @@ import           Database.Persist.TH
 
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
 import           Data.OpEnergy.Account.API.V2.Bolt11Invoice
-                 ( Bolt11Invoice(..), everifyBolt11Invoice
+                 ( Bolt11Invoice(..)
                  )
 import           Data.OpEnergy.Account.API.V2.PaymentHash
                  ( PaymentHash(..), everifyPaymentHash
@@ -91,9 +91,11 @@ WalletPayment
   invoice Bolt11Invoice
   note Text Maybe
   expiresAt POSIXTime Maybe -- incoming only: when the invoice stops being payable
+  creditedAt POSIXTime Maybe -- incoming only: when the balance was credited for it, so that happens exactly once
   createdAt POSIXTime
   updatedAt POSIXTime
   UniqueWalletPaymentHash paymentHash -- the same payment can never be recorded twice
+  UniqueWalletPaymentPersonDirectionInvoice personId direction invoice -- one account pays one invoice once, whatever two requests race
   deriving Eq Show Generic
 |]
 
@@ -117,8 +119,16 @@ instance PersistField PaymentHash where
 instance PersistFieldSql PaymentHash where
   sqlType _ = SqlString
 
+-- a stored invoice is taken as it is, rather than verified again. The API
+-- boundary is where a value is checked -- FromJSON and FromHttpApiData both
+-- run everifyBolt11Invoice -- and a row is already a fact by the time it is
+-- read. Verifying on the way out instead means that tightening the check
+-- makes rows, which an earlier build wrote and accepted, undecodable, and a
+-- failing fromPersistValue leaves persistent as an exception rather than an
+-- error value: the request is answered with a bare 500 carrying no JSON
+-- body, and no migration can repair it, as the row is what it is
 instance PersistField Bolt11Invoice where
   toPersistValue = toPersistValue . unBolt11Invoice
-  fromPersistValue v = fromPersistValue v >>= everifyBolt11Invoice
+  fromPersistValue v = Bolt11Invoice <$> fromPersistValue v
 instance PersistFieldSql Bolt11Invoice where
   sqlType _ = SqlString
