@@ -14,7 +14,6 @@ module OpEnergy.Offer.Server where
 import           System.IO as IO
 import           Servant ( Application, Proxy(..), ServerT, serve, hoistServer, (:<|>)(..))
 import           Network.Wai.Handler.Warp(run)
-import           Control.Monad (when)
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Concurrent (threadDelay)
 import           Control.Monad.IO.Class(liftIO, MonadIO)
@@ -37,7 +36,6 @@ import           OpEnergy.Offer.Server.V1.DB
 import           OpEnergy.Offer.Server.V1.Metrics
 import           OpEnergy.Offer.Server.V2 (offerServer)
 import qualified OpEnergy.Offer.Server.V2.Expiry as Expiry
-import qualified OpEnergy.Offer.Server.V2.Settlement as Settlement
 
 -- required by prometheus-client
 instance MonadMonitor (LoggingT IO)
