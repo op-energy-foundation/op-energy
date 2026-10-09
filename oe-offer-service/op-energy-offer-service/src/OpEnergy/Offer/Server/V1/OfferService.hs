@@ -10,7 +10,8 @@ module OpEnergy.Offer.Server.V1.OfferService
   , isOfferAcceptableAt
   ) where
 
-import           Control.Monad(join)
+import           Control.Monad.Trans(lift)
+import           Control.Monad.Trans.Except(ExceptT(..))
 import           Control.Monad.Trans.Reader(ReaderT)
 import           Control.Monad.IO.Class(MonadIO)
 import           Control.Monad.Logger(logError)
@@ -28,6 +29,9 @@ import           OpEnergy.Offer.Server.V1.Offer
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           OpEnergy.Error(CallstackError, describeError)
+import           OpEnergy.Error
+                 ( CallstackError, describeError, runExceptPrefixT
+                 )
 import           Data.Text.Show(tshow)
 
 -- | DB filter for the offers, which can not be accepted anymore at the
@@ -75,28 +79,32 @@ closeOfferIfOpenTx offerId newStatus now = do
 
 -- | Full refund-and-close: local flip then cross-service credit.
 -- Refunds @makerStakeSats * (totalContracts - matchedCount)@ — only
--- the unfilled portion of the offer. A failed DB transaction is logged and
--- treated as "not closed", so the caller can retry later. Returns the closed
--- offer with the result of the refund: the creator's new balance, or the
--- (already logged) error.
+-- the unfilled portion of the offer.
+--
+-- A failed transaction is returned to the caller, which decides what a
+-- failure means for it. @Right Nothing@ is the offer declining to close --
+-- it is gone, already closed, or an accept has changed its matchedCount --
+-- which is an answer rather than a failure.
 refundAndCloseOffer
   :: (MonadIO m, MonadMonitor m)
   => OfferId
   -> OfferStatus
   -> UTCTime
-  -> AppT m (Maybe (Offer, Either CallstackError Sats))
-refundAndCloseOffer offerId newStatus now = do
-  mClosed <- join <$> withDBTransaction "closeOfferIfOpenTx"
+  -> AppT m (Either CallstackError (Maybe Offer))
+refundAndCloseOffer offerId newStatus now =
+    let name = "V1.refundAndCloseOffer"
+    in runExceptPrefixT name $ do
+  mClosed <- ExceptT $ withDBTransaction "closeOfferIfOpenTx"
     (closeOfferIfOpenTx offerId newStatus now)
   case mClosed of
     Nothing -> return Nothing
     Just offerVal -> do
       let unfilled = fromNatural (offerTotalContracts offerVal - offerMatchedCount offerVal)
           refundAmount = offerMakerStakeSats offerVal * fromIntegral unfilled
-      ecredited <- AccountClient.creditBalance (offerPersonUUID offerVal) (Sats refundAmount)
+      ecredited <- lift $ AccountClient.creditBalance (offerPersonUUID offerVal) (Sats refundAmount)
       case ecredited of
         Right _ -> return ()
-        Left err -> runLogging $ $(logError)
+        Left err -> lift $ runLogging $ $(logError)
           ( "refundAndCloseOffer: offer " <> tshow (fromSqlKey offerId)
           <> " closed (" <> tshow newStatus <> ") but its stake of " <> tshow refundAmount
           <> " sats was NOT refunded -- "

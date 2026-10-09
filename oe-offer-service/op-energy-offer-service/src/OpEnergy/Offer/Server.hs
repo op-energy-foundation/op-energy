@@ -19,7 +19,7 @@ import           Control.Monad.Trans.Reader (ask)
 import           Control.Concurrent (threadDelay)
 import           Control.Monad.IO.Class(liftIO, MonadIO)
 import           Control.Monad.IO.Unlift(MonadUnliftIO)
-import           Control.Monad.Logger (MonadLoggerIO, askLoggerIO, logDebug, LoggingT, NoLoggingT, runLoggingT, filterLogger)
+import           Control.Monad.Logger (MonadLoggerIO, askLoggerIO, logDebug, logError, LoggingT, NoLoggingT, runLoggingT, filterLogger)
 import qualified Control.Concurrent.MVar as MVar
 import qualified Control.Concurrent.STM.TVar as TVar
 import           Control.Concurrent.Async
@@ -30,6 +30,7 @@ import           Data.OpEnergy.Offer.API
 import           Data.OpEnergy.API.V1.Positive
 import           Data.Text.Show(tshow)
 
+import           OpEnergy.Error(describeError)
 import           OpEnergy.Offer.Server.V1.Config
 import           OpEnergy.Offer.Server.V1.Class (AppT, AppM, State(..), defaultState, runAppT, runLogging)
 import           OpEnergy.Offer.Server.V1.DB
@@ -97,10 +98,18 @@ schedulerMainLoop = do
     Just tip -> do
       -- expiry goes first: it closes offers which should not be accepted
       -- anymore, before settlement pays out contracts
-      expiredCount <- Expiry.expireStaleOffers tip
-      if expiredCount > 0
-        then runLogging $ $(logDebug) (tshow expiredCount <> " offer(s) expired at tip " <> tshow tip)
-        else return ()
+      eExpiredCount <- Expiry.expireStaleOffers tip
+      case eExpiredCount of
+        -- the tick is over either way: the sweep is reported rather than
+        -- retried here, as the next tick runs it again
+        Left err -> runLogging $ $(logError)
+          ( "schedulerMainLoop: the expiry sweep failed at tip " <> tshow tip
+          <> ", the next tick runs it again: " <> describeError err
+          )
+        Right expiredCount
+          | expiredCount > 0 -> runLogging $ $(logDebug)
+            (tshow expiredCount <> " offer(s) expired at tip " <> tshow tip)
+          | otherwise -> return ()
       settledCount <- Settlement.settleContracts tip
       when (settledCount > 0) $
         runLogging $ $(logDebug) (tshow settledCount <> " contract(s) settled at tip " <> tshow tip)
