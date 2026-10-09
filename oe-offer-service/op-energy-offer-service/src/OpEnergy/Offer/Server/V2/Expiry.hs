@@ -6,8 +6,10 @@ module OpEnergy.Offer.Server.V2.Expiry
   ) where
 
 import           Control.Monad(forM)
-import           Control.Monad.Trans.Reader(ask)
 import           Control.Monad.IO.Class(liftIO, MonadIO)
+import           Control.Monad.Logger(logError)
+import           Control.Monad.Trans(lift)
+import           Control.Monad.Trans.Except(ExceptT(..))
 import           Data.Time.Clock(getCurrentTime)
 
 import           Database.Persist.Postgresql
@@ -15,19 +17,51 @@ import           Prometheus(MonadMonitor)
 
 import           Data.OpEnergy.API.V1.Block(BlockHeight)
 import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
+import           Data.Text.Show(tshow)
 
-import           OpEnergy.Offer.Server.V1.Class(AppT, State(..), profile)
+import           OpEnergy.Error
+                 ( CallstackError, describeError, runExceptPrefixT
+                 )
+import           OpEnergy.Offer.Server.V1.Class
+                 ( AppT, profile, runLogging, withDBTransaction
+                 )
 import           OpEnergy.Offer.Server.V1.Offer
 import           OpEnergy.Offer.Server.V1.OfferService(refundAndCloseOffer)
 
-expireStaleOffers :: (MonadIO m, MonadMonitor m) => BlockHeight -> AppT m Int
+-- | Closes every offer, whose target block the chain tip has passed, and
+-- answers with the number closed.
+--
+-- A failure is returned rather than counted as nothing to do: the sweep
+-- runs again on the next tick either way, but the scheduler is told the
+-- difference between a tick, which found no stale offers, and a tick,
+-- which could not look.
+expireStaleOffers
+  :: (MonadIO m, MonadMonitor m)
+  => BlockHeight
+  -> AppT m (Either CallstackError Int)
 expireStaleOffers tipHeight =
-  let name = "V2.Expiry.expireStaleOffers"
-  in profile name $ do
-  State{ offerDBPool = pool } <- ask
+    let name = "V2.Expiry.expireStaleOffers"
+    in profile name $ runExceptPrefixT name $ do
   now <- liftIO getCurrentTime
-  staleOfferIds <- liftIO $ flip runSqlPersistMPool pool $ selectKeysList
-    [ OfferStatus ==. Open, OfferTargetBlock <=. tipHeight ]
-    []
-  results <- forM staleOfferIds $ \offerId -> refundAndCloseOffer offerId Expired now
+  -- the sweep has nothing to work from when this fails, so it stops here
+  -- instead of reading a failed query as "no offer is stale"
+  staleOfferIds <- ExceptT $ withDBTransaction "selectKeysList"
+    ( selectKeysList
+      [ OfferStatus ==. Open, OfferTargetBlock <=. tipHeight ]
+      []
+    )
+  -- an offer, which cannot be closed, is logged and skipped rather than
+  -- ending the sweep: the rest of this tick's offers are still closed and
+  -- the next tick tries this one again
+  results <- lift $ forM staleOfferIds $ \offerId -> do
+    eClosed <- refundAndCloseOffer offerId Expired now
+    case eClosed of
+      Right mClosed -> return mClosed
+      Left err -> do
+        runLogging $ $(logError)
+          ( "expireStaleOffers: offer " <> tshow (fromSqlKey offerId)
+          <> " could not be closed, the next tick tries it again: "
+          <> describeError err
+          )
+        return Nothing
   return $! length [ () | Just _ <- results ]
