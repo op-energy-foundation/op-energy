@@ -47,8 +47,10 @@ getList
 getList mStatus mCreator mPage mLimit =
   let name = "V2.OffersAPI.GetList.getList"
   in profile name $ runExceptPrefixT name $ do
-  State{ offerDBPool = pool, currentTip = currentTipV } <- lift ask
-  mTip <- liftIO $ TVar.readTVarIO currentTipV
+  State{ offerDBPool = pool
+       , currentUnconfirmedTip = currentUnconfirmedTipV
+       } <- lift ask
+  mTip <- liftIO $ TVar.readTVarIO currentUnconfirmedTipV
   let page = maybe 1 fromPositive mPage
       limit = maybe defaultLimit (min maxLimit . fromPositive) mLimit
       statusFilter = maybe [] (\s -> [ OfferStatus ==. s ]) mStatus
