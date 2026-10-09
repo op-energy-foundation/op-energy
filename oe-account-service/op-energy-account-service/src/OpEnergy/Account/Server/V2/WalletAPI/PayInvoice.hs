@@ -20,6 +20,7 @@ import           Control.Monad.Logger(logError)
 import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Except (ExceptT(..), throwE)
 import           Control.Monad.Trans.Reader (ask)
+import           Data.Maybe (isJust)
 import           Data.Text (Text)
 import           Data.Text.Show (tshow)
 import           Data.Time.Clock.POSIX (getPOSIXTime)
@@ -48,6 +49,9 @@ import           OpEnergy.Account.Server.V1.LedgerEntry
                  ( LedgerDirection(..), adjustBalanceTx
                  )
 import           OpEnergy.Account.Server.V1.Wallet.Class
+import           OpEnergy.Account.Server.V1.WalletDeposits
+                 ( creditDepositOnce
+                 )
 import           OpEnergy.Error
                  ( eitherThrowJSON, runExceptPrefixT
                  , CallstackError, accountNotFound, describeError
@@ -147,18 +151,18 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
           <> " sats, which differ and need manual reconciliation"
           )
       -- an invoice of this service stays inside it: the account it was
-      -- created for is credited, as nothing left over lightning
-      mapM_
-        (\recipient -> do
-          ecredited <- liftIO $ flip runSqlPersistMPool pool
-            $ adjustBalanceTx
-                recipient Credit (paidInvoiceAmountSats paid) Deposit Nothing now
-          logUnreconciled
-            ( "paid " <> tshow (paidInvoiceAmountSats paid)
-            <> " sats, but crediting the receiving account failed"
-            ) ecredited
-        )
-        (paidInvoiceRecipientPersonId paid)
+      -- created for is credited, as nothing left over lightning. The credit
+      -- claims the payment as it moves the balance, which is what keeps it
+      -- to one: the scheduler credits every settled payment whose
+      -- creditedAt is unset, so a credit written beside the claim is made
+      -- again by the next tick
+      when (isJust (paidInvoiceRecipientPersonId paid)) $ do
+        ecredited <- liftIO $ flip runSqlPersistMPool pool
+          $ creditDepositOnce (paidInvoicePaymentHash paid) now
+        logUnreconciled
+          ( "paid " <> tshow (paidInvoiceAmountSats paid)
+          <> " sats, but crediting the receiving account failed"
+          ) ecredited
       -- positional, as several wallet types share these field names
       return $! PayInvoiceResult
         (paidInvoicePaymentHash paid)
