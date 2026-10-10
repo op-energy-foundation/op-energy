@@ -5,9 +5,8 @@ module OpEnergy.Offer.Server.V2.Expiry
   ( expireStaleOffers
   ) where
 
-import           Control.Monad(forM)
+import           Control.Monad(forM, forM_)
 import           Control.Monad.IO.Class(liftIO, MonadIO)
-import           Control.Monad.Logger(logError)
 import           Control.Monad.Trans(lift)
 import           Control.Monad.Trans.Except(ExceptT(..))
 import           Data.Time.Clock(getCurrentTime)
@@ -16,17 +15,20 @@ import           Database.Persist.Postgresql
 import           Prometheus(MonadMonitor)
 
 import           Data.OpEnergy.API.V1.Block(BlockHeight)
+import           Data.OpEnergy.API.V1.Natural(fromNatural)
 import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
-import           Data.Text.Show(tshow)
+import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 
 import           OpEnergy.Error
-                 ( CallstackError, describeError, runExceptPrefixT
+                 ( CallstackError, runExceptPrefixT
                  )
 import           OpEnergy.Offer.Server.V1.Class
-                 ( AppT, profile, runLogging, withDBTransaction
+                 ( AppT, profile, withDBTransaction
                  )
 import           OpEnergy.Offer.Server.V1.Offer
 import           OpEnergy.Offer.Server.V1.OfferService(refundAndCloseOffer)
+import           OpEnergy.Offer.Server.V1.LiveEvent(LiveEvent(..))
+import           OpEnergy.Offer.Server.V1.WebSocketService(publishLiveEvent)
 
 -- | Closes every offer, whose target block the chain tip has passed, and
 -- answers with the number closed.
@@ -50,18 +52,14 @@ expireStaleOffers tipHeight =
       [ OfferStatus ==. Open, OfferTargetBlock <=. tipHeight ]
       []
     )
-  -- an offer, which cannot be closed, is logged and skipped rather than
-  -- ending the sweep: the rest of this tick's offers are still closed and
-  -- the next tick tries this one again
-  results <- lift $ forM staleOfferIds $ \offerId -> do
-    eClosed <- refundAndCloseOffer offerId Expired now
-    case eClosed of
-      Right mClosed -> return mClosed
-      Left err -> do
-        runLogging $ $(logError)
-          ( "expireStaleOffers: offer " <> tshow (fromSqlKey offerId)
-          <> " could not be closed, the next tick tries it again: "
-          <> describeError err
-          )
-        return Nothing
+  results <- forM staleOfferIds $ \offerId -> do
+    mclosed <- ExceptT $ refundAndCloseOffer offerId Expired now
+    forM_ mclosed $ \offerVal -> lift $ publishLiveEvent $! LiveEvent
+      (LiveMessageOfferChanged
+        (offerIDFromKey offerId)
+        Expired
+        (fromIntegral (fromNatural (offerMatchedCount offerVal)))
+      )
+      [offerPersonUUID offerVal]
+    return mclosed
   return $! length [ () | Just _ <- results ]
