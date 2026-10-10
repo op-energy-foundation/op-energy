@@ -153,14 +153,6 @@ offerInfoFrom idText Offer{..} = API.OfferInfo
   , API.created = offerCreated
   }
 
--- | API identifier of the offer with the given key
-offerIDFromKey :: OfferId -> API.OfferID
-offerIDFromKey key = API.OfferID (tshow (fromSqlKey key))
-
--- | API identifier of the contract with the given key
-contractIDFromKey :: ContractId -> CAPI.ContractID
-contractIDFromKey key = CAPI.ContractID (tshow (fromSqlKey key))
-
 -- | same as 'offerInfoFrom', for an 'Entity Offer'
 offerInfoFromEntity :: Entity Offer -> API.OfferInfo
 offerInfoFromEntity (Entity key offerVal) = offerInfoFrom (tshow (fromSqlKey key)) offerVal

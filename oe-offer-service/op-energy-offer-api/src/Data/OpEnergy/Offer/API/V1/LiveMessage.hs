@@ -1,10 +1,10 @@
 {-- | Messages of the offer service's websocket: requests from the frontend
  - and live notifications about offers, contracts and new blocks.
  -
- - Offer notifications carry the whole offer, as the offer API returns it.
- - Contract notifications only say what has changed: the frontend is
- - expected to reload the affected data with the offer API. A new block's
- - notification carries the chain tip's height and mediantime.
+ - Offer and contract notifications carry the whole offer or contract, as
+ - the offer API's public list returns it; a contract's @yourRole@ is
+ - @null@. A new block's notification carries the chain tip's height and
+ - mediantime.
  -
  - Notifications sent to every connection are numbered 1, 2, ... from the
  - start of the service. Every connection first receives 'LiveMessageHello'
@@ -33,10 +33,8 @@ import           Data.OpEnergy.Account.API.V1.Account
                  ( AccountToken
                  , everifyAccountToken
                  )
-import           Data.OpEnergy.Offer.API.V1.OfferID (OfferID)
 import           Data.OpEnergy.Offer.API.V1.OfferInfo (OfferInfo)
-import           Data.OpEnergy.Offer.API.V1.ContractInfo (ContractID)
-import           Data.OpEnergy.Offer.API.V1.OfferSide (OfferSide)
+import           Data.OpEnergy.Offer.API.V1.ContractInfo (ContractInfo)
 
 -- | request from the frontend
 data LiveRequest
@@ -72,11 +70,13 @@ data LiveMessage
   | LiveMessageOfferChanged OfferInfo
     -- ^ an offer has been accepted, cancelled or has expired. Contains the
     -- offer as it is after the change
-  | LiveMessageContractCreated ContractID OfferID
-    -- ^ an offer has been accepted, which created a contract
-  | LiveMessageContractSettled ContractID OfferSide Word64
-    -- ^ a contract has been settled. Contains the winning side and the
-    -- actual mediantime of the contract's target block
+  | LiveMessageContractCreated ContractInfo
+    -- ^ an offer has been accepted, which created a contract. Contains the
+    -- contract; its @yourRole@ is @null@
+  | LiveMessageContractSettled ContractInfo
+    -- ^ a contract has been settled. Contains the contract after
+    -- settlement, with its winning side and the actual mediantime of its
+    -- target block; its @yourRole@ is @null@
   | LiveMessageBlockNew BlockHeight (Maybe Word64)
     -- ^ new chain tip, or a newly known mediantime of the same tip: its
     -- height and the mediantime of the block at that height, @null@ while
@@ -116,17 +116,13 @@ liveMessagePairs (LiveMessageOfferChanged offer) =
   [ "type" .= ("offer.changed" :: Text)
   , "offer" .= offer
   ]
-liveMessagePairs (LiveMessageContractCreated contractId offerId) =
+liveMessagePairs (LiveMessageContractCreated contract) =
   [ "type" .= ("contract.created" :: Text)
-  , "contractId" .= contractId
-  , "offerId" .= offerId
+  , "contract" .= contract
   ]
-liveMessagePairs
-    (LiveMessageContractSettled contractId winnerSide actualMtpEpoch) =
+liveMessagePairs (LiveMessageContractSettled contract) =
   [ "type" .= ("contract.settled" :: Text)
-  , "contractId" .= contractId
-  , "winnerSide" .= winnerSide
-  , "actualMtpEpoch" .= actualMtpEpoch
+  , "contract" .= contract
   ]
 liveMessagePairs (LiveMessageBlockNew height mmediantime) =
   [ "type" .= ("block.new" :: Text)
