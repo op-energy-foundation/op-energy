@@ -9,7 +9,7 @@ module OpEnergy.Offer.Server.V1.BlockspanClient
   ) where
 
 import           Control.Concurrent (threadDelay)
-import           Control.Monad (forever, when)
+import           Control.Monad (forever, guard, when)
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Logger (logDebug, logInfo, logWarn)
@@ -92,21 +92,46 @@ receiveTipInLoop state conn = do
       _ -> runAppT state $ runLogging $ $(logDebug)
         ( "receiveTipInLoop: ignoring unexpected message: " <> tmsg )
 
--- | stores the chain tip from a message of blockspan service. Blockspan
+-- | stores the chain tip from a message of blockspan service and publishes
+-- 'LiveMessageBlockNew' when its height or mediantime has changed. Blockspan
 -- service reports the newest confirmed block together with the chain tip
 -- height, which is the newest confirmed block's height plus the amount of
--- blocks it waits for confirmation.
+-- blocks it waits for confirmation, and the tip's header, if it has it.
 handleMessage :: MonadIO m => Message -> AppT m ()
 handleMessage MessagePong = return ()
 -- The tip height is forced before it is stored: its parser throws on invalid
 -- values, and an unevaluated error must not end up in 'currentUnconfirmedTip'.
-handleMessage (MessageNewestBlockHeader _confirmedBlock !tipHeight _mTipBlock) = do
-  State{ currentUnconfirmedTip = currentUnconfirmedTipV } <- ask
-  previousTip <- liftIO $ STM.atomically
-    $ TVar.swapTVar currentUnconfirmedTipV (Just tipHeight)
-  when (previousTip /= Just tipHeight) $ do
-    runLogging $ $(logInfo) ( "handleMessage: new chain tip " <> tshow tipHeight )
-    publishLiveEvent $! LiveEvent (LiveMessageBlockNew tipHeight) []
+handleMessage
+    (MessageNewestBlockHeader _confirmedBlock !tipHeight mTipBlock) = do
+  State{ currentUnconfirmedTip = currentUnconfirmedTipV
+       , currentTipMediantime = currentTipMediantimeV
+       } <- ask
+  let !mreported = tipMediantime tipHeight mTipBlock
+  (previousTip, previousMediantime, mmediantime) <- liftIO $ STM.atomically $ do
+    previousTip <- TVar.swapTVar currentUnconfirmedTipV (Just tipHeight)
+    previousMediantime <- TVar.readTVar currentTipMediantimeV
+    -- a message without the tip's header keeps the known mediantime of the
+    -- same tip
+    let mmediantime = case mreported of
+          Nothing | previousTip == Just tipHeight -> previousMediantime
+          _ -> mreported
+    TVar.writeTVar currentTipMediantimeV $! mmediantime
+    return (previousTip, previousMediantime, mmediantime)
+  when ((previousTip, previousMediantime) /= (Just tipHeight, mmediantime)) $ do
+    runLogging $ $(logInfo)
+      ( "handleMessage: publishing block.new: height " <> tshow tipHeight
+      <> ", mediantime " <> maybe "unknown" tshow mmediantime
+      )
+    publishLiveEvent $! LiveEvent (LiveMessageBlockNew tipHeight mmediantime) []
+
+-- | mediantime of the given tip header, if it is the header of the block at
+-- the given height. Blockspan service keeps sending the previous tip's
+-- header, when it fails to fetch the new one.
+tipMediantime :: BlockHeight -> Maybe BlockHeader -> Maybe Word64
+tipMediantime tipHeight mTipBlock = do
+  tipBlock <- mTipBlock
+  guard (blockHeaderHeight tipBlock == tipHeight)
+  return $! fromIntegral (blockHeaderMediantime tipBlock)
 
 -- | returns mediantime of the block with the given height, as reported by
 -- blockspan service's HTTP API
