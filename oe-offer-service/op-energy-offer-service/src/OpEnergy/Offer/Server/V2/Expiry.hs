@@ -7,7 +7,6 @@ module OpEnergy.Offer.Server.V2.Expiry
 
 import           Control.Monad(forM, forM_)
 import           Control.Monad.IO.Class(liftIO, MonadIO)
-import           Control.Monad.Logger(logError)
 import           Control.Monad.Trans(lift)
 import           Control.Monad.Trans.Except(ExceptT(..))
 import           Data.Time.Clock(getCurrentTime)
@@ -18,14 +17,13 @@ import           Prometheus(MonadMonitor)
 import           Data.OpEnergy.API.V1.Block(BlockHeight)
 import           Data.OpEnergy.API.V1.Natural(fromNatural)
 import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
-import           Data.Text.Show(tshow)
 import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 
 import           OpEnergy.Error
-                 ( CallstackError, describeError, runExceptPrefixT
+                 ( CallstackError, runExceptPrefixT
                  )
 import           OpEnergy.Offer.Server.V1.Class
-                 ( AppT, profile, runLogging, withDBTransaction
+                 ( AppT, profile, withDBTransaction
                  )
 import           OpEnergy.Offer.Server.V1.Offer
 import           OpEnergy.Offer.Server.V1.OfferService(refundAndCloseOffer)
@@ -55,8 +53,8 @@ expireStaleOffers tipHeight =
       []
     )
   results <- forM staleOfferIds $ \offerId -> do
-    mclosed <- refundAndCloseOffer offerId Expired now
-    forM_ mclosed $ \offerVal -> publishLiveEvent $! LiveEvent
+    mclosed <- ExceptT $ refundAndCloseOffer offerId Expired now
+    forM_ mclosed $ \offerVal -> lift $ publishLiveEvent $! LiveEvent
       (LiveMessageOfferChanged
         (offerIDFromKey offerId)
         Expired
