@@ -96,8 +96,8 @@ handleRequest state conn send personV = do
     Just LiveRequestPing -> send LiveMessagePong
     Just LiveRequestInit -> do
       -- lets the frontend know the chain tip right away
-      let State{ currentTip = currentTipV } = state
-      mtip <- TVar.readTVarIO currentTipV
+      let State{ currentUnconfirmedTip = currentUnconfirmedTipV } = state
+      mtip <- TVar.readTVarIO currentUnconfirmedTipV
       mapM_ (send . LiveMessageBlockNew) mtip
     Just (LiveRequestAuth token) -> authenticate state personV token
 
