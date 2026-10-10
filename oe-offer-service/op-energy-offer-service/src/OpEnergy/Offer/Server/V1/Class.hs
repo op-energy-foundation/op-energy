@@ -7,6 +7,7 @@ module OpEnergy.Offer.Server.V1.Class where
 import           Data.Text(Text)
 import qualified Data.Text as Text
 import           Data.Map(Map)
+import           Data.Word (Word64)
 import qualified Control.Concurrent.STM.TVar as TVar
 import           Control.Concurrent.STM.TVar (TVar)
 import qualified Control.Concurrent.STM.TChan as TChan
@@ -48,9 +49,14 @@ data State = State
     -- amount of blocks it waits for confirmation), followed from its
     -- websocket by "OpEnergy.Offer.Server.V1.BlockspanClient". 'Nothing'
     -- until the first tip arrives
-  , liveEvents :: TChan LiveEvent
-    -- ^ broadcast channel: every websocket connection reads its own copy
-    -- of it. Events written while there are no connections are dropped
+  , liveEvents :: TChan (Word64, LiveEvent)
+    -- ^ broadcast channel of published live events with their sequence
+    -- numbers: every websocket connection reads its own copy of it. Events
+    -- written while there are no connections are dropped
+  , liveEventSeq :: TVar Word64
+    -- ^ sequence number of the last published live event, 0 before the
+    -- first one. Changed only together with a write to 'liveEvents', in one
+    -- transaction, see "OpEnergy.Offer.Server.V1.WebSocketService"
   , callStack :: Text
   }
 
@@ -63,6 +69,7 @@ defaultState config metrics logFunc offerDBPool = do
   logLevelV <- liftIO $ TVar.newTVarIO (configLogLevelMin config)
   currentUnconfirmedTipV <- liftIO $ TVar.newTVarIO Nothing
   liveEventsV <- liftIO $ TChan.newBroadcastTChanIO
+  liveEventSeqV <- liftIO $ TVar.newTVarIO 0
   return $ State
     { config = config
     , offerDBPool = offerDBPool
@@ -71,6 +78,7 @@ defaultState config metrics logFunc offerDBPool = do
     , metrics = metrics
     , currentUnconfirmedTip = currentUnconfirmedTipV
     , liveEvents = liveEventsV
+    , liveEventSeq = liveEventSeqV
     , callStack = ""
     }
 
