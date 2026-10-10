@@ -84,14 +84,11 @@ cancel idText token =
         <> " sats failed — contact support"
         )
 
+  let offerInfo = offerInfoFromEntity (Entity key updatedVal)
   lift $ publishLiveEvent $! LiveEvent
-    (LiveMessageOfferChanged
-      (OfferID idText)
-      (offerStatus updatedVal)
-      (fromIntegral (fromNatural (offerMatchedCount updatedVal)))
-    )
+    (LiveMessageOfferChanged offerInfo)
     [personUUIDV]
-  return $! offerInfoFrom idText updatedVal
+  return $! offerInfo
 
 -- | closes the given account's open offer: fully when nothing is matched
 -- yet, otherwise down to its matched contracts. Returns the closed offer and

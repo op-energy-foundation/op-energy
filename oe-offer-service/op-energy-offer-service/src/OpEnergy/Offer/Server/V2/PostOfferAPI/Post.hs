@@ -33,7 +33,7 @@ import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLog
 import           OpEnergy.Offer.Server.V1.Config(Config(..))
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
-import           OpEnergy.Offer.Server.V1.Offer(Offer(..), offerInfoFrom, offerIDFromKey)
+import           OpEnergy.Offer.Server.V1.Offer(Offer(..), offerInfoFromEntity)
 import           OpEnergy.Offer.Server.V1.LiveEvent(LiveEvent(..))
 import           OpEnergy.Offer.Server.V1.WebSocketService(publishLiveEvent)
 import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
@@ -100,11 +100,12 @@ post token PostOfferRequest{..} =
     $ fmap Right $ flip runSqlPersistMPool pool $ insert offerRow
   case einserted of
     Right key -> do
+      let offerInfo = offerInfoFromEntity (Entity key offerRow)
       lift $ publishLiveEvent $! LiveEvent
-        (LiveMessageOfferCreated (offerIDFromKey key))
+        (LiveMessageOfferCreated offerInfo)
         [personUUIDV]
       return $! PostOfferResult
-        { offers = [ offerInfoFrom (tshow (fromSqlKey key)) offerRow ] }
+        { offers = [ offerInfo ] }
     Left insertErr -> do
       ecredited <- lift $ AccountClient.creditBalance personUUIDV (Sats totalStake)
       lift $ runLogging $ $(logError)
