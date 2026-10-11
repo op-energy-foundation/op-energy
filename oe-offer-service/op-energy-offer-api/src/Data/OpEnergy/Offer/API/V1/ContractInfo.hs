@@ -61,7 +61,8 @@ instance ToHttpApiData ContractID where
 defaultContractID :: ContractID
 defaultContractID = ContractID "1"
 
--- | one matched contract, as returned by accept/mine/list/:id/details
+-- | one matched contract, as returned by accept/mine/list/:id/details and
+-- sent in the websocket's contract notifications
 data ContractInfo = ContractInfo
   { contractId       :: ContractID
   , offerId          :: OfferID
@@ -77,12 +78,14 @@ data ContractInfo = ContractInfo
   , confirmations    :: Word64
   , actualMtpEpoch   :: Maybe Word64
   , winnerSide       :: Maybe OfferSide
-  , yourRole         :: Maybe Text  -- "maker" or "taker", present when auth'd
+  , yourRole         :: Maybe Text
+    -- ^ "maker" or "taker" for the caller in accept and mine; null in the
+    -- offer list and in websocket notifications
   , createdAtBlock   :: BlockHeight
   , matchedAt        :: UTCTime
   , settledAt        :: Maybe UTCTime
   }
-  deriving (Show, Generic, Typeable)
+  deriving (Show, Eq, Generic, Typeable)
 instance ToJSON   ContractInfo
 instance FromJSON ContractInfo
 instance ToSchema ContractInfo where
