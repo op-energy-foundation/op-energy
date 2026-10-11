@@ -30,7 +30,7 @@ import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           OpEnergy.Error(CallstackError, describeError)
 import           OpEnergy.Error
-                 ( CallstackError, describeError, runExceptPrefixT
+                 ( runExceptPrefixT
                  )
 import           Data.Text.Show(tshow)
 
@@ -90,7 +90,7 @@ refundAndCloseOffer
   => OfferId
   -> OfferStatus
   -> UTCTime
-  -> AppT m (Either CallstackError (Maybe Offer))
+  -> AppT m (Either CallstackError(Maybe (Offer, Either CallstackError Sats)))
 refundAndCloseOffer offerId newStatus now =
     let name = "V1.refundAndCloseOffer"
     in runExceptPrefixT name $ do

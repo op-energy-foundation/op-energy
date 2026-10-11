@@ -47,8 +47,8 @@ import           OpEnergy.Offer.Server.V1.WebSocketService
 import qualified OpEnergy.Offer.Server.V1.BlockspanClient as BlockspanClient
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           OpEnergy.Error
-                   ( runExceptPrefixT, exceptTMaybeT, describeError
-                   , CallstackError, dbQueryError, potDoesNotCoverFee
+                   ( runExceptPrefixT, describeError
+                   , CallstackError, potDoesNotCoverFee
                    )
 
 -- | Settles every live contract, whose target block has got
@@ -87,7 +87,7 @@ selectSettleableContracts tipHeight =
         fromNatural tipHeight - fromIntegral C.settlementConfirmations
   if maxTargetBlock < 0
     then return [] -- chain is shorter than the confirmation depth
-    else exceptTMaybeT dbQueryError $ withDBTransaction "selectList" $ selectList
+    else ExceptT $ withDBTransaction "selectList" $ selectList
       [ ContractStatus ==. Live
       , ContractTargetBlock <=. verifyNatural maxTargetBlock
       ]
@@ -134,7 +134,7 @@ settleContract (Entity contractId contract@Contract{..}) =
           , contractActualMtpEpoch = Just actualMtpEpoch
           , contractSettledAt = Just now
           }
-    settled <- exceptTMaybeT dbQueryError $ withDBTransaction "markSettled" $ do
+    settled <- ExceptT $ withDBTransaction "markSettled" $ do
       updated <- updateWhereCount
         [ ContractId ==. contractId, ContractStatus ==. Live ]
         [ ContractStatus =. Settled
