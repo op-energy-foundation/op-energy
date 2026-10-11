@@ -42,7 +42,8 @@ import           Data.OpEnergy.Offer.API.V1.ContractInfo
                  ( ContractInfo, defaultContractInfo
                  )
 
--- | one offer group, as returned by post/mine/list/:id/cancel
+-- | one offer group, as returned by post/mine/list/:id/cancel and
+-- /:id/details
 data OfferInfo = OfferInfo
   { offerId            :: OfferID
   , creatorDisplayName :: DisplayName
