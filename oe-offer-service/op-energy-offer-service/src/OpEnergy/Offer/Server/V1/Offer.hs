@@ -24,6 +24,8 @@ module OpEnergy.Offer.Server.V1.Offer
   where
 
 import           Data.Text(Text)
+import qualified Data.Text as T
+import qualified Data.Text.Read as TR
 import           Data.Word(Word64)
 import           Data.Time.Clock(UTCTime)
 
@@ -201,3 +203,11 @@ contractInfoFromEntity mYourRole mTip (Entity key Contract{..}) =
     , CAPI.matchedAt = contractMatchedAt
     , CAPI.settledAt = contractSettledAt
     }
+
+-- | DB key of the offer with the given id from a request's URL: 'Nothing'
+-- unless the id is an unsigned decimal number. Like the code it replaces,
+-- it does not check that the number fits an 'OfferId'
+offerKeyFromIDText :: Text -> Maybe OfferId
+offerKeyFromIDText idText = case TR.decimal idText of
+  Right (n, rest) | T.null rest -> Just (toSqlKey n)
+  _ -> Nothing
