@@ -8,6 +8,7 @@ module OpEnergy.Offer.Server.V2.OffersAPI.GetDetails
 
 import           Control.Monad.Trans.Reader(ask)
 import           Control.Monad.Trans(lift)
+import           Control.Monad.Trans.Except(ExceptT(..))
 import           Control.Monad.IO.Class(liftIO)
 import           Control.Monad.Logger(logError)
 import qualified Control.Concurrent.STM.TVar as TVar
@@ -26,7 +27,6 @@ import           OpEnergy.Offer.Server.V1.Offer
 import           OpEnergy.Error
                    ( eitherThrowJSON, runExceptPrefixT, exceptTMaybeT
                    , CallstackError, invalidRequest, offerNotFound
-                   , dbQueryError
                    )
 
 -- | Servant-facing handler
@@ -55,16 +55,15 @@ getDetails idText =
   in profile name $ runExceptPrefixT name $ do
   key <- exceptTMaybeT (invalidRequest "invalid offer id")
     $ return (offerKeyFromIDText idText)
-  State{ currentTip = currentTipV } <- lift ask
-  (mofferVal, contractRows) <- exceptTMaybeT dbQueryError
-    $ withDBTransaction "selectOfferDetails" $ do
+  State{ currentUnconfirmedTip = currentUnconfirmedTipV } <- lift ask
+  (mofferVal, contractRows) <- ExceptT $ withDBTransaction "selectOfferDetails" $ do
       mofferVal <- get key
       contractRows <- selectList
         [ ContractOfferId ==. key ]
         [ Asc ContractMatchedAt ]
       return (mofferVal, contractRows)
   offerVal <- exceptTMaybeT offerNotFound $ return mofferVal
-  mTip <- liftIO $ TVar.readTVarIO currentTipV
+  mTip <- liftIO $ TVar.readTVarIO currentUnconfirmedTipV
   return $! OfferDetails
     (offerInfoFromEntity (Entity key offerVal))
     (map (contractInfoFromEntity Nothing mTip) contractRows)

@@ -22,8 +22,7 @@ import           Control.Monad.IO.Class(MonadIO, liftIO)
 import           Prometheus(MonadMonitor)
 import           Control.Monad.Logger(logError)
 import           Data.Text(Text)
-import           Data.Int(Int64)
-import           Data.Time.Clock(UTCTime, getCurrentTime)
+import           Data.Time.Clock(UTCTime)
 import           Data.Word(Word64)
 
 import           Database.Persist.Postgresql
@@ -82,7 +81,7 @@ cancel idText token =
   withLiveEventOrderE $ do
     now <- getCurrentTimeDB
     (updatedVal, refundAmount) <-
-      closeForCancel key personUUIDV now cancelAttempts
+      closeForCancel key personUUIDV now
 
     -- refund unfilled stake
     ecredited <- lift
@@ -114,7 +113,7 @@ closeForCancel
   => OfferId
   -> AccountAPI.UUID AccountAPI.Person
   -> UTCTime
-  -> ExceptT CallstackError AppM (Offer, Word64)
+  -> ExceptT CallstackError (AppT m) (Offer, Word64)
 closeForCancel key personUUIDV now = do
   State{ offerDBPool = pool } <- lift ask
   ExceptT $ liftIO $ flip runSqlPersistMPool pool
