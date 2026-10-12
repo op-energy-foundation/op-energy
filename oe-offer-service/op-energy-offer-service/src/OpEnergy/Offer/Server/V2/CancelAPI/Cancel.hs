@@ -15,10 +15,9 @@ module OpEnergy.Offer.Server.V2.CancelAPI.Cancel
   , cancelHandler
   ) where
 
-import           Control.Monad.Trans.Reader(ask)
 import           Control.Monad.Trans(lift)
 import           Control.Monad.Trans.Except(ExceptT(..), runExceptT, throwE)
-import           Control.Monad.IO.Class(MonadIO, liftIO)
+import           Control.Monad.IO.Class(MonadIO)
 import           Prometheus(MonadMonitor)
 import           Control.Monad.Logger(logError)
 import           Data.Text(Text)
@@ -39,7 +38,8 @@ import           Data.Text.Show(tshow)
 
 import           OpEnergy.Offer.Server.V1.Time(getCurrentTimeDB)
 import           OpEnergy.Offer.Server.V1.Class
-                   ( AppM, AppT, State(..), profile, runLogging
+                   ( AppM, AppT, profile, runLogging
+                   , withDBTransaction
                    )
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
@@ -115,9 +115,9 @@ closeForCancel
   -> UTCTime
   -> ExceptT CallstackError (AppT m) (Offer, Word64)
 closeForCancel key personUUIDV now = do
-  State{ offerDBPool = pool } <- lift ask
-  ExceptT $ liftIO $ flip runSqlPersistMPool pool
+  eclosed <- ExceptT $ withDBTransaction "closeForCancel"
     $ closeForCancelTx key personUUIDV now
+  ExceptT $! return eclosed
 
 -- | the read, the checks and the update of a cancel, in one transaction.
 -- The offer is read FOR UPDATE, so an accept or the expiry sweep that wants
