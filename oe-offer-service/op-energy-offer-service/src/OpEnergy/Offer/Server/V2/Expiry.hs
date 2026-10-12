@@ -34,7 +34,7 @@ import           OpEnergy.Offer.Server.V1.LiveEvent
                    )
 import           OpEnergy.Offer.Server.V1.WebSocketService
                    ( publishLiveEvent
-                   , withLiveEventOrder
+                   , withLiveEventOrderE
                    )
 
 -- | Closes every offer, whose target block the chain tip has passed, and
@@ -59,11 +59,10 @@ expireStaleOffers tipHeight =
       ( ( OfferStatus ==. Open ) : notAcceptableAtFilter tipHeight )
       []
     )
-  results <- forM staleOfferIds $ \offerId ->
-    ExceptT $ withLiveEventOrder $ runExceptT $ do
-      mclosed <- ExceptT $ refundAndCloseOffer offerId Expired now
-      forM_ mclosed $ \(offerVal, ecredited) -> lift $ publishLiveEvent $! LiveEvent
-        (LiveMessageOfferChanged (offerInfoFromEntity (Entity offerId offerVal)))
-        (changedBalance (offerPersonUUID offerVal) ecredited)
-      return mclosed
+  results <- forM staleOfferIds $ \offerId -> withLiveEventOrderE $ do
+    mclosed <- ExceptT $ refundAndCloseOffer offerId Expired now
+    forM_ mclosed $ \(offerVal, ecredited) -> lift $ publishLiveEvent $! LiveEvent
+      (LiveMessageOfferChanged (offerInfoFromEntity (Entity offerId offerVal)))
+      (changedBalance (offerPersonUUID offerVal) ecredited)
+    return mclosed
   return $! length [ () | (Just _)<- results ]
