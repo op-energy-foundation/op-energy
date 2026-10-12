@@ -32,5 +32,6 @@ pkgs.mkShell {
       async unliftio-core
     ]))
     cabal-install
+    haskell-language-server
   ];
 }
