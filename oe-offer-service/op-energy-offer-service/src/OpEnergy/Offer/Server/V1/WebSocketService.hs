@@ -10,13 +10,14 @@ module OpEnergy.Offer.Server.V1.WebSocketService
   , withLiveEventOrderE
   ) where
 
-import           Control.Monad (forever, forM_)
+import           Control.Monad (forever, forM_, when)
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.Trans.Except (ExceptT(..), runExceptT)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Logger (logDebug, logWarn)
 import qualified Control.Concurrent.Async as Async
-import qualified Control.Concurrent.MVar as MVar
+import qualified Control.Concurrent.STM.TMVar as TMVar
+import           Control.Concurrent.STM.TMVar (TMVar)
 import qualified Control.Concurrent.STM as STM
 import qualified Control.Concurrent.STM.TChan as TChan
 import           Control.Concurrent.STM.TChan (TChan)
@@ -24,8 +25,10 @@ import qualified Control.Concurrent.STM.TVar as TVar
 import           Control.Concurrent.STM.TVar (TVar)
 import qualified Control.Exception.Safe as E
 import qualified Data.ByteString.Lazy as BL
+import           Data.Maybe (isNothing)
 import qualified Data.Aeson as Aeson
 import           Data.Word (Word64)
+import           System.Timeout (timeout)
 
 import qualified Network.WebSockets as WS
 
@@ -49,10 +52,29 @@ import           OpEnergy.Offer.Server.V1.LiveEvent (LiveEvent(..))
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           OpEnergy.Error (describeError)
 
+-- | runs the given action while it holds the given lock. The lock is a
+-- 'TMVar', so a thread, which waits for it, waits in a transaction, which
+-- can be composed with other transactions, as 'MVar' can not. The lock is
+-- released when the action throws, as 'Control.Concurrent.MVar.withMVar'
+-- also does.
+withLock :: TMVar () -> IO a -> IO a
+withLock lockV = E.bracket_
+  (STM.atomically $ TMVar.takeTMVar lockV)
+  (STM.atomically $ TMVar.putTMVar lockV ())
+
 -- | interval of websocket ping frames, which keep idle connections open
 -- through proxies
 keepAlivePingSecs :: Int
 keepAlivePingSecs = 30
+
+-- | how long one message may take to reach a connection before it is
+-- closed. A connection, which is not read, takes its events no further than
+-- its socket buffers, while every event published meanwhile is kept for it,
+-- so without this a single such connection grows the service's memory for
+-- as long as it stays open. The frontend reads the state it needs again
+-- when it reconnects, so closing it loses nothing.
+sendTimeoutSecs :: Int
+sendTimeoutSecs = 30
 
 -- | sends the given event to every websocket connection with the next
 -- sequence number. The number is taken and the event is queued in one
@@ -89,7 +111,7 @@ publishLiveEvent event = do
 withLiveEventOrder :: MonadIO m => AppT IO a -> AppT m a
 withLiveEventOrder change = do
   state@State{ liveEventOrder = liveEventOrderV } <- ask
-  liftIO $ MVar.withMVar liveEventOrderV $ \_ -> runAppT state change
+  liftIO $ withLock liveEventOrderV $ runAppT state change
 
 -- | 'withLiveEventOrder' for a change, which can fail
 withLiveEventOrderE
@@ -122,10 +144,17 @@ webSocketConnection conn = do
       <*> TVar.readTVar currentUnconfirmedTipV
       <*> TVar.readTVar currentTipMediantimeV
     personV <- TVar.newTVarIO Nothing
-    sendLock <- MVar.newMVar ()
+    sendLock <- TMVar.newTMVarIO ()
     let send :: SequencedMessage -> IO ()
-        send message = MVar.withMVar sendLock $ \_ ->
-          WS.sendTextData conn (Aeson.encode message)
+        send message = do
+          sent <- withLock sendLock
+            $ timeout (sendTimeoutSecs * 1000000)
+            $ WS.sendTextData conn (Aeson.encode message)
+          -- closes the connection, as 'sendTimeoutSecs' says
+          when (isNothing sent) $ E.throwString
+            ( "send: the connection did not take a message within "
+            <> show sendTimeoutSecs <> " seconds"
+            )
     runAppT state $ runLogging $ $(logDebug)
       "webSocketConnection: new connection"
     eresult <- E.tryAny $ WS.withPingThread conn keepAlivePingSecs (return ())
@@ -152,8 +181,11 @@ handleRequest
 handleRequest state conn send personV = do
   (request :: BL.ByteString) <- WS.receiveData conn
   case Aeson.decode request of
+    -- the request itself is not logged: an auth request carries an account
+    -- token, and a request, which did not decode, can still hold one
     Nothing -> runAppT state $ runLogging $ $(logDebug)
-      ( "handleRequest: ignoring unexpected request: " <> tshow request )
+      ( "handleRequest: ignoring a request of " <> tshow (BL.length request)
+      <> " bytes, which did not decode" )
     Just LiveRequestPing -> send (SequencedMessage Nothing LiveMessagePong)
     -- the chain tip has already been sent when the connection opened
     Just LiveRequestInit -> return ()

@@ -12,8 +12,8 @@ import qualified Control.Concurrent.STM.TVar as TVar
 import           Control.Concurrent.STM.TVar (TVar)
 import qualified Control.Concurrent.STM.TChan as TChan
 import           Control.Concurrent.STM.TChan (TChan)
-import qualified Control.Concurrent.MVar as MVar
-import           Control.Concurrent.MVar (MVar)
+import qualified Control.Concurrent.STM.TMVar as TMVar
+import           Control.Concurrent.STM.TMVar (TMVar)
 import           Control.Monad.Trans.Reader (runReaderT, ReaderT, ask, asks, local)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Trans(lift)
@@ -63,7 +63,7 @@ data State = State
     -- ^ sequence number of the last published live event, 0 before the
     -- first one. Changed only together with a write to 'liveEvents', in one
     -- transaction, see "OpEnergy.Offer.Server.V1.WebSocketService"
-  , liveEventOrder :: MVar ()
+  , liveEventOrder :: TMVar ()
     -- ^ held by every change of offers, contracts or balances while it is
     -- made and its live events are published, see
     -- 'OpEnergy.Offer.Server.V1.WebSocketService.withLiveEventOrder'
@@ -81,7 +81,7 @@ defaultState config metrics logFunc offerDBPool = do
   currentTipMediantimeV <- liftIO $ TVar.newTVarIO Nothing
   liveEventsV <- liftIO $ TChan.newBroadcastTChanIO
   liveEventSeqV <- liftIO $ TVar.newTVarIO 0
-  liveEventOrderV <- liftIO $ MVar.newMVar ()
+  liveEventOrderV <- liftIO $ TMVar.newTMVarIO ()
   return $ State
     { config = config
     , offerDBPool = offerDBPool

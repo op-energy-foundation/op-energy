@@ -86,8 +86,18 @@ cancel idText token =
     -- refund unfilled stake
     ecredited <- lift
       $ AccountClient.creditBalance personUUIDV (Sats refundAmount)
+
+    -- the offer is closed whether or not its refund went through, so its new
+    -- state is published before the error of a failed refund: a connection
+    -- would otherwise go on showing an offer, which can not be cancelled
+    -- again, until it reloads the list
+    let offerInfo = offerInfoFromEntity (Entity key updatedVal)
+    lift $ publishLiveEvent $! LiveEvent
+      (LiveMessageOfferChanged offerInfo)
+      (changedBalance personUUIDV ecredited)
+
     case ecredited of
-      Right _ -> return ()
+      Right _ -> return $! offerInfo
       Left err -> do
         lift $ runLogging $ $(logError)
           ( "cancel: offer " <> tshow (fromSqlKey key)
@@ -98,12 +108,6 @@ cancel idText token =
           ( "offer cancelled but refund of " <> tshow refundAmount
           <> " sats failed — contact support"
           )
-
-    let offerInfo = offerInfoFromEntity (Entity key updatedVal)
-    lift $ publishLiveEvent $! LiveEvent
-      (LiveMessageOfferChanged offerInfo)
-      (changedBalance personUUIDV ecredited)
-    return $! offerInfo
 
 -- | closes the given account's open offer: fully when nothing is matched
 -- yet, otherwise down to its matched contracts. Returns the closed offer and
