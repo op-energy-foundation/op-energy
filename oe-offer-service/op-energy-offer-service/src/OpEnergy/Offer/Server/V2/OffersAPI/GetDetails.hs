@@ -41,9 +41,10 @@ getDetailsHandler (OfferID idText) =
 -- (400) for an invalid id, with 'offerNotFound' (404) for an unknown offer
 -- and with 'dbQueryError' (500) if the DB query fails.
 --
--- The offer and its contracts are read in one DB transaction. At Postgres'
--- default isolation level, a contract matched between the two reads can be
--- listed while the offer's matchedCount and status do not include it yet.
+-- The offer and its contracts are read in one REPEATABLE READ transaction,
+-- so both reads see the same snapshot: a contract, which is matched between
+-- them, can not be listed while the offer's matchedCount and status do not
+-- include it yet.
 --
 -- Contracts come oldest first, in the order they were matched. An offer has
 -- at most 'Data.OpEnergy.Offer.API.V1.Constants.maxContracts' of them, so
@@ -57,6 +58,9 @@ getDetails idText =
     $ return (offerKeyFromIDText idText)
   State{ currentUnconfirmedTip = currentUnconfirmedTipV } <- lift ask
   (mofferVal, contractRows) <- ExceptT $ withDBTransaction "selectOfferDetails" $ do
+      -- both reads of this read-only transaction see one snapshot, so the
+      -- contracts are the ones the offer's matchedCount counts
+      rawExecute "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ" []
       mofferVal <- get key
       contractRows <- selectList
         [ ContractOfferId ==. key ]
