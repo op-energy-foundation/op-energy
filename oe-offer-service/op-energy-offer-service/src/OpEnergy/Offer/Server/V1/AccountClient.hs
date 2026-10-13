@@ -32,7 +32,7 @@ import qualified Prometheus as P
 
 import           OpEnergy.Error
                    ( CallstackError, authenticationFailure, accountServiceUnavailable
-                   , insufficientBalance
+                   , accountServiceRefused, insufficientBalance
                    )
 
 verifyAccountToken :: (MonadIO m) => AccountAPI.AccountToken -> AppT m (Either CallstackError WhoAmIResult)
@@ -59,7 +59,15 @@ deductBalance personUUIDV amountSats =
 
 creditBalance :: (MonadIO m) => AccountAPI.UUID AccountAPI.Person -> Sats -> AppT m (Either CallstackError Sats)
 creditBalance personUUIDV amountSats =
-  adjustBalance Client.creditBalance (accountServiceUnavailable . Text.pack . show) personUUIDV amountSats
+  adjustBalance Client.creditBalance classifyCredit personUUIDV amountSats
+  where
+    -- an answer from the account service tells the caller that the credit
+    -- did not happen, while a lost connection leaves that unknown: the
+    -- former can be repeated, the latter can not
+    classifyCredit :: ClientError -> CallstackError
+    classifyCredit (ConnectionError err) =
+      accountServiceUnavailable (Text.pack (show err))
+    classifyCredit err = accountServiceRefused (Text.pack (show err))
 
 adjustBalance
   :: (MonadIO m)
