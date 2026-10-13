@@ -54,8 +54,10 @@ reconnectDelayMicroseconds = 5 * 1000000
 -- stores it in 'currentUnconfirmedTip'. Any failure of the connection is
 -- logged and the connection is re-established after
 -- 'reconnectDelayMicroseconds', so this function never returns and never
--- throws a synchronous exception. Until the first tip arrives,
--- 'currentUnconfirmedTip' stays 'Nothing'.
+-- throws a synchronous exception. 'currentUnconfirmedTip' is 'Nothing'
+-- until the first tip arrives and again whenever the connection is closed,
+-- as a tip, which is not followed anymore, only gets older while the chain
+-- moves on.
 runBlockspanTipClient :: MonadIO m => AppT m ()
 runBlockspanTipClient = do
   state@State{ config = Config{ configBlockspanWebsocketURL = burl } } <- ask
@@ -67,6 +69,14 @@ runBlockspanTipClient = do
       (baseUrlPort burl)
       (baseUrlPath burl)
       (receiveTipInLoop state)
+    -- the tip of a closed connection is not followed anymore, so it is
+    -- forgotten rather than kept while the chain moves on without it: an
+    -- accept, an expiry or a settlement would otherwise go by a height,
+    -- which is only getting older. The next connection asks for the tip
+    -- again with its ActionInit
+    STM.atomically $ do
+      TVar.writeTVar (currentUnconfirmedTip state) Nothing
+      TVar.writeTVar (currentTipMediantime state) Nothing
     runAppT state $ runLogging $ $(logWarn)
       ( "runBlockspanTipClient: connection to " <> tshow burl
       <> " is closed (" <> either tshow (const "closed by blockspan service") eresult
