@@ -1,9 +1,10 @@
 {-- | Closed set of states a Contract can be in.
  -
  - A contract is an individual matched trade between a maker and a
- - taker. The "confirming" stage (0–5 of 6 confirmations, counted from
+ - taker. The "confirming" stage (0–6 of 6 confirmations, counted from
  - the block after the target block) is computed at query time from the
- - chain tip, not stored.
+ - chain tip, not stored. A live contract reports 6 while the settlement
+ - sweep has not settled it yet.
  -}
 {-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE DeriveDataTypeable         #-}
