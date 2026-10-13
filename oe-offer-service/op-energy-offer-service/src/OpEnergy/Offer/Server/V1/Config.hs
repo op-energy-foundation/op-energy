@@ -9,6 +9,7 @@ import qualified Data.List as List
 import qualified Data.ByteString.Char8 as BS
 import qualified System.Environment as E
 import           Data.OpEnergy.API.V1.Positive
+import qualified Data.OpEnergy.Offer.API.V1.Constants as C
 import           Control.Monad.Catch
 import           Control.Monad.Logger(LogLevel(..))
 
@@ -61,7 +62,7 @@ data Config = Config
   }
   deriving Show
 instance FromJSON Config where
-  parseJSON = withObject "Config" $ \v-> Config
+  parseJSON = withObject "Config" $ \v-> verifyFees =<< ( Config
     <$> ( v .:? "DB_PORT" .!= (configDBPort defaultConfig))
     <*> ( v .:? "DB_HOST" .!= (configDBHost defaultConfig))
     <*> ( v .:? "DB_USER" .!= (configDBUser defaultConfig))
@@ -77,6 +78,23 @@ instance FromJSON Config where
     <*> ((v .:? "BLOCKSPAN_WS_URL" .!= (showBaseUrl $ configBlockspanWebsocketURL defaultConfig)) >>= parseWebsocketUrl)
     <*> ((v .:? "BLOCKSPAN_API_URL" .!= (showBaseUrl $ configBlockspanURL defaultConfig)) >>= parseBaseUrl)
     <*> ( v .:? "PLATFORM_FEE_SATS" .!= (configPlatformFeeSats defaultConfig))
+    )
+
+-- | the given config, unless its platform fee leaves nothing to pay out:
+-- the pot of every contract is 'C.totalPotSats', so a fee, which is not
+-- smaller than the pot, would let the service start and then keep every
+-- settleable contract live forever, as its settlement can not cover the
+-- fee.
+--
+-- Example: PLATFORM_FEE_SATS of 100000 fails with the pot of 100000 sats.
+verifyFees :: MonadFail m => Config -> m Config
+verifyFees config = do
+  when (configPlatformFeeSats config >= C.totalPotSats) $ fail
+    ( "PLATFORM_FEE_SATS of " <> show (configPlatformFeeSats config)
+    <> " sats must be smaller than the contract pot of "
+    <> show C.totalPotSats <> " sats"
+    )
+  return config
 
 defaultConfig:: Config
 defaultConfig = Config

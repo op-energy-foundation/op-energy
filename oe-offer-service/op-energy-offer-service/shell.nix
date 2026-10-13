@@ -1,9 +1,9 @@
 let
   op-energy-blockspan-service-api-overlay =
-    import ../../op-energy-blockspan-service/op-energy-api/overlay.nix;
-  op-energy-account-api-overlay = import ../oe-account-service/op-energy-account-api/overlay.nix;
-  op-energy-offer-api-overlay = import ../oe-offer-service/op-energy-offer-api/overlay.nix;
-  stable = import ../nixpkgs.nix;
+    import ../../../op-energy-blockspan-service/op-energy-api/overlay.nix;
+  op-energy-account-api-overlay = import ../../oe-account-service/op-energy-account-api/overlay.nix;
+  op-energy-offer-api-overlay = import ../../oe-offer-service/op-energy-offer-api/overlay.nix;
+  stable = import ../../nixpkgs.nix;
   pkgs = import stable {
     config = {};
     overlays = [
@@ -32,5 +32,6 @@ pkgs.mkShell {
       async unliftio-core
     ]))
     cabal-install
+    haskell-language-server
   ];
 }

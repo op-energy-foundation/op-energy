@@ -51,11 +51,11 @@ reconnectDelayMicroseconds :: Int
 reconnectDelayMicroseconds = 5 * 1000000
 
 -- | Follows the chain tip announced by blockspan service's websocket and
--- stores its height in 'currentTip' and its mediantime in
--- 'currentTipMediantime'. Any failure of the connection is logged and the
--- connection is re-established after 'reconnectDelayMicroseconds', so this
--- function never returns and never throws a synchronous exception. Until the
--- first tip arrives, 'currentTip' stays 'Nothing'.
+-- stores it in 'currentUnconfirmedTip'. Any failure of the connection is
+-- logged and the connection is re-established after
+-- 'reconnectDelayMicroseconds', so this function never returns and never
+-- throws a synchronous exception. Until the first tip arrives,
+-- 'currentUnconfirmedTip' stays 'Nothing'.
 runBlockspanTipClient :: MonadIO m => AppT m ()
 runBlockspanTipClient = do
   state@State{ config = Config{ configBlockspanWebsocketURL = burl } } <- ask
@@ -103,21 +103,21 @@ handleMessage MessagePong = return ()
 -- values, and an unevaluated error must not end up in 'currentTip'.
 handleMessage
     (MessageNewestBlockHeader _confirmedBlock !tipHeight mTipBlock) = do
-  State{ currentTip = currentTipV
+  State{ currentUnconfirmedTip = currentUnconfirmedTipV
        , currentTipMediantime = currentTipMediantimeV
        } <- ask
   let !mreported = tipMediantime tipHeight mTipBlock
-  (previousTip, previousMediantime, mmediantime) <- liftIO $ STM.atomically $ do
-    previousTip <- TVar.swapTVar currentTipV (Just tipHeight)
+  (previousUnconfirmedTip, previousMediantime, mmediantime) <- liftIO $ STM.atomically $ do
+    previousUnconfirmedTip <- TVar.swapTVar currentUnconfirmedTipV (Just tipHeight)
     previousMediantime <- TVar.readTVar currentTipMediantimeV
     -- a message without the tip's header keeps the known mediantime of the
     -- same tip
     let mmediantime = case mreported of
-          Nothing | previousTip == Just tipHeight -> previousMediantime
+          Nothing | previousUnconfirmedTip == Just tipHeight -> previousMediantime
           _ -> mreported
     TVar.writeTVar currentTipMediantimeV $! mmediantime
-    return (previousTip, previousMediantime, mmediantime)
-  when ((previousTip, previousMediantime) /= (Just tipHeight, mmediantime)) $ do
+    return (previousUnconfirmedTip, previousMediantime, mmediantime)
+  when ((previousUnconfirmedTip, previousMediantime) /= (Just tipHeight, mmediantime)) $ do
     runLogging $ $(logInfo)
       ( "handleMessage: publishing block.new: height " <> tshow tipHeight
       <> ", mediantime " <> maybe "unknown" tshow mmediantime

@@ -14,12 +14,11 @@ module OpEnergy.Offer.Server where
 import           System.IO as IO
 import           Servant ( Application, Proxy(..), ServerT, serve, hoistServer, (:<|>)(..))
 import           Network.Wai.Handler.Warp(run)
-import           Control.Monad (when)
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Concurrent (threadDelay)
 import           Control.Monad.IO.Class(liftIO, MonadIO)
 import           Control.Monad.IO.Unlift(MonadUnliftIO)
-import           Control.Monad.Logger (MonadLoggerIO, askLoggerIO, logDebug, LoggingT, NoLoggingT, runLoggingT, filterLogger)
+import           Control.Monad.Logger (MonadLoggerIO, askLoggerIO, logDebug, logError, LoggingT, NoLoggingT, runLoggingT, filterLogger)
 import qualified Control.Concurrent.MVar as MVar
 import qualified Control.Concurrent.STM.TVar as TVar
 import           Control.Concurrent.Async
@@ -30,6 +29,7 @@ import           Data.OpEnergy.Offer.API
 import           Data.OpEnergy.API.V1.Positive
 import           Data.Text.Show(tshow)
 
+import           OpEnergy.Error(describeError)
 import           OpEnergy.Offer.Server.V1.Config
 import           OpEnergy.Offer.Server.V1.Class (AppT, AppM, State(..), defaultState, runAppT, runLogging)
 import           OpEnergy.Offer.Server.V1.DB
@@ -88,21 +88,41 @@ bootstrapTasks s = runAppT s $ do
 -- | main loop of the scheduler
 schedulerMainLoop :: (MonadIO m, MonadMonitor m) => AppT m ()
 schedulerMainLoop = do
-  State{ config = Config{ configSchedulerPollRateSecs = delaySecs }, currentTip = currentTipV } <- ask
+  State{ config = Config{ configSchedulerPollRateSecs = delaySecs }
+       , currentUnconfirmedTip = currentUnconfirmedTipV
+       } <- ask
   runLogging $ $(logDebug) "scheduler main loop"
   liftIO $ IO.hFlush stdout
-  mTip <- liftIO $ TVar.readTVarIO currentTipV
+  mTip <- liftIO $ TVar.readTVarIO currentUnconfirmedTipV
   case mTip of
     Nothing -> return ()
     Just tip -> do
       -- expiry goes first: it closes offers which should not be accepted
       -- anymore, before settlement pays out contracts
-      expiredCount <- Expiry.expireStaleOffers tip
-      if expiredCount > 0
-        then runLogging $ $(logDebug) (tshow expiredCount <> " offer(s) expired at tip " <> tshow tip)
-        else return ()
-      settledCount <- Settlement.settleContracts tip
-      when (settledCount > 0) $
-        runLogging $ $(logDebug) (tshow settledCount <> " contract(s) settled at tip " <> tshow tip)
+      eExpiredCount <- Expiry.expireStaleOffers tip
+      case eExpiredCount of
+        -- the tick is over either way: the sweep is reported rather than
+        -- retried here, as the next tick runs it again
+        Left err -> runLogging $ $(logError)
+          ( "schedulerMainLoop: the expiry sweep failed at tip " <> tshow tip
+          <> ", the next tick runs it again: " <> describeError err
+          )
+        Right expiredCount
+          | expiredCount > 0 -> runLogging $ $(logDebug)
+            (tshow expiredCount <> " offer(s) expired at tip " <> tshow tip)
+          | otherwise -> return ()
+      esettledCount <- Settlement.settleContracts tip
+      case esettledCount of
+        -- as with the expiry sweep: the tick is over either way and the
+        -- next one runs the sweep again
+        Left err -> runLogging $ $(logError)
+          ( "schedulerMainLoop: the settlement sweep failed at tip "
+          <> tshow tip <> ", the next tick runs it again: "
+          <> describeError err
+          )
+        Right settledCount
+          | settledCount > 0 -> runLogging $ $(logDebug)
+            (tshow settledCount <> " contract(s) settled at tip " <> tshow tip)
+          | otherwise -> return ()
   liftIO $ threadDelay ((fromPositive delaySecs) * 1000000)
   schedulerMainLoop
