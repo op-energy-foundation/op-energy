@@ -12,6 +12,11 @@ import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.Trans.Except (ExceptT(..), throwE)
 import           Control.Monad.IO.Class (MonadIO)
 import           Control.Monad.Logger (logError, logInfo)
+import           Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
+import           Data.Maybe (catMaybes)
+import           Data.Word (Word64)
 
 import           Database.Persist.Postgresql
 import           Prometheus (MonadMonitor)
@@ -63,16 +68,9 @@ settleContracts tipHeight =
     (\err -> runLogging ($(logError) (describeError err)) >> return [])
     return
     =<< selectSettleableContracts tipHeight
-  results <- forM contracts $ \contract@(Entity contractId _) -> either
-    (\err -> do
-      -- the contract stays live and will be retried on the next tick
-      runLogging $ $(logError)
-        ( "contract " <> tshow (fromSqlKey contractId) <> ": " <> describeError err )
-      return False
-    )
-    return
-    =<< settleContract contract
-  return $! length (filter id results)
+  mediantimes <- getTargetBlockMediantimes contracts
+  settled <- forM contracts $ settleContractLogging mediantimes
+  return $! length (filter id settled)
 
 -- | returns live contracts, whose target block has got
 -- 'C.settlementConfirmations' confirmations at the given chain tip
@@ -93,9 +91,60 @@ selectSettleableContracts tipHeight =
       ]
       [ Asc ContractId ]
 
+-- | mediantime of each distinct target block of the given contracts, as
+-- reported by blockspan service's HTTP API. Every contract of one offer
+-- carries the same target block and a sweep settles them together, so one
+-- request per distinct block saves up to 'C.maxContracts' - 1 requests per
+-- offer. A block, whose request failed, is logged and left out of the
+-- result: the contracts, which target it, are settled on a later tick.
+getTargetBlockMediantimes
+  :: (MonadIO m, MonadMonitor m)
+  => [Entity Contract]
+  -> AppT m (Map BlockHeight Word64)
+getTargetBlockMediantimes contracts =
+    let name = "V2.Settlement.getTargetBlockMediantimes"
+    in profile name $ do
+  mentries <- forM targetBlocks $ \height -> either
+    (\err -> do
+      runLogging $ $(logError)
+        ( "target block " <> tshow height <> ": " <> describeError err )
+      return Nothing
+    )
+    (return . Just . (,) height)
+    =<< BlockspanClient.getBlockMediantime height
+  return $! Map.fromList (catMaybes mentries)
+  where
+    targetBlocks = Set.toList $! Set.fromList
+      $! map (contractTargetBlock . entityVal) contracts
+
+-- | settles the given contract with 'settleContract', logging whatever kept
+-- it from being settled: the mediantime of its target block is missing from
+-- the given mediantimes, or its settlement itself failed. The contract
+-- stays live in both cases, so a later tick settles it.
+settleContractLogging
+  :: (MonadIO m, MonadMonitor m)
+  => Map BlockHeight Word64
+  -> Entity Contract
+  -> AppT m Bool
+settleContractLogging mediantimes contract@(Entity contractId contractVal) =
+  -- a failed mediantime request is logged by getTargetBlockMediantimes
+  maybe (return False) settleWithMediantime
+    $! Map.lookup (contractTargetBlock contractVal) mediantimes
+  where
+    settleWithMediantime actualMtpEpoch = either
+      (\err -> do
+        -- the contract stays live and will be retried on the next tick
+        runLogging $ $(logError)
+          ( "contract " <> tshow (fromSqlKey contractId) <> ": "
+          <> describeError err )
+        return False
+      )
+      return
+      =<< settleContract actualMtpEpoch contract
+
 -- | settles the given contract:
 --
--- - determines the winning side from the mediantime of the contract's
+-- - determines the winning side from the given mediantime of the contract's
 --   target block: BEFORE wins if it is earlier than the contract's cutoff,
 --   AFTER wins otherwise;
 -- - in one transaction, marks the contract as settled and adds the platform
@@ -106,16 +155,17 @@ selectSettleableContracts tipHeight =
 -- Returns 'False' if the contract was no longer live.
 settleContract
   :: (MonadIO m, MonadMonitor m)
-  => Entity Contract
+  => Word64
+     -- ^ mediantime of the contract's target block
+  -> Entity Contract
   -> AppT m (Either CallstackError Bool)
-settleContract (Entity contractId contract@Contract{..}) =
+settleContract actualMtpEpoch (Entity contractId contract@Contract{..}) =
   let name = "V2.Settlement.settleContract"
   in profile name $ runExceptPrefixT name $ do
   State{ config = Config{ configPlatformFeeSats = platformFeeSats } } <- lift ask
   let potSats = contractMakerStakeSats + contractTakerStakeSats
   when (potSats <= platformFeeSats) $
     throwE $ potDoesNotCoverFee potSats platformFeeSats
-  actualMtpEpoch <- ExceptT $ BlockspanClient.getBlockMediantime contractTargetBlock
   let winnerSide = if actualMtpEpoch < contractMtpCutoffEpoch
         then Before
         else After
