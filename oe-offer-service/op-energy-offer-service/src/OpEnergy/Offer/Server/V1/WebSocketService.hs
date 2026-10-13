@@ -170,8 +170,11 @@ handleRequest
 handleRequest state conn send personV = do
   (request :: BL.ByteString) <- WS.receiveData conn
   case Aeson.decode request of
+    -- the request itself is not logged: an auth request carries an account
+    -- token, and a request, which did not decode, can still hold one
     Nothing -> runAppT state $ runLogging $ $(logDebug)
-      ( "handleRequest: ignoring unexpected request: " <> tshow request )
+      ( "handleRequest: ignoring a request of " <> tshow (BL.length request)
+      <> " bytes, which did not decode" )
     Just LiveRequestPing -> send (SequencedMessage Nothing LiveMessagePong)
     -- the chain tip has already been sent when the connection opened
     Just LiveRequestInit -> return ()
