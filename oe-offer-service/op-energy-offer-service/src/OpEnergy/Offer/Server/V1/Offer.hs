@@ -170,10 +170,15 @@ contractInfoFromEntity mYourRole mTip (Entity key Contract{..}) =
   let idText = tshow (fromSqlKey key)
       offerIdText = tshow (fromSqlKey contractOfferId)
       confs = case (contractStatus, mTip) of
-        (Live, Just tip) -> -- the blocks mined after the target block
+        -- the blocks mined after the target block, and never more than the
+        -- settlement waits for: a live contract at a higher tip is one the
+        -- settlement sweep has not reached yet, not one with more
+        -- confirmations than a settled contract reports
+        (Live, Just tip) ->
           let tipInt = fromNatural tip
               tgtInt = fromNatural contractTargetBlock
-          in fromIntegral (max 0 (tipInt - tgtInt))
+          in min C.settlementConfirmations
+            (fromIntegral (max 0 (tipInt - tgtInt)))
         (Settled, _) -> C.settlementConfirmations
         _ -> 0
   in CAPI.ContractInfo
