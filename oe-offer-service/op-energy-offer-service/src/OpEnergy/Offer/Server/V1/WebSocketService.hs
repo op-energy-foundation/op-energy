@@ -10,7 +10,7 @@ module OpEnergy.Offer.Server.V1.WebSocketService
   , withLiveEventOrderE
   ) where
 
-import           Control.Monad (forever, forM_)
+import           Control.Monad (forever, forM_, when)
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.Trans.Except (ExceptT(..), runExceptT)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
@@ -24,8 +24,10 @@ import qualified Control.Concurrent.STM.TVar as TVar
 import           Control.Concurrent.STM.TVar (TVar)
 import qualified Control.Exception.Safe as E
 import qualified Data.ByteString.Lazy as BL
+import           Data.Maybe (isNothing)
 import qualified Data.Aeson as Aeson
 import           Data.Word (Word64)
+import           System.Timeout (timeout)
 
 import qualified Network.WebSockets as WS
 
@@ -53,6 +55,15 @@ import           OpEnergy.Error (describeError)
 -- through proxies
 keepAlivePingSecs :: Int
 keepAlivePingSecs = 30
+
+-- | how long one message may take to reach a connection before it is
+-- closed. A connection, which is not read, takes its events no further than
+-- its socket buffers, while every event published meanwhile is kept for it,
+-- so without this a single such connection grows the service's memory for
+-- as long as it stays open. The frontend reads the state it needs again
+-- when it reconnects, so closing it loses nothing.
+sendTimeoutSecs :: Int
+sendTimeoutSecs = 30
 
 -- | sends the given event to every websocket connection with the next
 -- sequence number. The number is taken and the event is queued in one
@@ -124,8 +135,15 @@ webSocketConnection conn = do
     personV <- TVar.newTVarIO Nothing
     sendLock <- MVar.newMVar ()
     let send :: SequencedMessage -> IO ()
-        send message = MVar.withMVar sendLock $ \_ ->
-          WS.sendTextData conn (Aeson.encode message)
+        send message = do
+          sent <- MVar.withMVar sendLock $ \_ ->
+            timeout (sendTimeoutSecs * 1000000)
+              $ WS.sendTextData conn (Aeson.encode message)
+          -- closes the connection, as 'sendTimeoutSecs' says
+          when (isNothing sent) $ E.throwString
+            ( "send: the connection did not take a message within "
+            <> show sendTimeoutSecs <> " seconds"
+            )
     runAppT state $ runLogging $ $(logDebug)
       "webSocketConnection: new connection"
     eresult <- E.tryAny $ WS.withPingThread conn keepAlivePingSecs (return ())
