@@ -46,7 +46,8 @@ getDetailsHandler (OfferID idText) =
 -- them, can not be listed while the offer's matchedCount and status do not
 -- include it yet.
 --
--- Contracts come oldest first, in the order they were matched. An offer has
+-- Contracts come oldest first, in the order they were matched, by their id
+-- where two of them share a matchedAt. An offer has
 -- at most 'Data.OpEnergy.Offer.API.V1.Constants.maxContracts' of them, so
 -- they are not paginated. The endpoint is public, so the contracts'
 -- 'yourRole' is 'Nothing', as in the offer list.
@@ -64,7 +65,9 @@ getDetails idText =
       mofferVal <- get key
       contractRows <- selectList
         [ ContractOfferId ==. key ]
-        [ Asc ContractMatchedAt ]
+        -- the id breaks the tie of two contracts with the same matchedAt,
+        -- which two accepts of one offer can get
+        [ Asc ContractMatchedAt, Asc ContractId ]
       return (mofferVal, contractRows)
   offerVal <- exceptTMaybeT offerNotFound $ return mofferVal
   mTip <- liftIO $ TVar.readTVarIO currentUnconfirmedTipV
