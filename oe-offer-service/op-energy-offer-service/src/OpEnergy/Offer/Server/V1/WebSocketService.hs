@@ -16,7 +16,8 @@ import           Control.Monad.Trans.Except (ExceptT(..), runExceptT)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Logger (logDebug, logWarn)
 import qualified Control.Concurrent.Async as Async
-import qualified Control.Concurrent.MVar as MVar
+import qualified Control.Concurrent.STM.TMVar as TMVar
+import           Control.Concurrent.STM.TMVar (TMVar)
 import qualified Control.Concurrent.STM as STM
 import qualified Control.Concurrent.STM.TChan as TChan
 import           Control.Concurrent.STM.TChan (TChan)
@@ -50,6 +51,16 @@ import           OpEnergy.Offer.Server.V1.Class
 import           OpEnergy.Offer.Server.V1.LiveEvent (LiveEvent(..))
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           OpEnergy.Error (describeError)
+
+-- | runs the given action while it holds the given lock. The lock is a
+-- 'TMVar', so a thread, which waits for it, waits in a transaction, which
+-- can be composed with other transactions, as 'MVar' can not. The lock is
+-- released when the action throws, as 'Control.Concurrent.MVar.withMVar'
+-- also does.
+withLock :: TMVar () -> IO a -> IO a
+withLock lockV = E.bracket_
+  (STM.atomically $ TMVar.takeTMVar lockV)
+  (STM.atomically $ TMVar.putTMVar lockV ())
 
 -- | interval of websocket ping frames, which keep idle connections open
 -- through proxies
@@ -100,7 +111,7 @@ publishLiveEvent event = do
 withLiveEventOrder :: MonadIO m => AppT IO a -> AppT m a
 withLiveEventOrder change = do
   state@State{ liveEventOrder = liveEventOrderV } <- ask
-  liftIO $ MVar.withMVar liveEventOrderV $ \_ -> runAppT state change
+  liftIO $ withLock liveEventOrderV $ runAppT state change
 
 -- | 'withLiveEventOrder' for a change, which can fail
 withLiveEventOrderE
@@ -133,12 +144,12 @@ webSocketConnection conn = do
       <*> TVar.readTVar currentUnconfirmedTipV
       <*> TVar.readTVar currentTipMediantimeV
     personV <- TVar.newTVarIO Nothing
-    sendLock <- MVar.newMVar ()
+    sendLock <- TMVar.newTMVarIO ()
     let send :: SequencedMessage -> IO ()
         send message = do
-          sent <- MVar.withMVar sendLock $ \_ ->
-            timeout (sendTimeoutSecs * 1000000)
-              $ WS.sendTextData conn (Aeson.encode message)
+          sent <- withLock sendLock
+            $ timeout (sendTimeoutSecs * 1000000)
+            $ WS.sendTextData conn (Aeson.encode message)
           -- closes the connection, as 'sendTimeoutSecs' says
           when (isNothing sent) $ E.throwString
             ( "send: the connection did not take a message within "
