@@ -8,7 +8,7 @@ module OpEnergy.Offer.Server.V2.Expiry
 import           Control.Monad(forM, forM_)
 import           Control.Monad.IO.Class(liftIO, MonadIO)
 import           Control.Monad.Trans(lift)
-import           Control.Monad.Trans.Except(runExceptT, ExceptT(..))
+import           Control.Monad.Trans.Except(ExceptT(..))
 
 import           Database.Persist.Postgresql
 import           Prometheus(MonadMonitor)
