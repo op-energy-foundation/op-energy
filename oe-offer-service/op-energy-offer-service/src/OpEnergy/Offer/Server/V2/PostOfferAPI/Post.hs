@@ -57,11 +57,14 @@ post token PostOfferRequest{..} =
   in profile name $ runExceptPrefixT name $ do
   when (totalContracts < 1 || totalContracts > C.maxContracts) $
     throwE $ invalidRequest ("totalContracts must be between 1 and " <> tshow C.maxContracts)
-  when (makerStakeSats < C.minStakeSats || makerStakeSats > C.maxStakeSats) $
-    throwE $ invalidRequest ("makerStakeSats must be between " <> tshow C.minStakeSats <> " and " <> tshow C.maxStakeSats)
   State{ config = Config{ configPlatformFeeSats = platformFeeSats } } <- lift ask
-  when (makerStakeSats <= platformFeeSats) $
-    throwE $ invalidRequest ("makerStakeSats must be greater than the platform fee of " <> tshow platformFeeSats <> " sats")
+  -- the fee comes out of the pot before the winner is paid, so a maker
+  -- stake, which does not cover the fee, leaves the taker's side nothing to
+  -- win: the taker's stake is the rest of the pot, which is then as large as
+  -- the payout. The smallest stake above that is the fee plus minStakeSats
+  let minStakeSats = platformFeeSats + C.minStakeSats
+  when (makerStakeSats < minStakeSats || makerStakeSats > C.maxStakeSats) $
+    throwE $ invalidRequest ("makerStakeSats must be between " <> tshow minStakeSats <> " and " <> tshow C.maxStakeSats)
   when (blockRate <= 0) $
     throwE $ invalidRequest "blockRate must be positive"
 
