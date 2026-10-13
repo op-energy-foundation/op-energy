@@ -14,7 +14,6 @@ module OpEnergy.Offer.Server where
 import           System.IO as IO
 import           Servant ( Application, Proxy(..), ServerT, serve, hoistServer, (:<|>)(..))
 import           Network.Wai.Handler.Warp(run)
-import           Control.Monad (when)
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Concurrent (threadDelay)
 import           Control.Monad.IO.Class(liftIO, MonadIO)
@@ -112,8 +111,18 @@ schedulerMainLoop = do
           | expiredCount > 0 -> runLogging $ $(logDebug)
             (tshow expiredCount <> " offer(s) expired at tip " <> tshow tip)
           | otherwise -> return ()
-      settledCount <- Settlement.settleContracts tip
-      when (settledCount > 0) $
-        runLogging $ $(logDebug) (tshow settledCount <> " contract(s) settled at tip " <> tshow tip)
+      esettledCount <- Settlement.settleContracts tip
+      case esettledCount of
+        -- as with the expiry sweep: the tick is over either way and the
+        -- next one runs the sweep again
+        Left err -> runLogging $ $(logError)
+          ( "schedulerMainLoop: the settlement sweep failed at tip "
+          <> tshow tip <> ", the next tick runs it again: "
+          <> describeError err
+          )
+        Right settledCount
+          | settledCount > 0 -> runLogging $ $(logDebug)
+            (tshow settledCount <> " contract(s) settled at tip " <> tshow tip)
+          | otherwise -> return ()
   liftIO $ threadDelay ((fromPositive delaySecs) * 1000000)
   schedulerMainLoop
