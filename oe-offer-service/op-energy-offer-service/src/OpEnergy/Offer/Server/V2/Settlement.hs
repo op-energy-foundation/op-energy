@@ -59,17 +59,23 @@ import           OpEnergy.Error
 -- | Settles every live contract, whose target block has got
 -- 'C.settlementConfirmations' confirmations at the given chain tip, ie
 -- @targetBlock + settlementConfirmations <= tip@.
--- Returns the amount of contracts settled during this call.
-settleContracts :: (MonadIO m, MonadMonitor m) => BlockHeight -> AppT m Int
+-- Returns the amount of contracts settled during this call, or the error,
+-- which kept the sweep from looking for them at all, so its caller can tell
+-- a tick, which found nothing to settle, from a tick, which could not look.
+-- A single contract, which could not be settled, is logged and left live
+-- for a later tick instead.
+settleContracts
+  :: (MonadIO m, MonadMonitor m)
+  => BlockHeight
+  -> AppT m (Either CallstackError Int)
 settleContracts tipHeight =
-  let name = "V2.Settlement.settleContracts"
-  in profile name $ do
-  contracts <- either
-    (\err -> runLogging ($(logError) (describeError err)) >> return [])
-    return
-    =<< selectSettleableContracts tipHeight
-  mediantimes <- getTargetBlockMediantimes contracts
-  settled <- forM contracts $ settleContractLogging mediantimes
+    let name = "V2.Settlement.settleContracts"
+    in profile name $ runExceptPrefixT name $ do
+  -- the sweep has nothing to work from when this fails, so it stops here
+  -- instead of reading a failed query as "no contract is settleable"
+  contracts <- ExceptT $ selectSettleableContracts tipHeight
+  mediantimes <- lift $ getTargetBlockMediantimes contracts
+  settled <- lift $ forM contracts $ settleContractLogging mediantimes
   return $! length (filter id settled)
 
 -- | returns live contracts, whose target block has got
