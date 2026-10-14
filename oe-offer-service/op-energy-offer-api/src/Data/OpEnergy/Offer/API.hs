@@ -45,13 +45,13 @@ type OfferWebSocketDocAPI
     :> Tags "Live notifications"
     :> Summary "websocket, not a POST: live notifications of offers, contracts, new blocks and the account's balance"
     :> Description
-       "Open a websocket to ws(s)://<host>/api/v1/offer/ws and exchange the \
-       \JSON messages below: the request body is a message that the frontend \
-       \sends, the response is a message that the service sends. The service \
-       \also sends messages on its own, whenever an offer or a contract \
-       \changes, a block arrives or the authenticated account's balance \
-       \changes, so it is not a request/response protocol -- it is described \
-       \as one here because swagger has no websocket."
+       "Open a websocket to /api/v1/offer/ws on this host, over ws or wss, \
+       \and exchange the JSON messages below: the request body is a message \
+       \that the frontend sends, the response is a message that the service \
+       \sends. The service also sends messages on its own, whenever an offer \
+       \or a contract changes, a block arrives or the authenticated \
+       \account's balance changes, so it is not a request/response protocol \
+       \-- it is described as one here because swagger has no websocket."
     :> ReqBody '[JSON] LiveRequest
     :> Post '[JSON] SequencedMessage
 
