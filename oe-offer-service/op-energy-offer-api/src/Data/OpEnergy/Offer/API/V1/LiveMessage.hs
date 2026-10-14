@@ -17,14 +17,18 @@
  - has to reload its data.
  -}
 {-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE OverloadedLists            #-}
 module Data.OpEnergy.Offer.API.V1.LiveMessage
   ( LiveRequest(..)
   , LiveMessage(..)
   , SequencedMessage(..)
   ) where
 
+import           Control.Lens               ((&), (.~), (?~))
 import           Data.Aeson
 import           Data.Aeson.Types           (Pair)
+import           Data.Proxy                 (Proxy(..))
+import           Data.Swagger
 import           Data.Text                  (Text)
 import qualified Data.Text                  as Text
 import           Data.Word                  (Word64)
@@ -32,9 +36,13 @@ import           Data.Word                  (Word64)
 import           Data.OpEnergy.API.V1.Block (BlockHeight)
 import           Data.OpEnergy.Account.API.V1.Account
                  ( AccountToken
+                 , defaultAccountToken
                  , everifyAccountToken
                  )
-import           Data.OpEnergy.Offer.API.V1.OfferInfo (OfferInfo)
+import           Data.OpEnergy.Offer.API.V1.OfferInfo
+                 ( OfferInfo
+                 , defaultOfferInfo
+                 )
 import           Data.OpEnergy.Offer.API.V1.ContractInfo (ContractInfo)
 
 -- | request from the frontend
@@ -62,6 +70,36 @@ instance FromJSON LiveRequest where
           (everifyAccountToken rawToken)
       "ping" -> return LiveRequestPing
       other -> fail ("LiveRequest: unknown action: " <> show other)
+
+-- | Hand-written, as swagger has no sum type: the three requests are one
+-- object, whose @action@ says which of them it is
+instance ToSchema LiveRequest where
+  declareNamedSchema _ = do
+    tokenSchema <- declareSchemaRef (Proxy :: Proxy AccountToken)
+    return $! NamedSchema (Just "LiveRequest") $ mempty
+      & type_ ?~ SwaggerObject
+      & description ?~ Text.unwords
+        [ "Request of the frontend over the websocket."
+        , "init is accepted and ignored,"
+        , "ping is answered with a pong message, and"
+        , "auth takes a token, after which the connection also receives the"
+        , "account's my.balance messages."
+        ]
+      & properties .~
+        [ ( "action"
+          , Inline $ mempty
+            & type_ ?~ SwaggerString
+            & enum_ ?~ map String [ "init", "auth", "ping" ]
+          )
+        , ( "token", tokenSchema )
+        ]
+      & required .~
+        [ "action"
+        ]
+      & example ?~ object
+        [ "action" .= ("auth" :: Text)
+        , "token" .= defaultAccountToken
+        ]
 
 -- | live notification to the frontend
 data LiveMessage
@@ -107,6 +145,60 @@ instance ToJSON SequencedMessage where
     ( maybe id (\seqNo -> (("seq" .= seqNo) :)) mseqNo
       (liveMessagePairs message)
     )
+
+-- | Hand-written, as swagger has no sum type: every message is one object,
+-- whose @type@ says which fields it carries, listed in the description
+instance ToSchema SequencedMessage where
+  declareNamedSchema _ = do
+    -- both @seq@ and @mediantime@ are a number, which can be absent
+    optionalNumber <- declareSchemaRef (Proxy :: Proxy (Maybe Word64))
+    offerSchema    <- declareSchemaRef (Proxy :: Proxy OfferInfo)
+    contractSchema <- declareSchemaRef (Proxy :: Proxy ContractInfo)
+    heightSchema   <- declareSchemaRef (Proxy :: Proxy BlockHeight)
+    balanceSchema  <- declareSchemaRef (Proxy :: Proxy Word64)
+    return $! NamedSchema (Just "SequencedMessage") $ mempty
+      & type_ ?~ SwaggerObject
+      & description ?~ Text.unwords
+        [ "Message of the offer service over the websocket."
+        , "Every message has a type, which says which of the fields below it"
+        , "carries: offer.created and offer.changed carry offer,"
+        , "contract.created and contract.settled carry contract,"
+        , "block.new carries height and mediantime,"
+        , "my.balance carries balance, and"
+        , "hello and pong carry nothing else."
+        , "seq numbers the notifications sent to every connection, so a gap"
+        , "in the numbers means that one was missed. The messages sent to"
+        , "one connection only -- pong, my.balance and the chain tip right"
+        , "after hello -- have no seq."
+        ]
+      & properties .~
+        [ ( "seq", optionalNumber )
+        , ( "type"
+          , Inline $ mempty
+            & type_ ?~ SwaggerString
+            & enum_ ?~ map String
+              [ "hello"
+              , "offer.created"
+              , "offer.changed"
+              , "contract.created"
+              , "contract.settled"
+              , "block.new"
+              , "my.balance"
+              , "pong"
+              ]
+          )
+        , ( "offer", offerSchema )
+        , ( "contract", contractSchema )
+        , ( "height", heightSchema )
+        , ( "mediantime", optionalNumber )
+        , ( "balance", balanceSchema )
+        ]
+      & required .~
+        [ "type"
+        ]
+      & example ?~ toJSON
+        ( SequencedMessage (Just 42) (LiveMessageOfferCreated defaultOfferInfo)
+        )
 
 -- | JSON fields of the given notification
 liveMessagePairs :: LiveMessage -> [Pair]
