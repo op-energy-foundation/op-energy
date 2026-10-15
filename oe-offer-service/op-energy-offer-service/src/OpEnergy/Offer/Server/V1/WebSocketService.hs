@@ -32,6 +32,7 @@ import           System.Timeout (timeout)
 
 import qualified Network.WebSockets as WS
 
+import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountAPI
 import qualified Data.OpEnergy.Account.API.V1.UUID as AccountAPI
 import qualified Data.OpEnergy.Account.API.V2.WhoAmIResult as AccountV2
@@ -229,5 +230,5 @@ forwardEvent send personV eventsV = do
     mperson <- TVar.readTVar personV
     return (event, mperson)
   send (SequencedMessage (Just seqNo) message)
-  forM_ (mperson >>= (`lookup` balances)) $ \balance ->
+  forM_ (mperson >>= (`lookup` balances)) $ \(Sats balance) ->
     send (SequencedMessage Nothing (LiveMessageMyBalance balance))

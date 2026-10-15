@@ -83,7 +83,7 @@ post token PostOfferRequest{..} =
   withLiveEventOrderE $ do
     let totalStake = makerStakeSats * totalContracts
         takerStakeSatsV = C.totalPotSats - makerStakeSats
-    Sats makerBalance <-
+    makerBalance <-
       ExceptT $ AccountClient.deductBalance personUUIDV (Sats totalStake)
 
     now <- getCurrentTimeDB
