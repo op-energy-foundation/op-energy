@@ -29,7 +29,10 @@ import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 import qualified Control.Concurrent.STM.TVar as TVar
 
 import           OpEnergy.Offer.Server.V1.Time(getCurrentTimeDB)
-import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
+import           OpEnergy.Offer.Server.V1.Class
+                   ( AppM, AppT, State(..), profile, runLogging
+                   , withDBTransaction
+                   )
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           OpEnergy.Offer.Server.V1.Offer
@@ -67,11 +70,9 @@ accept idText token =
   (AccountV2.WhoAmIResult takerUUIDV takerDisplayNameV _balance) <-
     ExceptT $ AccountClient.verifyAccountToken token
 
-  State{ offerDBPool = pool
-       , currentUnconfirmedTip = currentUnconfirmedTipV
-       } <- lift ask
-  offerVal <- exceptTMaybeT offerNotFound
-    $! liftIO $ flip runSqlPersistMPool pool $ get key
+  State{ currentUnconfirmedTip = currentUnconfirmedTipV } <- lift ask
+  mofferVal <- ExceptT $ withDBTransaction "getOffer" $ get key
+  offerVal <- exceptTMaybeT offerNotFound $! return mofferVal
 
   when (offerStatus offerVal /= Open) $ throwE offerNotOpen
   when (fromNatural (offerMatchedCount offerVal) >= fromNatural (offerTotalContracts offerVal)) $ throwE offerFilled
@@ -85,7 +86,7 @@ accept idText token =
   -- balances and offers change from here on: in withLiveEventOrder, so the
   -- change's events are published in the order of the changes
   withLiveEventOrderE $ do
-    Sats takerBalance <- ExceptT $ AccountClient.deductBalance takerUUIDV
+    takerBalance <- ExceptT $ AccountClient.deductBalance takerUUIDV
       (Sats (offerTakerStakeSats offerVal))
 
     now <- getCurrentTimeDB
@@ -119,7 +120,7 @@ accept idText token =
           { offerMatchedCount = newCount
           , offerStatus = if isFilled then Filled else Open
           }
-    mContractKey <- liftIO $ flip runSqlPersistMPool pool $ do
+    emContractKey <- lift $ withDBTransaction "acceptOfferTx" $ do
       bumped <- updateWhereCount
         [ OfferId ==. key
         , OfferMatchedCount ==. staleCount
@@ -134,26 +135,43 @@ accept idText token =
             update key [ OfferStatus =. Filled ]
           return (Just cKey)
 
-    case mContractKey of
-      Nothing -> do
-        ecredited <- lift $ AccountClient.creditBalance takerUUIDV (Sats (offerTakerStakeSats offerVal))
-        case ecredited of
-          Right _ -> return ()
-          Left err -> lift $ runLogging $ $(logError)
-            ( "accept: CAS failed for offer " <> T.pack (show (fromSqlKey key))
-            <> " but refund of " <> T.pack (show (offerTakerStakeSats offerVal))
-            <> " sats failed, needs manual reconciliation: " <> describeError err
-            )
+    -- takes the taker's stake back, for an accept, which did not happen.
+    -- A refund, which fails itself, is logged for reconciliation: the
+    -- accept is answered with the error of its own failure either way
+    let refundTaker :: Text -> ExceptT CallstackError (AppT IO) ()
+        refundTaker reason = do
+          ecredited <- lift $ AccountClient.creditBalance takerUUIDV
+            (Sats (offerTakerStakeSats offerVal))
+          case ecredited of
+            Right _ -> return ()
+            Left err -> lift $ runLogging $ $(logError)
+              ( "accept: " <> reason <> " for offer "
+              <> T.pack (show (fromSqlKey key))
+              <> " but refund of "
+              <> T.pack (show (offerTakerStakeSats offerVal))
+              <> " sats failed, needs manual reconciliation: "
+              <> describeError err
+              )
+
+    -- the stake is deducted by now, so every answer below refunds it first.
+    -- A failed transaction has changed nothing, so it is refunded like a
+    -- conditional update, which did not apply
+    case emContractKey of
+      Left txErr -> do
+        refundTaker "the transaction failed"
+        throwE txErr
+      Right Nothing -> do
+        refundTaker "the conditional update did not apply"
         -- another accept, a cancel or the expiry sweep changed the offer
         -- first: report which
-        mlatest <- liftIO $ flip runSqlPersistMPool pool $ get key
+        mlatest <- ExceptT $ withDBTransaction "getOffer" $ get key
         throwE $ case offerStatus <$> mlatest of
           Just Open -> offerChanged -- another accept took a slot: try again
           Just Filled -> offerFilled
           Just Expired -> offerExpired
           Just Cancelled -> offerNotOpen
           Nothing -> offerNotFound
-      Just contractKey -> do
+      Right (Just contractKey) -> do
         let contractEntity = Entity contractKey contractRow
         -- sent to every connection, so without yourRole
         lift $ publishLiveEvent $! LiveEvent
