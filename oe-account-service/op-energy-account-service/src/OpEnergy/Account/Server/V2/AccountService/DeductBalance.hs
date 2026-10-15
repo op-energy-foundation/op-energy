@@ -73,10 +73,11 @@ deductBalance secret (BalanceAdjustRequest personUUIDV (Sats amountSats)) =
   checkInternalServiceSecret secret
   State{ accountDBPool = pool } <- lift ask
   let modelUUID = modelApiUUIDPerson personUUIDV
-  (Entity key _) <- exceptTMaybeT accountNotFound
-    $ liftIO $ flip runSqlPersistMPool pool
-    $ selectFirst [ PersonUuid ==. modelUUID ] []
+  -- the account is looked up in the same transaction as the update and the
+  -- read, so it cannot be gone between finding it and deducting from it
   balance <- ExceptT $ liftIO $ flip runSqlPersistMPool pool $ runExceptT $ do
+    (Entity key _) <- exceptTMaybeT accountNotFound
+      $ selectFirst [ PersonUuid ==. modelUUID ] []
     nowUTC <- liftIO getCurrentTime
     let now = utcTimeToPOSIXSeconds nowUTC
     deducted <- lift $ updateWhereCount

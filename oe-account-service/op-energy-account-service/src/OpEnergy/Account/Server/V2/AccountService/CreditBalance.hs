@@ -13,6 +13,7 @@ import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Logger(logError)
 import           Control.Monad.Trans (lift)
+import           Control.Monad.Trans.Except (ExceptT(..), runExceptT)
 import           Data.Text(Text)
 import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
@@ -69,16 +70,16 @@ creditBalance secret (BalanceAdjustRequest personUUIDV (Sats amountSats)) =
   checkInternalServiceSecret secret
   State{ accountDBPool = pool } <- lift ask
   let modelUUID = modelApiUUIDPerson personUUIDV
-  (Entity key _) <- exceptTMaybeT accountNotFound
-    $ liftIO $ flip runSqlPersistMPool pool
-    $ selectFirst [ PersonUuid ==. modelUUID ] []
-  balance <- exceptTMaybeT accountNotFound
-    $ liftIO $ flip runSqlPersistMPool pool $ do
-      nowUTC <- liftIO getCurrentTime
-      let now = utcTimeToPOSIXSeconds nowUTC
-      update key
-        [ PersonBalance +=. Sats amountSats
-        , PersonLastUpdated =. now
-        ]
-      fmap personBalance <$> get key
+  -- the account is looked up in the same transaction as the update and the
+  -- read, so it cannot be gone between finding it and crediting it
+  balance <- ExceptT $ liftIO $ flip runSqlPersistMPool pool $ runExceptT $ do
+    (Entity key _) <- exceptTMaybeT accountNotFound
+      $ selectFirst [ PersonUuid ==. modelUUID ] []
+    nowUTC <- liftIO getCurrentTime
+    let now = utcTimeToPOSIXSeconds nowUTC
+    lift $ update key
+      [ PersonBalance +=. Sats amountSats
+      , PersonLastUpdated =. now
+      ]
+    exceptTMaybeT accountNotFound $ fmap personBalance <$> get key
   return $! BalanceAdjustResult balance
