@@ -86,7 +86,7 @@ accept idText token =
   -- balances and offers change from here on: in withLiveEventOrder, so the
   -- change's events are published in the order of the changes
   withLiveEventOrderE $ do
-    Sats takerBalance <- ExceptT $ AccountClient.deductBalance takerUUIDV
+    takerBalance <- ExceptT $ AccountClient.deductBalance takerUUIDV
       (Sats (offerTakerStakeSats offerVal))
 
     now <- getCurrentTimeDB
