@@ -170,6 +170,12 @@ instance ToSchema SequencedMessage where
         , "in the numbers means that one was missed. The messages sent to"
         , "one connection only -- pong, my.balance and the chain tip right"
         , "after hello -- have no seq."
+        , "The seq of hello is the number of the last notification published"
+        , "before the connection opened, and 0 when none was published yet."
+        , "The numbers start again when the service restarts, so they can"
+        , "only be compared within one connection: after a reconnect, take"
+        , "the seq of the new hello as the baseline and reload the data,"
+        , "instead of keeping the one from the connection before."
         ]
       & properties .~
         [ ( "seq", optionalNumber )
