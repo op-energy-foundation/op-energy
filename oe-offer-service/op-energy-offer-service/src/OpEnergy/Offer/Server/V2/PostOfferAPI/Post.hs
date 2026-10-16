@@ -44,6 +44,7 @@ import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
 import           OpEnergy.Error
                    ( eitherThrowJSON, runExceptPrefixT, describeError
                    , CallstackError, invalidRequest
+                   , exceptTMaybeT, chainTipUnknown
                    )
 
 postHandler :: AccountAPI.AccountToken -> PostOfferRequest -> AppM PostOfferResult
@@ -72,11 +73,13 @@ post token PostOfferRequest{..} =
     ExceptT $ AccountClient.verifyAccountToken token
 
   State{ currentUnconfirmedTip = currentUnconfirmedTipV } <- lift ask
-  mTip <- liftIO $ TVar.readTVarIO currentUnconfirmedTipV
-  case mTip of
-    Just tip | targetBlock <= tip ->
-      throwE $ invalidRequest ("targetBlock must be in the future (current tip: " <> tshow tip <> ")")
-    _ -> return ()
+  -- the tip is forgotten while the connection to blockspan service is down,
+  -- and an offer, whose target block is mined already, must not be posted
+  -- in the meantime: accept refuses without a tip, and so does this
+  tip <- exceptTMaybeT chainTipUnknown
+    $ liftIO $ TVar.readTVarIO currentUnconfirmedTipV
+  when (targetBlock <= tip) $ throwE $ invalidRequest
+    ("targetBlock must be in the future (current tip: " <> tshow tip <> ")")
 
   -- balances and offers change from here on: in withLiveEventOrder, so the
   -- change's events are published in the order of the changes
