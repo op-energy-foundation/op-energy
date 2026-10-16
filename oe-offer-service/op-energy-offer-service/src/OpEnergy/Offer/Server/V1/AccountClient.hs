@@ -61,13 +61,20 @@ creditBalance :: (MonadIO m) => AccountAPI.UUID AccountAPI.Person -> Sats -> App
 creditBalance personUUIDV amountSats =
   adjustBalance Client.creditBalance classifyCredit personUUIDV amountSats
   where
-    -- an answer from the account service tells the caller that the credit
-    -- did not happen, while a lost connection leaves that unknown: the
-    -- former can be repeated, the latter can not
+    -- Only the two answers, which the credit handler gives before it touches
+    -- the balance, tell the caller that the credit did not happen: 401 for a
+    -- wrong service secret and 400 for an account, which is not there. Every
+    -- other failure -- a 500 from around the update, a reply which does not
+    -- decode, a lost connection -- leaves it unknown whether the balance was
+    -- changed. Only a refused credit can be repeated, so the unknown ones
+    -- must not be reported as one
     classifyCredit :: ClientError -> CallstackError
     classifyCredit (ConnectionError err) =
       accountServiceUnavailable (Text.pack (show err))
-    classifyCredit err = accountServiceRefused (Text.pack (show err))
+    classifyCredit err@(FailureResponse _ response)
+      | statusCode (responseStatusCode response) `elem` [400, 401] =
+        accountServiceRefused (Text.pack (show err))
+    classifyCredit err = accountServiceUnavailable (Text.pack (show err))
 
 adjustBalance
   :: (MonadIO m)

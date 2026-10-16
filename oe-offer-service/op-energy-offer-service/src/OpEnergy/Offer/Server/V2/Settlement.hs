@@ -249,20 +249,31 @@ settleContract actualMtpEpoch (Entity contractId contract@Contract{..}) =
           -- the account service has credited nothing, so the settlement is
           -- taken back and a later tick settles the contract again
           Left err | isAccountServiceRefused err -> do
-            rolledBack <- ExceptT
+            -- the rollback is answered before it is reported, so a rollback,
+            -- which fails itself, is logged as what it leaves behind: a
+            -- settled contract with an unpaid winner, which no later tick
+            -- looks at again
+            erolledBack <- lift
               $ rollbackSettlement contractId platformFeeSats now
             lift $ runLogging $ $(logError)
               ( "contract " <> tshow (fromSqlKey contractId)
               <> ": the account service refused the payout of "
               <> tshow payoutSats <> " sats to " <> tshow winnerUUID
               <> ", so its settlement was "
-              <> ( if rolledBack
-                     then "taken back and a later tick settles it again"
-                     else "left in place, as it was not settled anymore"
+              <> ( case erolledBack of
+                     Right True ->
+                       "taken back and a later tick settles it again"
+                     Right False ->
+                       "left in place, as it was not settled anymore"
+                     Left rollbackErr ->
+                       "left settled, as taking it back failed: the winner is "
+                       <> "unpaid and a settled contract is not swept again, "
+                       <> "so this needs manual reconciliation: "
+                       <> describeError rollbackErr
                  )
               <> ": " <> describeError err
               )
-            return False
+            either throwE (const (return False)) erolledBack
           _ -> do
             lift $ runLogging $ case ecredited of
               Right _ -> $(logInfo)
