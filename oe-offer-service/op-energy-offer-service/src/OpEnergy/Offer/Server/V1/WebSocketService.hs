@@ -14,7 +14,7 @@ import           Control.Monad (forever, forM_)
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.Trans.Except (ExceptT(..), runExceptT)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
-import           Control.Monad.Logger (logDebug)
+import           Control.Monad.Logger (logDebug, logWarn)
 import qualified Control.Concurrent.Async as Async
 import qualified Control.Concurrent.MVar as MVar
 import qualified Control.Concurrent.STM as STM
@@ -160,7 +160,10 @@ handleRequest state conn send personV = do
     Just (LiveRequestAuth token) -> authenticate state personV token
 
 -- | remembers the account of the given token, so the connection receives
--- 'LiveMessageMyBalance' for this account. An invalid token is ignored
+-- 'LiveMessageMyBalance' for this account. If the account service can't
+-- verify the token, for any reason, the connection has no account anymore:
+-- it must not keep receiving notifications of a previous account after a
+-- later auth, e.g. with a token, which a later login has invalidated
 authenticate
   :: State
   -> TVar (Maybe (AccountAPI.UUID AccountAPI.Person))
@@ -171,8 +174,14 @@ authenticate state personV token = runAppT state $ do
   case eperson of
     Right (AccountV2.WhoAmIResult personUUIDV _displayName _balance) ->
       liftIO $ STM.atomically $ TVar.writeTVar personV (Just personUUIDV)
-    Left err -> runLogging $ $(logDebug)
-      ( "authenticate: ignoring invalid token: " <> describeError err )
+    Left err -> do
+      liftIO $ STM.atomically $ TVar.writeTVar personV Nothing
+      -- a warning, so an account service outage, which leaves connections
+      -- without their account, is visible
+      runLogging $ $(logWarn)
+        ( "authenticate: token not verified, the connection has no account: "
+        <> describeError err
+        )
 
 -- | waits for the next live event and sends it to the frontend with its
 -- sequence number, followed by 'LiveMessageMyBalance' if the event has
