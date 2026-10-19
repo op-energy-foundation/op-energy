@@ -6,8 +6,6 @@ module OpEnergy.Offer.Server.V1.LiveEvent
   , changedBalance
   ) where
 
-import           Data.Word (Word64)
-
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountAPI
 import qualified Data.OpEnergy.Account.API.V1.UUID as AccountAPI
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
@@ -17,7 +15,7 @@ import           Data.OpEnergy.Offer.API.V1.LiveMessage (LiveMessage)
 data LiveEvent = LiveEvent
   { liveEventMessage :: LiveMessage
     -- ^ sent to every connection
-  , liveEventBalances :: [(AccountAPI.UUID AccountAPI.Person, Word64)]
+  , liveEventBalances :: [(AccountAPI.UUID AccountAPI.Person, Sats)]
     -- ^ the balances this change has set: each is sent as
     -- 'LiveMessageMyBalance' to the connections authenticated as its account
   }
@@ -27,6 +25,6 @@ data LiveEvent = LiveEvent
 changedBalance
   :: AccountAPI.UUID AccountAPI.Person
   -> Either e Sats
-  -> [(AccountAPI.UUID AccountAPI.Person, Word64)]
+  -> [(AccountAPI.UUID AccountAPI.Person, Sats)]
 changedBalance person =
-  either (const []) (\(Sats balance) -> [(person, balance)])
+  either (const []) (\balance -> [(person, balance)])

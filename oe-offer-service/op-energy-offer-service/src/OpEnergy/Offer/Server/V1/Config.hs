@@ -58,7 +58,9 @@ data Config = Config
     -- ^ base URL of blockspan service's HTTP API, used to get the
     -- mediantime of a contract's target block during settlement
   , configPlatformFeeSats :: Word64
-    -- ^ fee deducted from the pot of every settled contract
+    -- ^ fee deducted from the pot of every settled contract. Defaults to
+    -- 'C.platformFeeSats', the amount the API tells its clients, so a
+    -- deployment, which does not set it, settles by that amount
   }
   deriving Show
 instance FromJSON Config where
@@ -112,7 +114,7 @@ defaultConfig = Config
   , configInternalServiceSharedSecret = error "defaultConfig: you are missing INTERNAL_SERVICE_SHARED_SECRET from config -- must match oe-account-service's own value. Generate with \"dd if=/dev/urandom bs=1 count=32 2>/dev/null | base64 -w 0\" command"
   , configBlockspanWebsocketURL = BaseUrl Http "127.0.0.1" 8999 "/api/v1/ws"
   , configBlockspanURL = BaseUrl Http "127.0.0.1" 8999 ""
-  , configPlatformFeeSats = 1000
+  , configPlatformFeeSats = C.platformFeeSats
   }
 
 -- | parses websocket URL. The websocket client does not support TLS, so
