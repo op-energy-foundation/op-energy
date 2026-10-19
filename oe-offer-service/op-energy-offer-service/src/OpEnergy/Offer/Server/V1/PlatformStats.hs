@@ -75,10 +75,13 @@ removeCollectedFeeTx
   -> ReaderT SqlBackend m ()
 removeCollectedFeeTx feeSats now = do
   mstats <- selectFirst [] []
-  forM_ mstats $ \(Entity statsId stats) ->
+  forM_ mstats $ \(Entity _ stats) ->
+    -- the subtraction itself is left to the database, so a total, which
+    -- another writer has changed since the read, is not overwritten with
+    -- one computed from the old value. The read is still what bounds the
+    -- subtraction, so the total does not go below zero
     let collectedSats = platformStatsTotalFeesCollectedSats stats
-    in update statsId
-      [ PlatformStatsTotalFeesCollectedSats
-          =. collectedSats - min feeSats collectedSats
+    in updateWhere []
+      [ PlatformStatsTotalFeesCollectedSats -=. min feeSats collectedSats
       , PlatformStatsLastUpdated =. now
       ]
