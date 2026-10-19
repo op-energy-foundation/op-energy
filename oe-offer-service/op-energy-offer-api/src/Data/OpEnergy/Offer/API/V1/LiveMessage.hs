@@ -1,5 +1,6 @@
 {-- | Messages of the offer service's websocket: requests from the frontend
- - and live notifications about offers, contracts and new blocks.
+ - and live notifications about offers, contracts, new blocks and the
+ - authenticated account's balance.
  -
  - Offer and contract notifications carry the whole offer or contract, as
  - the offer API's public list returns it; a contract's @yourRole@ is
@@ -43,9 +44,9 @@ data LiveRequest
     -- known, is sent right after 'LiveMessageHello', when the connection
     -- opens
   | LiveRequestAuth AccountToken
-    -- ^ @{"action": "auth", "token": "..."}@: additionally receive
-    -- notifications about the given account's own offers, contracts and
-    -- balance
+    -- ^ @{"action": "auth", "token": "..."}@: also receive the account's
+    -- new balance as 'LiveMessageMyBalance' whenever the offer service
+    -- changes it
   | LiveRequestPing
     -- ^ @{"action": "ping"}@: keepalive, answered with 'LiveMessagePong'
   deriving (Eq, Show)
@@ -82,9 +83,10 @@ data LiveMessage
     -- height and the mediantime of the block at that height, @null@ while
     -- the offer service does not know it. On a new tip, confirmations of
     -- live contracts have changed
-  | LiveMessageMyChanged
-    -- ^ something of the authenticated account has changed: its offers,
-    -- contracts or balance. Sent only after 'LiveRequestAuth'
+  | LiveMessageMyBalance Word64
+    -- ^ new balance, in sats, of the account given in a successful
+    -- 'LiveRequestAuth'. Sent to that connection only, right after the
+    -- notification of the change that caused it
   | LiveMessagePong
     -- ^ answer to 'LiveRequestPing'
   | LiveMessageHello
@@ -95,7 +97,7 @@ data LiveMessage
 -- | a message as it is sent to a connection: with its sequence number
 -- (@"seq"@) if it is a notification sent to every connection or
 -- 'LiveMessageHello', without one if it is sent to this connection only:
--- the chain tip right after 'LiveMessageHello', 'LiveMessageMyChanged' and
+-- the chain tip right after 'LiveMessageHello', 'LiveMessageMyBalance' and
 -- 'LiveMessagePong'. Unnumbered messages never cause a gap
 data SequencedMessage = SequencedMessage (Maybe Word64) LiveMessage
   deriving (Eq, Show)
@@ -129,8 +131,9 @@ liveMessagePairs (LiveMessageBlockNew height mmediantime) =
   , "height" .= height
   , "mediantime" .= mmediantime
   ]
-liveMessagePairs LiveMessageMyChanged =
-  [ "type" .= ("my.changed" :: Text)
+liveMessagePairs (LiveMessageMyBalance balance) =
+  [ "type" .= ("my.balance" :: Text)
+  , "balance" .= balance
   ]
 liveMessagePairs LiveMessagePong =
   [ "type" .= ("pong" :: Text)
