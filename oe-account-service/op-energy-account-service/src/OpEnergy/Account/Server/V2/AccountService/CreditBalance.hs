@@ -13,6 +13,7 @@ import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Logger(logError)
 import           Control.Monad.Trans (lift)
+import           Control.Monad.Trans.Except (ExceptT(..), runExceptT)
 import           Data.Text(Text)
 import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
@@ -55,7 +56,10 @@ creditBalanceHandler secret request =
       ( runLogging . $(logError))
       $ creditBalance secret request
 
--- | business logic for V2 balance credit
+-- | business logic for V2 balance credit. Returns the balance after the
+-- credit, read in the same transaction as the update: the update holds the
+-- account's row lock until the transaction commits, so no other change of
+-- the balance can come in between.
 creditBalance
   :: Text
   -> BalanceAdjustRequest
@@ -66,15 +70,16 @@ creditBalance secret (BalanceAdjustRequest personUUIDV (Sats amountSats)) =
   checkInternalServiceSecret secret
   State{ accountDBPool = pool } <- lift ask
   let modelUUID = modelApiUUIDPerson personUUIDV
-  (Entity key person) <- exceptTMaybeT accountNotFound
-    $ liftIO $ flip runSqlPersistMPool pool
-    $ selectFirst [ PersonUuid ==. modelUUID ] []
-  liftIO $ flip runSqlPersistMPool pool $ do
+  -- the account is looked up in the same transaction as the update and the
+  -- read, so it cannot be gone between finding it and crediting it
+  balance <- ExceptT $ liftIO $ flip runSqlPersistMPool pool $ runExceptT $ do
+    (Entity key _) <- exceptTMaybeT accountNotFound
+      $ selectFirst [ PersonUuid ==. modelUUID ] []
     nowUTC <- liftIO getCurrentTime
     let now = utcTimeToPOSIXSeconds nowUTC
-    update key
+    lift $ update key
       [ PersonBalance +=. Sats amountSats
       , PersonLastUpdated =. now
       ]
-  let Sats currentBalance = personBalance person
-  return $! BalanceAdjustResult (Sats (currentBalance + amountSats))
+    exceptTMaybeT accountNotFound $ fmap personBalance <$> get key
+  return $! BalanceAdjustResult balance
