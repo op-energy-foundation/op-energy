@@ -19,7 +19,10 @@ import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 
 import           OpEnergy.Offer.Server.V1.Class(AppT, profile, withDBTransaction)
 import           OpEnergy.Offer.Server.V1.Offer
-import           OpEnergy.Offer.Server.V1.OfferService(refundAndCloseOffer)
+import           OpEnergy.Offer.Server.V1.OfferService
+                   ( refundAndCloseOffer
+                   , notAcceptableAtFilter
+                   )
 import           OpEnergy.Offer.Server.V1.LiveEvent
                    ( LiveEvent(..)
                    , changedBalance
@@ -29,6 +32,14 @@ import           OpEnergy.Offer.Server.V1.WebSocketService
                    , withLiveEventOrder
                    )
 
+-- | Expires the open offers, which can not be accepted anymore at the given
+-- chain tip (see 'notAcceptableAtFilter'): once the tip has passed an
+-- offer's validTillBlock or has reached its target block. Each is closed
+-- with the matchedCount it has when it is closed, and its creator refunded
+-- the stake of its unmatched contracts. An offer, whose matchedCount an
+-- accept changes while it is being closed, is left to the next call; a
+-- cancelled one is not expired; a failed refund is logged by
+-- 'refundAndCloseOffer'. Returns the number of offers closed by this call.
 expireStaleOffers :: (MonadIO m, MonadMonitor m) => BlockHeight -> AppT m Int
 expireStaleOffers tipHeight =
   let name = "V2.Expiry.expireStaleOffers"
@@ -37,7 +48,7 @@ expireStaleOffers tipHeight =
   -- a failed query is logged by withDBTransaction; the sweep retries next tick
   staleOfferIds <- fromMaybe [] <$> withDBTransaction "selectKeysList"
     ( selectKeysList
-      [ OfferStatus ==. Open, OfferTargetBlock <=. tipHeight ]
+      ( [ OfferStatus ==. Open ] ++ notAcceptableAtFilter tipHeight )
       []
     )
   results <- forM staleOfferIds $ \offerId -> withLiveEventOrder $ do
