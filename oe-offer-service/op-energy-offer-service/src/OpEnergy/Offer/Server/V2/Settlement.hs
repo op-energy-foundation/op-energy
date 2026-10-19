@@ -131,7 +131,9 @@ getTargetBlockMediantimes contracts =
 -- | settles the given contract with 'settleContract', logging whatever kept
 -- it from being settled: the mediantime of its target block is missing from
 -- the given mediantimes, or its settlement itself failed. The contract
--- stays live in both cases, so a later tick settles it.
+-- stays live in both cases, so a later tick settles it -- except for a
+-- payout, whose rollback failed itself: that one is left settled with an
+-- unpaid winner, which 'settleContract' logs for reconciliation.
 settleContractLogging
   :: (MonadIO m, MonadMonitor m)
   => Map BlockHeight Word64
