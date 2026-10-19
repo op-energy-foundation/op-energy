@@ -153,14 +153,59 @@ accept idText token =
               <> describeError err
               )
 
+    -- A Left from withDBTransaction does not say, that the transaction
+    -- rolled back: the handler there covers the whole runSqlPersistMPool,
+    -- the COMMIT included, so a connection, which drops after the commit,
+    -- is reported the same way as a query, which failed. The contract row
+    -- the transaction inserts says which of the two happened, so it is
+    -- looked for before the stake is given back. A lookup, which fails
+    -- itself, leaves the outcome unknown: the stake is then kept rather
+    -- than refunded against a contract, which may be live, and logged for
+    -- reconciliation
+    let committedContractKey
+          :: CallstackError
+          -> ExceptT CallstackError (AppT IO) (Maybe (Key Contract))
+        committedContractKey txErr = do
+          ekeys <- lift $ withDBTransaction "getAcceptedContract"
+            $ selectKeysList
+              [ ContractOfferId ==. key
+              , ContractTakerUUID ==. takerUUIDV
+              , ContractMatchedAt ==. now
+              ]
+              [ LimitTo 1 ]
+          case ekeys of
+            Right (contractKey:_) -> return $! Just contractKey
+            Right [] -> return Nothing
+            Left lookupErr -> do
+              lift $ runLogging $ $(logError)
+                ( "accept: the transaction for offer "
+                <> T.pack (show (fromSqlKey key))
+                <> " failed with: " <> describeError txErr
+                <> ", and whether it committed could not be read: "
+                <> describeError lookupErr
+                <> ", so the taker's stake of "
+                <> T.pack (show (offerTakerStakeSats offerVal))
+                <> " sats is kept and needs manual reconciliation"
+                )
+              throwE txErr
+
     -- the stake is deducted by now, so every answer below refunds it first.
-    -- A failed transaction has changed nothing, so it is refunded like a
-    -- conditional update, which did not apply
-    case emContractKey of
+    -- A transaction, which verifiably did not commit, has changed nothing,
+    -- so it is refunded like a conditional update, which did not apply
+    emContractKey' <- case emContractKey of
       Left txErr -> do
-        refundTaker "the transaction failed"
-        throwE txErr
-      Right Nothing -> do
+        mcommitted <- committedContractKey txErr
+        case mcommitted of
+          -- the accept did happen, so it is answered as one: the stake
+          -- stays with the contract it bought
+          Just contractKey -> return $! Just contractKey
+          Nothing -> do
+            refundTaker "the transaction failed"
+            throwE txErr
+      Right mContractKey -> return mContractKey
+
+    case emContractKey' of
+      Nothing -> do
         refundTaker "the conditional update did not apply"
         -- another accept, a cancel or the expiry sweep changed the offer
         -- first: report which
@@ -171,7 +216,7 @@ accept idText token =
           Just Expired -> offerExpired
           Just Cancelled -> offerNotOpen
           Nothing -> offerNotFound
-      Right (Just contractKey) -> do
+      Just contractKey -> do
         let contractEntity = Entity contractKey contractRow
         -- sent to every connection, so without yourRole
         lift $ publishLiveEvent $! LiveEvent
