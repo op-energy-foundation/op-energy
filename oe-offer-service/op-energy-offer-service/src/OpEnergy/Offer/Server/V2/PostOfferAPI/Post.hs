@@ -15,8 +15,6 @@ import           Control.Monad.Trans.Except(ExceptT(..), throwE)
 import           Control.Monad.IO.Class(liftIO)
 import           Control.Monad.Logger(logError)
 import qualified Control.Concurrent.STM.TVar as TVar
-import           Control.Exception.Safe(SomeException)
-import qualified Control.Exception.Safe as E
 
 import           Database.Persist.Postgresql
 
@@ -29,7 +27,9 @@ import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 import           Data.Text.Show(tshow)
 
 import           OpEnergy.Offer.Server.V1.Time(getCurrentTimeDB)
-import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
+import           OpEnergy.Offer.Server.V1.Class
+                   ( AppM, State(..), profile, runLogging, withDBTransaction
+                   )
 import           OpEnergy.Offer.Server.V1.Config(Config(..))
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
@@ -43,7 +43,8 @@ import           Data.OpEnergy.Offer.API.V1.OfferStatus(OfferStatus(..))
 
 import           OpEnergy.Error
                    ( eitherThrowJSON, runExceptPrefixT, describeError
-                   , CallstackError, invalidRequest, unspecified
+                   , CallstackError, invalidRequest
+                   , exceptTMaybeT, chainTipUnknown
                    )
 
 postHandler :: AccountAPI.AccountToken -> PostOfferRequest -> AppM PostOfferResult
@@ -72,22 +73,23 @@ post token PostOfferRequest{..} =
     ExceptT $ AccountClient.verifyAccountToken token
 
   State{ currentUnconfirmedTip = currentUnconfirmedTipV } <- lift ask
-  mTip <- liftIO $ TVar.readTVarIO currentUnconfirmedTipV
-  case mTip of
-    Just tip | targetBlock <= tip ->
-      throwE $ invalidRequest ("targetBlock must be in the future (current tip: " <> tshow tip <> ")")
-    _ -> return ()
+  -- the tip is forgotten while the connection to blockspan service is down,
+  -- and an offer, whose target block is mined already, must not be posted
+  -- in the meantime: accept refuses without a tip, and so does this
+  tip <- exceptTMaybeT chainTipUnknown
+    $ liftIO $ TVar.readTVarIO currentUnconfirmedTipV
+  when (targetBlock <= tip) $ throwE $ invalidRequest
+    ("targetBlock must be in the future (current tip: " <> tshow tip <> ")")
 
   -- balances and offers change from here on: in withLiveEventOrder, so the
   -- change's events are published in the order of the changes
   withLiveEventOrderE $ do
     let totalStake = makerStakeSats * totalContracts
         takerStakeSatsV = C.totalPotSats - makerStakeSats
-    Sats makerBalance <-
+    makerBalance <-
       ExceptT $ AccountClient.deductBalance personUUIDV (Sats totalStake)
 
     now <- getCurrentTimeDB
-    State{ offerDBPool = pool } <- lift ask
     let offerRow = Offer
           { offerPersonUUID = personUUIDV
           , offerCreatorDisplayName = displayNameV
@@ -106,9 +108,10 @@ post token PostOfferRequest{..} =
           , offerRefundedAt = Nothing
           , offerCreated = now
           }
-    einserted <- liftIO
-      $ E.handle (\(e :: SomeException) -> return $! Left (tshow e))
-      $ fmap Right $ flip runSqlPersistMPool pool $ insert offerRow
+    -- the stake is deducted by now, so a failed insert is answered only
+    -- after it is refunded. withDBTransaction logs the query's own error
+    -- and answers dbQueryError, which is reported as it is
+    einserted <- lift $ withDBTransaction "insertOffer" $ insert offerRow
     case einserted of
       Right key -> do
         let offerInfo = offerInfoFromEntity (Entity key offerRow)
@@ -123,12 +126,12 @@ post token PostOfferRequest{..} =
         lift $ runLogging $ $(logError)
           ( "post: failed to persist offer row after staking "
           <> tshow totalStake
-          <> " sats for " <> tshow personUUIDV <> ": " <> insertErr
+          <> " sats for " <> tshow personUUIDV <> ": "
+          <> describeError insertErr
           <> case ecredited of
                Right _ -> "; stake was refunded"
                Left creditErr ->
                  "; stake refund ALSO failed, needs manual reconciliation: "
                  <> describeError creditErr
           )
-        throwE $ unspecified
-          ("post: failed to persist offer row: " <> insertErr)
+        throwE insertErr
