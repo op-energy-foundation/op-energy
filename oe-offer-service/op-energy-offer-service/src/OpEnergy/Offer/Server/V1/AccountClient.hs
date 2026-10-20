@@ -32,7 +32,8 @@ import qualified Prometheus as P
 
 import           OpEnergy.Error
                    ( CallstackError, authenticationFailure, accountServiceUnavailable
-                   , accountServiceRefused, insufficientBalance
+                   , accountServiceRefused, accountUnknown
+                   , insufficientBalance
                    )
 
 verifyAccountToken :: (MonadIO m) => AccountAPI.AccountToken -> AppT m (Either CallstackError WhoAmIResult)
@@ -71,8 +72,15 @@ creditBalance personUUIDV amountSats =
     classifyCredit :: ClientError -> CallstackError
     classifyCredit (ConnectionError err) =
       accountServiceUnavailable (Text.pack (show err))
+    -- 400 is the account service answering that it does not have the
+    -- account, and 401 that it did not accept this service's secret. Both
+    -- credited nothing, and they are told apart as only the second one can
+    -- be carried out later: a secret is put right where the services are
+    -- configured, while an account, which is not there, stays that way
     classifyCredit err@(FailureResponse _ response)
-      | statusCode (responseStatusCode response) `elem` [400, 401] =
+      | statusCode (responseStatusCode response) == 400 =
+        accountUnknown (Text.pack (show err))
+      | statusCode (responseStatusCode response) == 401 =
         accountServiceRefused (Text.pack (show err))
     classifyCredit err = accountServiceUnavailable (Text.pack (show err))
 

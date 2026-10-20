@@ -16,6 +16,8 @@ module OpEnergy.Error
   , accountServiceUnavailable
   , accountServiceRefused
   , isAccountServiceRefused
+  , accountUnknown
+  , isAccountUnknown
   , blockspanRequestFailed
   , chainTipUnknown
 
@@ -89,7 +91,13 @@ data Error
     -- whether it has carried out the request
   | AccountServiceRefused Text
     -- ^ the account service has answered the request with an error, so it
-    -- has not carried it out
+    -- has not carried it out. The same request may be carried out later:
+    -- what it was refused for, a secret this service holds wrongly, is
+    -- put right where the services are configured and not here
+  | AccountUnknown Text
+    -- ^ the account service does not have the account the request names,
+    -- so it has carried nothing out and no later attempt of the same
+    -- request can succeed either
   | BlockspanRequestFailed Text
   | ChainTipUnknown
     -- ^ the service has not received the chain tip yet
@@ -107,6 +115,8 @@ accountServiceUnavailable :: Text -> CallstackError
 accountServiceUnavailable = CallstackError "" . AccountServiceUnavailable
 accountServiceRefused :: Text -> CallstackError
 accountServiceRefused = CallstackError "" . AccountServiceRefused
+accountUnknown :: Text -> CallstackError
+accountUnknown = CallstackError "" . AccountUnknown
 
 -- | 'True' for the error of a request, which the account service itself has
 -- answered with an error: it has carried nothing out, so its caller may
@@ -120,6 +130,18 @@ accountServiceRefused = CallstackError "" . AccountServiceRefused
 isAccountServiceRefused :: CallstackError -> Bool
 isAccountServiceRefused (CallstackError _ (AccountServiceRefused _)) = True
 isAccountServiceRefused _ = False
+
+-- | 'True' for the error of a request naming an account, which the account
+-- service does not have. Nothing was carried out and nothing will be: a
+-- caller, which repeats a refused request on a later tick, has to stop
+-- for this one rather than repeat it for good.
+--
+-- Example: the settlement sweep leaves a contract settled, with its winner
+-- unpaid, when the winner's account is unknown, rather than taking the
+-- settlement back for every later tick to try the same payout again.
+isAccountUnknown :: CallstackError -> Bool
+isAccountUnknown (CallstackError _ (AccountUnknown _)) = True
+isAccountUnknown _ = False
 blockspanRequestFailed :: Text -> CallstackError
 blockspanRequestFailed = CallstackError "" . BlockspanRequestFailed
 chainTipUnknown :: CallstackError
@@ -160,6 +182,7 @@ errorToServerError (BadRequest specificError) = (err400, tshow specificError)
 errorToServerError (Internal specificError) = (err500, tshow specificError)
 errorToServerError (AccountServiceUnavailable reason) = (err502, "account service unavailable: " <> reason)
 errorToServerError (AccountServiceRefused reason) = (err502, "account service refused the request: " <> reason)
+errorToServerError (AccountUnknown reason) = (err502, "account service does not have the account: " <> reason)
 errorToServerError (BlockspanRequestFailed reason) = (err502, "blockspan request failed: " <> reason)
 errorToServerError ChainTipUnknown =
   (err503, "the chain tip is not known yet, try again shortly")
