@@ -38,6 +38,7 @@ module OpEnergy.Error
   , walletAmountBelowMinimum
   , walletAmountAboveMaximum
   , walletTooManyPendingInvoices
+  , walletTooManyPayAttempts
   , ledgerReasonMismatch
   ) where
 
@@ -74,6 +75,7 @@ data BadRequestError
   | WalletAmountBelowMinimum
   | WalletAmountAboveMaximum
   | WalletTooManyPendingInvoices
+  | WalletTooManyPayAttempts
   | LedgerReasonMismatch
 instance Show BadRequestError where
   show CalculatedGuessesCountNotFound = "calculated guesses count not found"
@@ -97,6 +99,8 @@ instance Show BadRequestError where
   show WalletAmountAboveMaximum = "amount is above the largest allowed"
   show WalletTooManyPendingInvoices =
     "too many invoices of this account are waiting to be paid"
+  show WalletTooManyPayAttempts =
+    "too many payments have been attempted by this account, try again later"
   show LedgerReasonMismatch = "reason does not describe this direction"
 
 data InternalError
@@ -195,6 +199,9 @@ walletAmountAboveMaximum = CallstackError "" $! BadRequest WalletAmountAboveMaxi
 walletTooManyPendingInvoices :: CallstackError
 walletTooManyPendingInvoices =
   CallstackError "" $! BadRequest WalletTooManyPendingInvoices
+walletTooManyPayAttempts :: CallstackError
+walletTooManyPayAttempts =
+  CallstackError "" $! BadRequest WalletTooManyPayAttempts
 ledgerReasonMismatch :: CallstackError
 ledgerReasonMismatch = CallstackError "" $! BadRequest LedgerReasonMismatch
 

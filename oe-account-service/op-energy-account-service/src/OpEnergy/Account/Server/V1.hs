@@ -16,15 +16,21 @@ module OpEnergy.Account.Server.V1
   )where
 
 import           Servant
-import           Control.Monad.IO.Class(MonadIO)
+import           Control.Monad.IO.Class(MonadIO, liftIO)
+import           Control.Monad.Trans.Reader (ask)
+import           Data.Time.Clock.POSIX (getPOSIXTime)
 
 import           Data.OpEnergy.Account.API.V1
 import           Data.OpEnergy.API.V1(GitHashResponse(..))
 import qualified OpEnergy.Account.Server.GitCommitHash as Server
-import           OpEnergy.Account.Server.V1.Class (AppT)
+import           OpEnergy.Account.Server.V1.Class (AppT, State(..))
 import           OpEnergy.Account.Server.V1.AccountService
+import           OpEnergy.Account.Server.V1.Config (Config(..))
 import           OpEnergy.Account.Server.V1.WalletDeposits
                  ( creditWaitingDeposits
+                 )
+import           OpEnergy.Account.Server.V1.WalletRateLimit
+                 ( forgetFinishedWindows
                  )
 import           OpEnergy.Account.Server.V1.WalletReconcile
                  ( reconcilePendingPayments
@@ -49,6 +55,18 @@ schedulerIteration :: (MonadIO m, MonadMonitor m) => AppT m ()
 schedulerIteration = do
   reconcilePendingPayments
   creditWaitingDeposits
+  forgetSpentPayAttempts
+
+-- | drops the accounts, whose window of payment attempts is over, so what
+-- counts them holds the accounts, which are paying now, rather than every
+-- account, which ever paid
+forgetSpentPayAttempts :: MonadIO m => AppT m ()
+forgetSpentPayAttempts = do
+  State{ config = config, walletAttempts = attemptsV } <- ask
+  now <- liftIO getPOSIXTime
+  forgetFinishedWindows attemptsV
+    (fromIntegral (configWalletPayAttemptWindowSecs config))
+    now
 
 -- returns just commit hash, provided by build system
 oeGitHashGet :: AppT Handler GitHashResponse

@@ -65,6 +65,9 @@ import           OpEnergy.Account.Server.V1.Wallet.Class
 import           OpEnergy.Account.Server.V1.WalletDeposits
                  ( creditDepositOnce
                  )
+import           OpEnergy.Account.Server.V1.WalletRateLimit
+                 ( takeWalletAttempt
+                 )
 import           OpEnergy.Error
                  ( eitherThrowJSON, runExceptPrefixT
                  , CallstackError, accountNotFound, describeError
@@ -72,6 +75,7 @@ import           OpEnergy.Error
                  , insufficientBalance
                  , walletAmountRequired, walletInvoiceAlreadyPaid
                  , walletInvoiceNotFound, walletSelfPaymentNotAllowed
+                 , walletTooManyPayAttempts
                  )
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 
@@ -96,7 +100,8 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
     in profile name $ runExceptPrefixT name $ do
   (Entity key person) <- exceptTMaybeT accountNotFound
     $ mgetPersonByAccountToken token
-  State{ config = config, accountDBPool = pool, wallet = walletV } <- lift ask
+  State{ config = config, accountDBPool = pool, wallet = walletV
+       , walletAttempts = attemptsV } <- lift ask
   -- an account, which can not cover the smallest amount this wallet takes,
   -- can not pay any invoice. It is refused before the wallet is asked to
   -- read one: an account is free to create, so a request, which can not
@@ -104,11 +109,21 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
   -- as often as the caller likes
   when (personBalance person < configWalletMinInvoiceSats config)
     $ throwE insufficientBalance
+  now <- liftIO getPOSIXTime
+  -- every attempt asks the wallet to read the invoice before any balance
+  -- is touched, and an attempt, which is refused after that, has already
+  -- spent the call. An account is free to create, so the attempts one of
+  -- them may make are counted: a wallet, which refuses this service for
+  -- calling too often, is refused for every account at once
+  allowed <- lift $ takeWalletAttempt attemptsV
+    (configWalletMaxPayAttemptsPerWindow config)
+    (fromIntegral (configWalletPayAttemptWindowSecs config))
+    now key
+  when (not allowed) $ throwE walletTooManyPayAttempts
   -- the amount is needed before the payment, as the balance is taken first.
   -- An invoice this service issued is paid for the amount it was created
   -- with, whatever the client believes; for any other invoice the client has
   -- to say, as the wallet can not read it
-  now <- liftIO getPOSIXTime
   mresolved <- ExceptT $ liftIO $ walletResolveInvoice walletV key requestInvoice
   -- an invoice this account has paid before is refused here too, for the
   -- same reason as the two checks below it: the wallet answers Left for it,

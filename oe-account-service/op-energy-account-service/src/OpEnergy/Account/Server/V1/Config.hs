@@ -117,6 +117,14 @@ data Config = Config
     -- it, to cover a fee, which is only known once the payment has been
     -- made. What the fee does not use is given back. A wallet, which
     -- charges no fee, still reserves and gives all of it back
+  , configWalletMaxPayAttemptsPerWindow :: Word32
+    -- ^ how many payments one account may attempt in
+    -- WALLET_PAY_ATTEMPT_WINDOW_SECS. Every attempt asks the wallet to read
+    -- an invoice before any balance is touched, so without a bound one
+    -- account decides how often this service calls the wallet
+  , configWalletPayAttemptWindowSecs :: Word64
+    -- ^ how long the window, which counts an account's payment attempts,
+    -- lasts
   }
   deriving Show
 instance FromJSON Config where
@@ -155,6 +163,8 @@ instance FromJSON Config where
     <*> ( v .:? "LNBITS_ADMIN_KEY" .!= (configLNBitsAdminKey defaultConfig))
     <*> ( v .:? "WALLET_MAX_PENDING_INVOICES" .!= (configWalletMaxPendingInvoices defaultConfig))
     <*> ( v .:? "WALLET_FEE_RESERVE_PERCENT" .!= (configWalletFeeReservePercent defaultConfig))
+    <*> ( v .:? "WALLET_MAX_PAY_ATTEMPTS_PER_WINDOW" .!= (configWalletMaxPayAttemptsPerWindow defaultConfig))
+    <*> ( v .:? "WALLET_PAY_ATTEMPT_WINDOW_SECS" .!= (configWalletPayAttemptWindowSecs defaultConfig))
 
 -- need to get Key from json, which represented as base64-encoded string
 instance FromJSON Key where
@@ -202,6 +212,11 @@ defaultConfig = Config
   -- the demo LNBits instance charges 5% per payment, which is far above
   -- what routing over a node costs, so this covers both
   , configWalletFeeReservePercent = 5
+  -- a person pays one invoice at a time, so ten attempts a minute is far
+  -- above what using the wallet looks like and far below what makes a
+  -- wallet refuse this service
+  , configWalletMaxPayAttemptsPerWindow = 10
+  , configWalletPayAttemptWindowSecs = 60
   }
 
 -- | the largest amount, which survives a round trip through the DB:
@@ -265,6 +280,12 @@ everifyWalletConfig config
           "WALLET_FEE_RESERVE_PERCENT must not be above 100: a payment \
           \would reserve more than it sends, so an account could not \
           \spend even half of its balance"
+      , require (configWalletMaxPayAttemptsPerWindow config > 0)
+          "WALLET_MAX_PAY_ATTEMPTS_PER_WINDOW must be above 0: no account \
+          \could pay an invoice at all"
+      , require (configWalletPayAttemptWindowSecs config > 0)
+          "WALLET_PAY_ATTEMPT_WINDOW_SECS must be above 0: a window, which \
+          \is over as soon as it starts, counts nothing and bounds nothing"
       , require withdrawalWithReserveIsStorable
           "WALLET_MAX_WITHDRAWAL_SATS and WALLET_FEE_RESERVE_PERCENT must \
           \not come to more than the largest amount the DB stores: the \
