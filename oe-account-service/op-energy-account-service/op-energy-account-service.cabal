@@ -63,6 +63,9 @@ library
                    , OpEnergy.Account.Server.V1.Wallet
                    , OpEnergy.Account.Server.V1.Wallet.Class
                    , OpEnergy.Account.Server.V1.Wallet.Mock
+                   , OpEnergy.Account.Server.V1.Wallet.LNBits
+                   , OpEnergy.Account.Server.V1.Wallet.LNBits.Client
+                   , OpEnergy.Account.Server.V1.WalletReconcile
                    , OpEnergy.Account.Server.V2.WalletAPI
                    , OpEnergy.Account.Server.V2.WalletAPI.GetWalletInfo
                    , OpEnergy.Account.Server.V2.WalletAPI.CreateInvoice
@@ -149,6 +152,7 @@ library
                     , servant-server, servant-client, servant-jsonrpc, servant-jsonrpc-client
                     , websockets, servant-websockets
                     , http-client
+                    , http-types
                     , servant-swagger
                     , swagger2
                     , time

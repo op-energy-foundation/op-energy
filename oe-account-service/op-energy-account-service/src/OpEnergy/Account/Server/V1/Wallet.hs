@@ -21,14 +21,14 @@ import           OpEnergy.Account.Server.V1.Config
 import           Data.OpEnergy.Account.API.V2.WalletMode (WalletMode(..))
 
 import           OpEnergy.Account.Server.V1.Wallet.Class
+import           OpEnergy.Account.Server.V1.Wallet.LNBits (lnbitsWalletBackend)
 import           OpEnergy.Account.Server.V1.Wallet.Mock (mockWalletBackend)
 
 -- | builds the wallet backend named by WALLET_BACKEND.
 --
--- The lnbits backend is not implemented yet: it arrives with the node and
--- the LNBits instance, and only this module and its own module change then.
--- Until that, a service configured to use it refuses to start rather than
--- failing on the first request
+-- The options the chosen backend needs are checked by
+-- 'OpEnergy.Account.Server.V1.Config.everifyWalletConfig' at startup, so a
+-- backend is only built here from options, which can work
 newWalletBackend
   :: MonadIO m
   => Config
@@ -36,6 +36,7 @@ newWalletBackend
   -> m WalletBackend
 newWalletBackend config pool = case configWalletBackend config of
   WalletModeMock -> return $! mockWalletBackend pool
-  WalletModeLNBits -> error
-    $ "newWalletBackend: WALLET_BACKEND is lnbits, which needs the LNBits "
-    <> "backend. It is not implemented yet: set WALLET_BACKEND to mock"
+  WalletModeLNBits -> return $! lnbitsWalletBackend
+    (configLNBitsURL config)
+    (configLNBitsInvoiceKey config)
+    pool

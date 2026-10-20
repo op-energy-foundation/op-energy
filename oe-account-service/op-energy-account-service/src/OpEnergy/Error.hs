@@ -13,6 +13,7 @@ module OpEnergy.Error
   , dbQueryError
 
   , blockspanAPIError
+  , walletAPIError
 
   , authenticationFailure
   , accountNotFound
@@ -31,6 +32,7 @@ module OpEnergy.Error
   , walletInvoiceAlreadyPaid
   , walletSelfPaymentNotAllowed
   , walletSimulationNotSupported
+  , walletSendNotSupported
   , walletAmountRequired
   , walletAmountBelowMinimum
   , walletAmountAboveMaximum
@@ -66,6 +68,7 @@ data BadRequestError
   | WalletInvoiceAlreadyPaid
   | WalletSelfPaymentNotAllowed
   | WalletSimulationNotSupported
+  | WalletSendNotSupported
   | WalletAmountRequired
   | WalletAmountBelowMinimum
   | WalletAmountAboveMaximum
@@ -87,6 +90,7 @@ instance Show BadRequestError where
   show WalletInvoiceAlreadyPaid = "invoice has already been paid"
   show WalletSelfPaymentNotAllowed = "an account can not pay its own invoice"
   show WalletSimulationNotSupported = "this wallet can not mark an invoice paid"
+  show WalletSendNotSupported = "this wallet can not send a payment"
   show WalletAmountRequired = "amount is required for an invoice of another wallet"
   show WalletAmountBelowMinimum = "amount is below the smallest allowed"
   show WalletAmountAboveMaximum = "amount is above the largest allowed"
@@ -107,6 +111,10 @@ data Error
   = BadRequest BadRequestError
   | Internal InternalError
   | BlockspanAPI Text
+  | WalletAPI Text
+    -- ^ the wallet service answered with something, which is not an answer.
+    -- Its reason is built from the status alone and never from the request,
+    -- which carries this service's API key
 
 data CallstackError = CallstackError Text Error
 
@@ -121,6 +129,12 @@ dbQueryError = CallstackError "" $! Internal DBQueryError
 
 blockspanAPIError :: Text-> CallstackError
 blockspanAPIError = CallstackError "" . BlockspanAPI
+
+-- | the wallet service could not be reached, or did not answer with what it
+-- promises. The reason is shown to the client, so it is a short description
+-- of what happened and never the request, which carries the API key
+walletAPIError :: Text-> CallstackError
+walletAPIError = CallstackError "" . WalletAPI
 
 authenticationFailure :: CallstackError
 authenticationFailure = CallstackError "" $! BadRequest AuthenticationFailure
@@ -154,6 +168,8 @@ walletSelfPaymentNotAllowed :: CallstackError
 walletSelfPaymentNotAllowed = CallstackError "" $! BadRequest WalletSelfPaymentNotAllowed
 walletSimulationNotSupported :: CallstackError
 walletSimulationNotSupported = CallstackError "" $! BadRequest WalletSimulationNotSupported
+walletSendNotSupported :: CallstackError
+walletSendNotSupported = CallstackError "" $! BadRequest WalletSendNotSupported
 walletAmountRequired :: CallstackError
 walletAmountRequired = CallstackError "" $! BadRequest WalletAmountRequired
 walletAmountBelowMinimum :: CallstackError
@@ -174,6 +190,7 @@ errorToServerError (BadRequest InvalidServiceSecret) = (err401, tshow InvalidSer
 errorToServerError (BadRequest specificError) = (err400, tshow specificError)
 errorToServerError (Internal specificError) = (err500, tshow specificError)
 errorToServerError (BlockspanAPI specificError) = (err500, tshow specificError)
+errorToServerError (WalletAPI specificError) = (err500, tshow specificError)
 
 
 -- | The goal of this function is to turn failure results from @payload@ into JSON  `ServerError`s.

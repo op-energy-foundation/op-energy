@@ -98,6 +98,15 @@ data Config = Config
     -- node's job, so the mock wallet, which has none, does not
   , configWalletRecordsPerPage :: Word32
     -- ^ how many movements one page of the wallet history holds
+  , configLNBitsURL :: BaseUrl
+    -- ^ the LNBits instance the "lnbits" wallet backend talks to. Only
+    -- read when WALLET_BACKEND is "lnbits"
+  , configLNBitsInvoiceKey :: Text
+    -- ^ LNBits invoice/read key: creates invoices and reads what has been
+    -- paid. A secret, which is as good as the wallet's incoming history
+  , configLNBitsAdminKey :: Text
+    -- ^ LNBits admin key: spends the wallet. A secret, which is as good as
+    -- its balance
   }
   deriving Show
 instance FromJSON Config where
@@ -131,6 +140,9 @@ instance FromJSON Config where
     <*> ( v .:? "WALLET_MAX_WITHDRAWAL_SATS" .!= (configWalletMaxWithdrawalSats defaultConfig))
     <*> ( v .:? "WALLET_INVOICE_EXPIRY_SECS" .!= (configWalletInvoiceExpirySecs defaultConfig))
     <*> ( v .:? "WALLET_RECORDS_PER_PAGE" .!= (configWalletRecordsPerPage defaultConfig))
+    <*> ((v .:? "LNBITS_API_URL" .!= (showBaseUrl $ configLNBitsURL defaultConfig)) >>= parseBaseUrl)
+    <*> ( v .:? "LNBITS_INVOICE_KEY" .!= (configLNBitsInvoiceKey defaultConfig))
+    <*> ( v .:? "LNBITS_ADMIN_KEY" .!= (configLNBitsAdminKey defaultConfig))
 
 -- need to get Key from json, which represented as base64-encoded string
 instance FromJSON Key where
@@ -171,6 +183,9 @@ defaultConfig = Config
   , configWalletMaxWithdrawalSats = Sats 10000000
   , configWalletInvoiceExpirySecs = 3600
   , configWalletRecordsPerPage = 10
+  , configLNBitsURL = BaseUrl Http "127.0.0.1" 5000 ""
+  , configLNBitsInvoiceKey = ""
+  , configLNBitsAdminKey = ""
   }
 
 -- | the largest amount, which survives a round trip through the DB:
@@ -231,6 +246,36 @@ everifyWalletConfig config
           "WALLET_INVOICE_EXPIRY_SECS must be above 0: an invoice would be \
           \advertised as expired as soon as it is created"
       ]
+      ++ if configWalletBackend config == WalletModeLNBits
+           then lnbitsProblems
+           else []
+    -- only the configured backend's options are checked: the keys of a
+    -- backend, which is not in use, are not needed and are commonly unset
+    lnbitsProblems = catMaybes
+      [ require (configLNBitsInvoiceKey config /= "")
+          "LNBITS_INVOICE_KEY must be set when WALLET_BACKEND is lnbits: \
+          \without it no invoice can be created and nothing can be read \
+          \back, so every wallet request fails"
+      , require (configLNBitsAdminKey config /= "")
+          "LNBITS_ADMIN_KEY must be set when WALLET_BACKEND is lnbits: \
+          \without it no payment can be made"
+      , require
+          (configLNBitsInvoiceKey config /= configLNBitsAdminKey config)
+          "LNBITS_INVOICE_KEY must not be the same as LNBITS_ADMIN_KEY: the \
+          \reading paths would then hold a key, which spends the wallet, \
+          \and the separation LNBits offers would be given up"
+      , require (urlCarriesKeysSafely (configLNBitsURL config))
+          "LNBITS_API_URL must be https, unless it names a loopback host: \
+          \the API keys travel in every request, so a plain-text hop \
+          \hands the wallet to anyone on the path"
+      ]
+    -- an API key is sent as a header on every call, so the hop has to be
+    -- encrypted. A loopback address never leaves the machine, which is how
+    -- an instance on the same host is reached
+    urlCarriesKeysSafely url = case baseUrlScheme url of
+      Https -> True
+      Http -> List.elem (baseUrlHost url)
+        [ "127.0.0.1", "::1", "localhost" ]
     require holds message = if holds then Nothing else Just message
 
 getConfigFromEnvironment :: IO Config

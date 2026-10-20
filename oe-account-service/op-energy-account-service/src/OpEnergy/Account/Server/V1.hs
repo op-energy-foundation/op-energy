@@ -26,6 +26,9 @@ import           OpEnergy.Account.Server.V1.AccountService
 import           OpEnergy.Account.Server.V1.WalletDeposits
                  ( creditWaitingDeposits
                  )
+import           OpEnergy.Account.Server.V1.WalletReconcile
+                 ( reconcilePendingPayments
+                 )
 
 import           Prometheus(MonadMonitor)
 
@@ -38,9 +41,14 @@ accountServer
   :<|> OpEnergy.Account.Server.V1.AccountService.postDisplayName
   :<|> oeGitHashGet
 
--- | one iteration that called from scheduler thread
+-- | one iteration that called from scheduler thread.
+--
+-- Asking the wallet comes first, so a payment, which is found settled, is
+-- credited by the same iteration rather than by the next one
 schedulerIteration :: (MonadIO m, MonadMonitor m) => AppT m ()
-schedulerIteration = creditWaitingDeposits
+schedulerIteration = do
+  reconcilePendingPayments
+  creditWaitingDeposits
 
 -- returns just commit hash, provided by build system
 oeGitHashGet :: AppT Handler GitHashResponse

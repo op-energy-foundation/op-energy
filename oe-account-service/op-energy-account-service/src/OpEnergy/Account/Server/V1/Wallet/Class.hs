@@ -21,6 +21,7 @@ module OpEnergy.Account.Server.V1.Wallet.Class
   , PaidInvoice(..)
   , SettledInvoice(..)
   , ResolvedInvoice(..)
+  , ObservedPayment(..)
   ) where
 
 import           Data.Text (Text)
@@ -104,6 +105,22 @@ data ResolvedInvoice = ResolvedInvoice
   }
   deriving (Show, Generic)
 
+-- | what a wallet says has become of a payment it was given the hash of.
+-- Named apart from 'OpEnergy.Account.Server.V1.WalletPayment' statuses on
+-- purpose: this is the wallet's answer, while those are what this service
+-- has recorded, and the two are only brought together by the caller
+data ObservedPayment
+  = ObservedPending -- ^ nobody has paid it yet, or the payment is in flight
+  | ObservedSettled -- ^ the sats have arrived
+  | ObservedFailed -- ^ it will not be paid: expired, cancelled or rejected
+  | ObservedUnknown
+    -- ^ the wallet does not have this payment at all. A payment, which was
+    -- recorded against another wallet -- by another backend, or by this
+    -- one before its instance was changed -- reads this way, and so does
+    -- one, which was never created. The caller decides what to make of it:
+    -- the wallet is only reporting that it is not its own
+  deriving (Show, Eq, Ord, Generic, Enum, Bounded)
+
 -- | everything this service needs from a lightning wallet
 data WalletBackend = WalletBackend
   { walletKind :: WalletMode
@@ -123,6 +140,15 @@ data WalletBackend = WalletBackend
     -- from the client
   , walletPayInvoice
       :: PayInvoiceParams -> IO (Either CallstackError PaidInvoice)
+  , walletReadPayment
+      :: Maybe (PaymentHash -> IO (Either CallstackError ObservedPayment))
+    -- ^ 'Just' for a wallet, which settles payments elsewhere: this service
+    -- is not told when an invoice is paid, so it has to ask, and the
+    -- scheduler does. 'Nothing' for a backend, which settles payments
+    -- itself and so already knows -- there is nothing to ask it.
+    --
+    -- The hash alone identifies the payment, as this service only ever
+    -- asks about payments it recorded
   , walletSettleInvoice
       :: Maybe
          (PersonId -> PaymentHash -> IO (Either CallstackError SettledInvoice))

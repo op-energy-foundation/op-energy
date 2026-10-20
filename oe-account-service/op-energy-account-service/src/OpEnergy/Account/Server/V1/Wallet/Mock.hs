@@ -60,6 +60,10 @@ mockWalletBackend pool = WalletBackend
   , walletCreateInvoice = createInvoice pool
   , walletResolveInvoice = resolveInvoice pool
   , walletPayInvoice = payInvoice pool
+  -- this backend settles its own payments, so what it would answer is
+  -- what the asking service wrote in the first place: there is nothing to
+  -- ask it
+  , walletReadPayment = Nothing
   , walletSettleInvoice = Just (settleInvoice pool)
   }
 

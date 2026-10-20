@@ -1,4 +1,5 @@
 { mkDerivation, lib, base
+, http-types
 , hspec, text
 , servant, servant-server, servant-client, servant-jsonrpc, servant-jsonrpc-client, servant-swagger, swagger2
 , websockets, servant-websockets
@@ -40,6 +41,7 @@ mkDerivation {
     op-energy-account-api
     servant servant-server servant-client servant-jsonrpc servant-jsonrpc-client servant-swagger swagger2
     websockets servant-websockets
+    http-types
     aeson aeson-pretty
     text bytestring
     lens
