@@ -265,6 +265,11 @@ everifyWalletConfig config
           "WALLET_FEE_RESERVE_PERCENT must not be above 100: a payment \
           \would reserve more than it sends, so an account could not \
           \spend even half of its balance"
+      , require withdrawalWithReserveIsStorable
+          "WALLET_MAX_WITHDRAWAL_SATS and WALLET_FEE_RESERVE_PERCENT must \
+          \not come to more than the largest amount the DB stores: the \
+          \reserve is taken on top of the amount, so the two together are \
+          \what the largest payment debits"
       , require (configWalletInvoiceExpirySecs config > 0)
           "WALLET_INVOICE_EXPIRY_SECS must be above 0: an invoice would be \
           \advertised as expired as soon as it is created"
@@ -292,6 +297,16 @@ everifyWalletConfig config
           \the API keys travel in every request, so a plain-text hop \
           \hands the wallet to anyone on the path"
       ]
+    -- a payment debits the amount together with the reserve, so it is
+    -- their sum, rather than the amount alone, which has to survive the
+    -- DB. Worked out as Integer: Sats counts upwards only and stores as
+    -- an Int64, so the sum being checked is exactly what would wrap if it
+    -- were worked out in the type it is checking
+    withdrawalWithReserveIsStorable =
+      let amount = toInteger (unSats (configWalletMaxWithdrawalSats config))
+          percent = toInteger (configWalletFeeReservePercent config)
+      in amount + ((amount * percent + 99) `div` 100)
+           <= toInteger (unSats maxStorableSats)
     -- an API key is sent as a header on every call, so the hop has to be
     -- encrypted. A loopback address never leaves the machine, which is how
     -- an instance on the same host is reached
