@@ -30,8 +30,11 @@ import           Data.Maybe (isJust)
 import           Data.Text (Text)
 import           Data.Text.Show (tshow)
 import           Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
+import           Data.Pool (Pool)
+import           Data.Word (Word64)
 import           Database.Persist (Entity(..))
 import           Database.Persist.Postgresql (runSqlPersistMPool)
+import           Database.Persist.Sql (SqlBackend)
 
 import qualified Data.OpEnergy.Account.API.V1.Account as API
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
@@ -138,7 +141,7 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
   -- taken together with the amount, so a fee can not take an account
   -- below nothing: a balance, which does not cover both, refuses the
   -- payment here rather than leaving the fee unpaid for afterwards
-  let reserve = feeReserve config amount
+  let reserve = feeReserve (configWalletFeeReservePercent config) amount
       taken = amount + reserve
   balanceAfterDebit <- ExceptT $ liftIO $ flip runSqlPersistMPool pool
     $ adjustBalanceTx key Debit taken Withdrawal Nothing now
@@ -195,7 +198,7 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
       -- says what the payment cost
       balanceAfterFee <- case paidInvoiceProgress paid of
         PaymentInFlight -> return balanceAfterDebit
-        PaymentSettled -> releaseReserve key reserve
+        PaymentSettled -> releaseReserve pool key reserve
           (paidInvoiceFeeSats paid) balanceAfterDebit now
       -- positional, as several wallet types share these field names
       return $! PayInvoiceResult
@@ -207,11 +210,11 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
 -- | what is taken on top of the amount to cover a fee, which is only
 -- known once the payment has been made. It is a share of the amount, and
 -- never nothing at all for an amount, which has one
-feeReserve :: Config -> Sats -> Sats
-feeReserve config (Sats amount) =
+feeReserve :: Word64 -> Sats -> Sats
+feeReserve percent (Sats amount) =
   -- rounded up, so the share of a small amount is a satoshi rather than
   -- none, and a payment of nothing reserves nothing
-  Sats ((amount * configWalletFeeReservePercent config + 99) `div` 100)
+  Sats ((amount * percent + 99) `div` 100)
 
 -- | gives back the part of the reserve, which the fee did not use.
 --
@@ -219,13 +222,14 @@ feeReserve config (Sats amount) =
 -- from the wallet, and taking more from an account, which was told what it
 -- would pay, is worse than recording that the reserve was too small
 releaseReserve
-  :: PersonId
+  :: Pool SqlBackend
+  -> PersonId
   -> Sats
   -> Sats
   -> Sats
   -> POSIXTime
   -> ExceptT CallstackError AppM Sats
-releaseReserve key reserve fee balanceAfterDebit now
+releaseReserve pool key reserve fee balanceAfterDebit now
   | fee > reserve = do
       lift $ runLogging $ $(logError)
         ( "payInvoice: the payment cost " <> tshow (unSats fee)
@@ -235,7 +239,6 @@ releaseReserve key reserve fee balanceAfterDebit now
         )
       return balanceAfterDebit
   | otherwise = do
-      State{ accountDBPool = pool } <- lift ask
       let unused = reserve - fee
       ereleased <- liftIO $ flip runSqlPersistMPool pool
         $ adjustBalanceTx key Credit unused Refund

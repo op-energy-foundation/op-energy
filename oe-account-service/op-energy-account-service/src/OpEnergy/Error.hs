@@ -14,6 +14,8 @@ module OpEnergy.Error
 
   , blockspanAPIError
   , walletAPIError
+  , walletUnreachable
+  , walletPaymentNotMade
 
   , authenticationFailure
   , accountNotFound
@@ -102,7 +104,11 @@ data InternalError
   | LatestUnconfirmedBlockHeightMissing
   | LatestConfirmedBlockMissing
   | DBQueryError
+  | WalletUnreachable
+  | WalletPaymentNotMade
 instance Show InternalError where
+  show WalletUnreachable = "the wallet could not be reached"
+  show WalletPaymentNotMade = "the wallet could not pay the invoice"
   show DBQueryError = "DB query failed"
   show LatestConfirmedBlockMissing = "latest confirmed block hasn't been received yet"
   show LatestUnconfirmedBlockHeightMissing = "latest unconfirmed block hasn't been received yet"
@@ -131,11 +137,22 @@ dbQueryError = CallstackError "" $! Internal DBQueryError
 blockspanAPIError :: Text-> CallstackError
 blockspanAPIError = CallstackError "" . BlockspanAPI
 
--- | the wallet service could not be reached, or did not answer with what it
--- promises. The reason is shown to the client, so it is a short description
--- of what happened and never the request, which carries the API key
+-- | the wallet service did not answer with what it promises, for a reason,
+-- which is not one of the cases below -- an answer, which can not be read,
+-- names what was wrong with it, and a failed call names its status. The
+-- reason is shown to the client, so it is a short description of what
+-- happened and never the request, which carries the API key
 walletAPIError :: Text-> CallstackError
 walletAPIError = CallstackError "" . WalletAPI
+
+-- | the wallet did not answer at all, so whether it acted on the request
+-- is not known
+walletUnreachable :: CallstackError
+walletUnreachable = CallstackError "" $! Internal WalletUnreachable
+
+-- | the wallet says it did not pay the invoice it was given
+walletPaymentNotMade :: CallstackError
+walletPaymentNotMade = CallstackError "" $! Internal WalletPaymentNotMade
 
 authenticationFailure :: CallstackError
 authenticationFailure = CallstackError "" $! BadRequest AuthenticationFailure

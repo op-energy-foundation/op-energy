@@ -86,14 +86,15 @@ createInvoice token (CreateInvoiceRequest requestAmountSats requestNote) =
   -- deciding how often this service calls the wallet. An expired one is
   -- not counted: it is no longer asked about and the account would
   -- otherwise be left unable to ask to be paid
-  ependingCount <- liftIO $ eitherException $ flip runSqlPersistMPool pool
+  pendingCount <- ExceptT $ liftIO
+    $ fmap (either (const (Left dbQueryError)) Right)
+    $ eitherException $ flip runSqlPersistMPool pool
     $ count
       [ WalletPaymentPersonId ==. key
       , WalletPaymentDirection ==. Incoming
       , WalletPaymentStatus ==. Pending
       , WalletPaymentExpiresAt >. Just now
       ]
-  pendingCount <- either (const (throwE dbQueryError)) return ependingCount
   when (pendingCount >= fromIntegral (configWalletMaxPendingInvoices config))
     $ throwE walletTooManyPendingInvoices
   created <- ExceptT $ liftIO $ walletCreateInvoice walletV $ CreateInvoiceParams

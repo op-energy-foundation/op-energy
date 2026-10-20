@@ -30,7 +30,9 @@ module OpEnergy.Account.Server.V1.Wallet.LNBits
   ( lnbitsWalletBackend
   ) where
 
+import           Control.Monad.Trans.Except (ExceptT(..), runExceptT)
 import           Data.Int (Int64)
+import           Data.Maybe (fromMaybe, isJust)
 import           Data.Pool (Pool)
 import           Data.Text (Text)
 import qualified Data.Text as Text
@@ -70,7 +72,8 @@ import           OpEnergy.Account.Server.V1.WalletPayment
 import           OpEnergy.Error
                  ( CallstackError, dbQueryError, eitherException
                  , walletAPIError, walletInvoiceAlreadyPaid
-                 , walletInvoiceNotFound, walletSelfPaymentNotAllowed
+                 , walletInvoiceNotFound, walletPaymentNotMade
+                 , walletSelfPaymentNotAllowed, walletUnreachable
                  )
 
 -- | wallet backend, which issues its invoices through the LNBits instance
@@ -114,22 +117,18 @@ createInvoice
   -> Pool SqlBackend
   -> CreateInvoiceParams
   -> IO (Either CallstackError CreatedInvoice)
-createInvoice url invoiceKey pool params = do
+createInvoice url invoiceKey pool params = runExceptT $ do
   let Sats amount = createInvoiceAmountSats params
       now = createInvoiceNow params
       expiresAt = now + fromIntegral (createInvoiceExpirySecs params)
-  eanswer <- callLNBits url $ LNBits.createInvoice invoiceKey
+  answer <- ExceptT $ callLNBits url $ LNBits.createInvoice invoiceKey
     $ LNBits.CreateInvoiceRequest
       { LNBits.createInvoiceRequestAmountSats = amount
       , LNBits.createInvoiceRequestMemo = createInvoiceNote params
       , LNBits.createInvoiceRequestExpirySecs = createInvoiceExpirySecs params
       }
-  case eanswer of
-    Left err -> return $! Left err
-    Right answer -> case readInvoiceAnswer answer of
-      Left err -> return $! Left err
-      Right (paymentHashV, invoiceV) ->
-        recordInvoice pool params paymentHashV invoiceV expiresAt
+  (paymentHashV, invoiceV) <- ExceptT $ return $! readInvoiceAnswer answer
+  ExceptT $ recordInvoice pool params paymentHashV invoiceV expiresAt
 
 -- | the hash and the invoice of an answer, verified as this service's own
 -- types rather than trusted as the text they arrived as
@@ -232,7 +231,7 @@ resolveInvoice url invoiceKey pool asker invoiceV = do
       ]
       []
     return (ours, paidByAsker)
-  let paidByAsker = maybe False (const True) mpaidByAsker
+  let paidByAsker = isJust mpaidByAsker
   case mours of
     Just (Entity _ payment) -> return $! Right $! Just $! ResolvedInvoice
       { resolvedInvoiceAmountSats = walletPaymentAmountSats payment
@@ -319,16 +318,12 @@ payOverLightning
   -> Pool SqlBackend
   -> PayInvoiceParams
   -> IO (Either CallstackError PaidInvoice)
-payOverLightning url invoiceKey adminKey pool params = do
-  edecoded <- callLNBits url $ LNBits.decodeInvoice invoiceKey
+payOverLightning url invoiceKey adminKey pool params = runExceptT $ do
+  decoded <- ExceptT $ callLNBits url $ LNBits.decodeInvoice invoiceKey
     $ LNBits.DecodeRequest (unBolt11Invoice (payInvoiceBolt11 params))
-  case edecoded >>= readDecodedHash of
-    Left err -> return $! Left err
-    Right paymentHashV -> do
-      erecorded <- recordPendingPayment pool params paymentHashV
-      case erecorded of
-        Left err -> return $! Left err
-        Right () -> sendPayment url adminKey pool params paymentHashV
+  paymentHashV <- ExceptT $ return $! readDecodedHash decoded
+  ExceptT $ recordPendingPayment pool params paymentHashV
+  ExceptT $ sendPayment url adminKey pool params paymentHashV
 
 -- | the hash of a decoded invoice, as this service's own type
 readDecodedHash
@@ -350,7 +345,7 @@ recordPendingPayment
   -> IO (Either CallstackError ())
 recordPendingPayment pool params paymentHashV = do
   let now = payInvoiceNow params
-      amount = maybe (Sats 0) id (payInvoiceAmountSats params)
+      amount = fromMaybe (Sats 0) (payInvoiceAmountSats params)
       reserve = payInvoiceFeeReserveSats params
   erecorded <- eitherException $ flip runSqlPersistMPool pool $ do
     -- insertUnique, as the uniqueness of the hash and of the account's own
@@ -405,7 +400,7 @@ sendPayment
   -> IO (Either CallstackError PaidInvoice)
 sendPayment url adminKey pool params paymentHashV = do
   let now = payInvoiceNow params
-      amount = maybe (Sats 0) id (payInvoiceAmountSats params)
+      amount = fromMaybe (Sats 0) (payInvoiceAmountSats params)
       reserve = payInvoiceFeeReserveSats params
       inFlight = Right $! PaidInvoice
         { paidInvoicePaymentHash = paymentHashV
@@ -452,7 +447,7 @@ sendPayment url adminKey pool params paymentHashV = do
       "failed" -> do
         recorded <- recordFailed pool paymentHashV now
         return $! if recorded
-          then Left $! walletAPIError "the wallet could not pay the invoice"
+          then Left $! walletPaymentNotMade
           else inFlight
       _ -> return inFlight
 
@@ -519,7 +514,7 @@ callLNBitsOutcome :: BaseUrl -> ClientM r -> IO (CallOutcome r)
 callLNBitsOutcome url call = do
   eresult <- eitherException $ withClientEither url call
   return $! case eresult of
-    Left _ -> CallUnknown $! walletAPIError "the wallet could not be reached"
+    Left _ -> CallUnknown $! walletUnreachable
     Right (Left clientError)
       | refusalSaysNotPaid clientError ->
           CallRefused $! walletAPIError (describeClientError clientError)
@@ -604,7 +599,7 @@ callLNBitsMaybe url call = do
   -- Left, and the caller has to answer the request either way
   eresult <- eitherException $ withClientEither url call
   return $! case eresult of
-    Left _ -> Left $! walletAPIError "the wallet could not be reached"
+    Left _ -> Left $! walletUnreachable
     Right (Left clientError)
       | isNotFound clientError -> Right Nothing
       | otherwise -> Left $! walletAPIError (describeClientError clientError)

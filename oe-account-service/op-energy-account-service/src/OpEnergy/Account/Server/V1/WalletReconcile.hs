@@ -160,8 +160,15 @@ reconcilePendingPayments =
         )
       -- an outgoing payment is finished here: the amount is gone for good
       -- and the reserve, which the fee did not use, goes back. An incoming
-      -- one is credited by creditWaitingDeposits instead
-      finish pool payment Settled (Just fee)
+      -- one is credited by creditWaitingDeposits instead, for the amount
+      -- of its invoice, so a fee reported against it is not recorded: the
+      -- column holds what a payment cost this service to send, and
+      -- nothing was sent for one, which arrived
+      finish pool payment Settled
+        (case walletPaymentDirection payment of
+           Outgoing -> Just fee
+           Incoming -> Nothing
+        )
         (if fee > reserve then Sats 0 else reserve - fee)
         "the fee reserve, which the payment did not use" now
 
