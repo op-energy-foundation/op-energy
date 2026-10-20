@@ -5,6 +5,12 @@
  - way a stake is refunded when posting an offer fails. The amount a client
  - sends is only a cap: an invoice this service issued is paid for the
  - amount it was created with.
+ -
+ - A fee reserve is taken along with the amount, as what a payment costs is
+ - only known once it has been made. What the fee does not use is given
+ - back here, or by the scheduler for a payment, which is still in flight
+ - when the wallet answers. A payment in flight is never given back: it may
+ - still be paid, and refunding it would pay it twice.
  -}
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE OverloadedStrings          #-}
@@ -23,11 +29,12 @@ import           Control.Monad.Trans.Reader (ask)
 import           Data.Maybe (isJust)
 import           Data.Text (Text)
 import           Data.Text.Show (tshow)
-import           Data.Time.Clock.POSIX (getPOSIXTime)
+import           Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
 import           Database.Persist (Entity(..))
 import           Database.Persist.Postgresql (runSqlPersistMPool)
 
 import qualified Data.OpEnergy.Account.API.V1.Account as API
+import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
 import           Data.OpEnergy.Account.API.V2.LedgerReason (LedgerReason(..))
 import           Data.OpEnergy.Account.API.V2.PayInvoiceRequest
                  ( PayInvoiceRequest(..)
@@ -48,6 +55,7 @@ import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.Account.Server.V1.LedgerEntry
                  ( LedgerDirection(..), adjustBalanceTx
                  )
+import           OpEnergy.Account.Server.V1.Person (PersonId)
 import           OpEnergy.Account.Server.V1.Wallet.Class
 import           OpEnergy.Account.Server.V1.WalletDeposits
                  ( creditDepositOnce
@@ -117,21 +125,29 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
     $ throwE walletAmountBelowMinimum
   when (amount > configWalletMaxWithdrawalSats config)
     $ throwE walletAmountAboveMaximum
+  -- taken together with the amount, so a fee can not take an account
+  -- below nothing: a balance, which does not cover both, refuses the
+  -- payment here rather than leaving the fee unpaid for afterwards
+  let reserve = feeReserve config amount
+      taken = amount + reserve
   balanceAfterDebit <- ExceptT $ liftIO $ flip runSqlPersistMPool pool
-    $ adjustBalanceTx key Debit amount Withdrawal Nothing now
+    $ adjustBalanceTx key Debit taken Withdrawal Nothing now
   epaid <- liftIO $ walletPayInvoice walletV $ PayInvoiceParams
     { payInvoicePersonId = key
     , payInvoiceBolt11 = requestInvoice
     , payInvoiceAmountSats = Just amount
+    , payInvoiceFeeReserveSats = reserve
     , payInvoiceNow = now
     }
   case epaid of
     Left err -> do
-      -- the payment did not happen, so the balance goes straight back
+      -- the payment did not happen, so the balance goes straight back,
+      -- reserve and all. A backend only answers this way for a payment,
+      -- which can not still be travelling
       erefunded <- liftIO $ flip runSqlPersistMPool pool
-        $ adjustBalanceTx key Credit amount Refund (Just "payment failed") now
+        $ adjustBalanceTx key Credit taken Refund (Just "payment failed") now
       logUnreconciled
-        ( "payment failed and the refund of " <> tshow amount
+        ( "payment failed and the refund of " <> tshow taken
         <> " sats failed as well"
         ) erefunded
       throwE err
@@ -163,12 +179,62 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
           ( "paid " <> tshow (paidInvoiceAmountSats paid)
           <> " sats, but crediting the receiving account failed"
           ) ecredited
+      -- what the fee did not use goes back, once the fee is known. A
+      -- payment, which is still in flight, has no fee yet: the whole
+      -- reserve stays taken and the scheduler releases it when the wallet
+      -- says what the payment cost
+      balanceAfterFee <- case paidInvoiceProgress paid of
+        PaymentInFlight -> return balanceAfterDebit
+        PaymentSettled -> releaseReserve key reserve
+          (paidInvoiceFeeSats paid) balanceAfterDebit now
       -- positional, as several wallet types share these field names
       return $! PayInvoiceResult
         (paidInvoicePaymentHash paid)
         (paidInvoiceAmountSats paid)
         (paidInvoiceFeeSats paid)
-        balanceAfterDebit
+        balanceAfterFee
+
+-- | what is taken on top of the amount to cover a fee, which is only
+-- known once the payment has been made. It is a share of the amount, and
+-- never nothing at all for an amount, which has one
+feeReserve :: Config -> Sats -> Sats
+feeReserve config (Sats amount) =
+  -- rounded up, so the share of a small amount is a satoshi rather than
+  -- none, and a payment of nothing reserves nothing
+  Sats ((amount * configWalletFeeReservePercent config + 99) `div` 100)
+
+-- | gives back the part of the reserve, which the fee did not use.
+--
+-- A fee above the reserve is not taken further: the sats are already gone
+-- from the wallet, and taking more from an account, which was told what it
+-- would pay, is worse than recording that the reserve was too small
+releaseReserve
+  :: PersonId
+  -> Sats
+  -> Sats
+  -> Sats
+  -> POSIXTime
+  -> ExceptT CallstackError AppM Sats
+releaseReserve key reserve fee balanceAfterDebit now
+  | fee > reserve = do
+      lift $ runLogging $ $(logError)
+        ( "payInvoice: the payment cost " <> tshow fee
+        <> " sats while " <> tshow reserve
+        <> " sats were reserved for it, so the wallet is short by the "
+        <> "difference and needs manual reconciliation"
+        )
+      return balanceAfterDebit
+  | otherwise = do
+      State{ accountDBPool = pool } <- lift ask
+      let unused = reserve - fee
+      ereleased <- liftIO $ flip runSqlPersistMPool pool
+        $ adjustBalanceTx key Credit unused Refund
+          (Just "fee reserve not used") now
+      logUnreconciled
+        ( "paid, but giving back the " <> tshow unused
+        <> " sats of the fee reserve, which were not used, failed"
+        ) ereleased
+      return $! either (const balanceAfterDebit) id ereleased
 
 -- | logs a balance change, which failed once the payment had already
 -- happened. The request is answered as the payment went, so a failure here

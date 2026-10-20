@@ -39,4 +39,5 @@ newWalletBackend config pool = case configWalletBackend config of
   WalletModeLNBits -> return $! lnbitsWalletBackend
     (configLNBitsURL config)
     (configLNBitsInvoiceKey config)
+    (configLNBitsAdminKey config)
     pool

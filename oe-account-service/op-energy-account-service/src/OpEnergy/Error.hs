@@ -32,7 +32,6 @@ module OpEnergy.Error
   , walletInvoiceAlreadyPaid
   , walletSelfPaymentNotAllowed
   , walletSimulationNotSupported
-  , walletSendNotSupported
   , walletAmountRequired
   , walletAmountBelowMinimum
   , walletAmountAboveMaximum
@@ -68,7 +67,6 @@ data BadRequestError
   | WalletInvoiceAlreadyPaid
   | WalletSelfPaymentNotAllowed
   | WalletSimulationNotSupported
-  | WalletSendNotSupported
   | WalletAmountRequired
   | WalletAmountBelowMinimum
   | WalletAmountAboveMaximum
@@ -90,7 +88,6 @@ instance Show BadRequestError where
   show WalletInvoiceAlreadyPaid = "invoice has already been paid"
   show WalletSelfPaymentNotAllowed = "an account can not pay its own invoice"
   show WalletSimulationNotSupported = "this wallet can not mark an invoice paid"
-  show WalletSendNotSupported = "this wallet can not send a payment"
   show WalletAmountRequired = "amount is required for an invoice of another wallet"
   show WalletAmountBelowMinimum = "amount is below the smallest allowed"
   show WalletAmountAboveMaximum = "amount is above the largest allowed"
@@ -168,8 +165,6 @@ walletSelfPaymentNotAllowed :: CallstackError
 walletSelfPaymentNotAllowed = CallstackError "" $! BadRequest WalletSelfPaymentNotAllowed
 walletSimulationNotSupported :: CallstackError
 walletSimulationNotSupported = CallstackError "" $! BadRequest WalletSimulationNotSupported
-walletSendNotSupported :: CallstackError
-walletSendNotSupported = CallstackError "" $! BadRequest WalletSendNotSupported
 walletAmountRequired :: CallstackError
 walletAmountRequired = CallstackError "" $! BadRequest WalletAmountRequired
 walletAmountBelowMinimum :: CallstackError
@@ -190,7 +185,9 @@ errorToServerError (BadRequest InvalidServiceSecret) = (err401, tshow InvalidSer
 errorToServerError (BadRequest specificError) = (err400, tshow specificError)
 errorToServerError (Internal specificError) = (err500, tshow specificError)
 errorToServerError (BlockspanAPI specificError) = (err500, tshow specificError)
-errorToServerError (WalletAPI specificError) = (err500, tshow specificError)
+-- the reason is already a sentence, so it is reported as it is: tshow
+-- would wrap it in quotes, which only adds noise to what a client reads
+errorToServerError (WalletAPI reason) = (err500, reason)
 
 
 -- | The goal of this function is to turn failure results from @payload@ into JSON  `ServerError`s.

@@ -208,6 +208,7 @@ payInvoiceOrThrow pool params = do
               { paidInvoicePaymentHash = walletPaymentPaymentHash payment
               , paidInvoiceAmountSats = walletPaymentAmountSats payment
               , paidInvoiceFeeSats = Sats 0
+              , paidInvoiceProgress = PaymentSettled
               , paidInvoiceRecipientPersonId = Just (walletPaymentPersonId payment)
               }
     Nothing -> do
@@ -262,6 +263,7 @@ payInvoiceOrThrow pool params = do
               { paidInvoicePaymentHash = paymentHashV
               , paidInvoiceAmountSats = amount
               , paidInvoiceFeeSats = Sats 0
+              , paidInvoiceProgress = PaymentSettled
               , paidInvoiceRecipientPersonId = Nothing
               }
 

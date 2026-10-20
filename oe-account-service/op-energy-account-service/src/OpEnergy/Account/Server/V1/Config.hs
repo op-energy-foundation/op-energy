@@ -107,6 +107,11 @@ data Config = Config
   , configLNBitsAdminKey :: Text
     -- ^ LNBits admin key: spends the wallet. A secret, which is as good as
     -- its balance
+  , configWalletFeeReservePercent :: Word64
+    -- ^ how much of a payment's amount is taken from the balance on top of
+    -- it, to cover a fee, which is only known once the payment has been
+    -- made. What the fee does not use is given back. A wallet, which
+    -- charges no fee, still reserves and gives all of it back
   }
   deriving Show
 instance FromJSON Config where
@@ -143,6 +148,7 @@ instance FromJSON Config where
     <*> ((v .:? "LNBITS_API_URL" .!= (showBaseUrl $ configLNBitsURL defaultConfig)) >>= parseBaseUrl)
     <*> ( v .:? "LNBITS_INVOICE_KEY" .!= (configLNBitsInvoiceKey defaultConfig))
     <*> ( v .:? "LNBITS_ADMIN_KEY" .!= (configLNBitsAdminKey defaultConfig))
+    <*> ( v .:? "WALLET_FEE_RESERVE_PERCENT" .!= (configWalletFeeReservePercent defaultConfig))
 
 -- need to get Key from json, which represented as base64-encoded string
 instance FromJSON Key where
@@ -186,6 +192,9 @@ defaultConfig = Config
   , configLNBitsURL = BaseUrl Http "127.0.0.1" 5000 ""
   , configLNBitsInvoiceKey = ""
   , configLNBitsAdminKey = ""
+  -- the demo LNBits instance charges 5% per payment, which is far above
+  -- what routing over a node costs, so this covers both
+  , configWalletFeeReservePercent = 5
   }
 
 -- | the largest amount, which survives a round trip through the DB:
@@ -242,6 +251,10 @@ everifyWalletConfig config
       , require (configWalletMaxWithdrawalSats config <= maxStorableSats)
           "WALLET_MAX_WITHDRAWAL_SATS must not be above the largest amount \
           \the DB stores"
+      , require (configWalletFeeReservePercent config <= 100)
+          "WALLET_FEE_RESERVE_PERCENT must not be above 100: a payment \
+          \would reserve more than it sends, so an account could not \
+          \spend even half of its balance"
       , require (configWalletInvoiceExpirySecs config > 0)
           "WALLET_INVOICE_EXPIRY_SECS must be above 0: an invoice would be \
           \advertised as expired as soon as it is created"

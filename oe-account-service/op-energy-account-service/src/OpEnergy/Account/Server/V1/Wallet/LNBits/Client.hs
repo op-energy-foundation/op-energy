@@ -15,9 +15,15 @@
 {-# LANGUAGE TypeOperators              #-}
 module OpEnergy.Account.Server.V1.Wallet.LNBits.Client
   ( CreateInvoiceRequest(..)
+  , PayInvoiceRequest(..)
+  , DecodeRequest(..)
+  , DecodedInvoice(..)
   , PaymentResponse(..)
   , PaymentStateResponse(..)
+  , RefusedPayment(..)
   , createInvoice
+  , payInvoice
+  , decodeInvoice
   , readPaymentState
   ) where
 
@@ -54,6 +60,43 @@ instance ToJSON CreateInvoiceRequest where
     , "expiry" .= createInvoiceRequestExpirySecs request
     ]
 
+-- | an invoice, which LNBits is asked to pay out of the wallet its key
+-- names. The amount is the invoice's own, so none is sent: a wallet, which
+-- is told what to pay, could be told the wrong thing
+newtype PayInvoiceRequest = PayInvoiceRequest
+  { payInvoiceRequestBolt11 :: Text
+  }
+  deriving (Show, Eq)
+
+instance ToJSON PayInvoiceRequest where
+  toJSON request = object
+    [ "out" .= True
+    , "bolt11" .= payInvoiceRequestBolt11 request
+    ]
+
+-- | an invoice, which LNBits is asked to read for this service
+newtype DecodeRequest = DecodeRequest
+  { decodeRequestData :: Text
+  }
+  deriving (Show, Eq)
+
+instance ToJSON DecodeRequest where
+  toJSON request = object [ "data" .= decodeRequestData request ]
+
+-- | what LNBits reads out of an invoice. The amount is in millisatoshi,
+-- and is the invoice's own: it is the answer this service pays against,
+-- rather than an amount a client claimed
+data DecodedInvoice = DecodedInvoice
+  { decodedInvoicePaymentHash :: Text
+  , decodedInvoiceAmountMsats :: Int64
+  }
+  deriving (Show, Eq)
+
+instance FromJSON DecodedInvoice where
+  parseJSON = withObject "DecodedInvoice" $ \v-> DecodedInvoice
+    <$> v .: "payment_hash"
+    <*> v .: "amount_msat"
+
 -- | a payment as LNBits reports it.
 --
 -- The amounts are in millisatoshi and are negative for a payment, which
@@ -84,6 +127,7 @@ instance FromJSON PaymentResponse where
 data PaymentStateResponse = PaymentStateResponse
   { paymentStateResponsePaid :: Bool
   , paymentStateResponseStatus :: Text
+  , paymentStateResponseFeeMsats :: Int64
   }
   deriving (Show, Eq)
 
@@ -91,6 +135,22 @@ instance FromJSON PaymentStateResponse where
   parseJSON = withObject "PaymentStateResponse" $ \v-> PaymentStateResponse
     <$> v .:? "paid" .!= False
     <*> v .:? "status" .!= "pending"
+    -- the fee is reported inside the payment's own details, and only once
+    -- there is a payment to report it for
+    <*> (v .:? "details" >>= maybe (pure 0) (withObject "details"
+          $ \d-> d .:? "fee" .!= 0))
+
+-- | what LNBits says when it refuses a payment. It answers these with a
+-- status of its own, which is not a success code, so the body is read out
+-- of the failure rather than returned as one
+newtype RefusedPayment = RefusedPayment
+  { refusedPaymentStatus :: Text
+  }
+  deriving (Show, Eq)
+
+instance FromJSON RefusedPayment where
+  parseJSON = withObject "RefusedPayment" $ \v-> RefusedPayment
+    <$> v .:? "status" .!= ""
 
 -- | LNBits answers a created invoice with 201, not 200
 type CreateInvoiceAPI
@@ -98,6 +158,19 @@ type CreateInvoiceAPI
     :> Header' '[Required, Strict] "X-Api-Key" Text
     :> ReqBody '[JSON] CreateInvoiceRequest
     :> PostCreated '[JSON] PaymentResponse
+
+-- | paying answers 201 as well, with the payment it made
+type PayInvoiceAPI
+  = "api" :> "v1" :> "payments"
+    :> Header' '[Required, Strict] "X-Api-Key" Text
+    :> ReqBody '[JSON] PayInvoiceRequest
+    :> PostCreated '[JSON] PaymentResponse
+
+type DecodeInvoiceAPI
+  = "api" :> "v1" :> "payments" :> "decode"
+    :> Header' '[Required, Strict] "X-Api-Key" Text
+    :> ReqBody '[JSON] DecodeRequest
+    :> Post '[JSON] DecodedInvoice
 
 type ReadPaymentStateAPI
   = "api" :> "v1" :> "payments"
@@ -108,6 +181,16 @@ type ReadPaymentStateAPI
 -- | asks LNBits for an invoice to be paid to the wallet the key names
 createInvoice :: Text -> CreateInvoiceRequest -> ClientM PaymentResponse
 createInvoice = client (Proxy :: Proxy CreateInvoiceAPI)
+
+-- | asks LNBits to pay an invoice out of the wallet the key names. This
+-- one needs the admin key: the invoice key can not spend
+payInvoice :: Text -> PayInvoiceRequest -> ClientM PaymentResponse
+payInvoice = client (Proxy :: Proxy PayInvoiceAPI)
+
+-- | asks LNBits what an invoice says, so the amount paid is the invoice's
+-- own rather than one a client sent
+decodeInvoice :: Text -> DecodeRequest -> ClientM DecodedInvoice
+decodeInvoice = client (Proxy :: Proxy DecodeInvoiceAPI)
 
 -- | asks LNBits what has become of the payment with the given hash
 readPaymentState :: Text -> Text -> ClientM PaymentStateResponse
