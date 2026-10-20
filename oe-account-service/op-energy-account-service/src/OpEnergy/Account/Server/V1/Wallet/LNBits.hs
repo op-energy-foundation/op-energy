@@ -221,11 +221,14 @@ resolveInvoice url invoiceKey pool asker invoiceV = do
       ]
       [ Desc WalletPaymentId ]
     -- scoped to the account, which asked: what another account has paid is
-    -- not something this service answers
+    -- not something this service answers. An attempt, which did not pay --
+    -- the wallet had no route, or no liquidity -- is not counted: its sats
+    -- are back and the account is free to try the same invoice again
     paidByAsker <- selectFirst
       [ WalletPaymentInvoice ==. invoiceV
       , WalletPaymentDirection ==. Outgoing
       , WalletPaymentPersonId ==. asker
+      , WalletPaymentStatus <-. [ Pending, Settled ]
       ]
       []
     return (ours, paidByAsker)
@@ -347,17 +350,18 @@ recordPendingPayment
   -> IO (Either CallstackError ())
 recordPendingPayment pool params paymentHashV = do
   let now = payInvoiceNow params
-  einserted <- eitherException $ flip runSqlPersistMPool pool
+      amount = maybe (Sats 0) id (payInvoiceAmountSats params)
+      reserve = payInvoiceFeeReserveSats params
+  erecorded <- eitherException $ flip runSqlPersistMPool pool $ do
     -- insertUnique, as the uniqueness of the hash and of the account's own
     -- payment of this invoice is what refuses a second attempt, which
     -- arrives while the first is still in flight
-    $ insertUnique $ WalletPayment
+    minserted <- insertUnique $ WalletPayment
       { walletPaymentPersonId = payInvoicePersonId params
       , walletPaymentDirection = Outgoing
       , walletPaymentStatus = Pending
-      , walletPaymentAmountSats =
-          maybe (Sats 0) id (payInvoiceAmountSats params)
-      , walletPaymentFeeSats = payInvoiceFeeReserveSats params
+      , walletPaymentAmountSats = amount
+      , walletPaymentFeeSats = reserve
       , walletPaymentPaymentHash = paymentHashV
       , walletPaymentInvoice = payInvoiceBolt11 params
       , walletPaymentNote = Nothing
@@ -366,12 +370,30 @@ recordPendingPayment pool params paymentHashV = do
       , walletPaymentCreatedAt = now
       , walletPaymentUpdatedAt = now
       }
-  return $! case einserted of
+    case minserted of
+      Just _ -> return True
+      -- the row is already there. An attempt, which did not pay, is taken
+      -- up again rather than refused: its sats are back with the account,
+      -- so the invoice is still unpaid and still this account's to pay.
+      -- The status is matched in the write itself, so of two attempts,
+      -- which arrive together, only one takes it up
+      Nothing -> fmap (== 1) $ updateWhereCount
+        [ WalletPaymentPaymentHash ==. paymentHashV
+        , WalletPaymentPersonId ==. payInvoicePersonId params
+        , WalletPaymentDirection ==. Outgoing
+        , WalletPaymentStatus <-. [ Failed, Expired ]
+        ]
+        [ WalletPaymentStatus =. Pending
+        , WalletPaymentAmountSats =. amount
+        , WalletPaymentFeeSats =. reserve
+        , WalletPaymentUpdatedAt =. now
+        ]
+  return $! case erecorded of
     Left _ -> Left dbQueryError
-    -- the account's own payment of this invoice is already recorded, by
-    -- whichever attempt got here first
-    Right Nothing -> Left walletInvoiceAlreadyPaid
-    Right (Just _) -> Right ()
+    -- the account's own payment of this invoice is recorded and is either
+    -- still in flight or has already paid
+    Right False -> Left walletInvoiceAlreadyPaid
+    Right True -> Right ()
 
 -- | asks the wallet to pay, and records what it answered
 sendPayment
