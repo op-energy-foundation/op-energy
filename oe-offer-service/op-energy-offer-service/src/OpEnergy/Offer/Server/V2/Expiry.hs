@@ -1,6 +1,5 @@
 {-- | Offer expiry sweep, run per scheduler tick.
  -}
-{-# LANGUAGE TemplateHaskell #-}
 module OpEnergy.Offer.Server.V2.Expiry
   ( expireStaleOffers
   ) where
@@ -22,6 +21,7 @@ import           OpEnergy.Offer.Server.V1.Class(AppT, profile, withDBTransaction
 
 import           OpEnergy.Error
                  ( CallstackError, runExceptPrefixT
+                 , catchBadRequest
                  )
 import           OpEnergy.Offer.Server.V1.Offer
 import           OpEnergy.Offer.Server.V1.OfferService
@@ -60,9 +60,14 @@ expireStaleOffers tipHeight =
       []
     )
   results <- forM staleOfferIds $ \offerId -> withLiveEventOrderE $ do
-    mclosed <- ExceptT $ refundAndCloseOffer offerId Expired now
-    forM_ mclosed $ \(offerVal, ecredited) -> lift $ publishLiveEvent $! LiveEvent
-      (LiveMessageOfferChanged (offerInfoFromEntity (Entity offerId offerVal)))
-      (changedBalance (offerPersonUUID offerVal) ecredited)
-    return mclosed
+    emclosed <- ExceptT $ catchBadRequest $ refundAndCloseOffer offerId Expired now
+    case emclosed of
+      (Left _badRequestError) -> profileBadRequestHitBranch
+        where
+        profileBadRequestHitBranch = lift $ profile "badRequest" $! return Nothing
+      Right mclosed -> do
+        forM_ mclosed $ \(offerVal, ecredited) -> lift $ publishLiveEvent $! LiveEvent
+          (LiveMessageOfferChanged (offerInfoFromEntity (Entity offerId offerVal)))
+          (changedBalance (offerPersonUUID offerVal) ecredited)
+        return mclosed
   return $! length [ () | (Just _)<- results ]

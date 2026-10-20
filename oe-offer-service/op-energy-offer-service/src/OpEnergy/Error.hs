@@ -29,6 +29,7 @@ module OpEnergy.Error
   , offerExpired
   , offerChanged
   , cannotAcceptOwnOffer
+  , catchBadRequest
   ) where
 
 import           Data.Text(Text)
@@ -213,3 +214,22 @@ runExceptPrefixT prefix payload = do
     )
     Right
     eret
+
+-- | runs @payload@. If @payload@ throws BadRequest error, will catch it and
+-- will return such error as a value (ie,
+-- `Right (Left (CallstackError callstack (BadRequest ...)))`
+-- any other error returned as error `(Left ...)`
+-- the success value will be returned as `Right (Right successValue))`
+catchBadRequest
+  :: Monad m
+  => m (Either CallstackError r)
+  -> m (Either CallstackError (Either CallstackError r))
+catchBadRequest payload = do
+  eresult <- payload
+  case eresult of
+    Left (CallstackError _callstack (BadRequest _specificError )) ->
+      returnExceptionAsValue eresult
+      where
+        returnExceptionAsValue = return . Right
+    Left nonCatchableError -> return (Left nonCatchableError)
+    Right _successValue -> return (Right (Right _successValue))
