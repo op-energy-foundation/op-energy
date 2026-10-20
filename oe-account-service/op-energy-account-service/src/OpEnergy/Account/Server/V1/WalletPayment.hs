@@ -94,7 +94,7 @@ WalletPayment
   creditedAt POSIXTime Maybe -- incoming only: when the balance was credited for it, so that happens exactly once
   createdAt POSIXTime
   updatedAt POSIXTime
-  UniqueWalletPaymentHash paymentHash -- the same payment can never be recorded twice
+  UniqueWalletPaymentHashDirection paymentHash direction -- the same payment can never be recorded twice in the same direction. An invoice of this service, which one of its accounts pays, is both sides of one hash: the account, which is paid, has the incoming row and the account, which pays, the outgoing one
   UniqueWalletPaymentPersonDirectionInvoice personId direction invoice -- one account pays one invoice once, whatever two requests race
   deriving Eq Show Generic
 |]

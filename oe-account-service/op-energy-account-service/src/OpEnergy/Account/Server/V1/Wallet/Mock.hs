@@ -285,6 +285,7 @@ settleInvoice pool personKey paymentHashV = do
     $ selectFirst
       [ WalletPaymentPaymentHash ==. paymentHashV
       , WalletPaymentPersonId ==. personKey
+      , WalletPaymentDirection ==. Incoming
       ]
       []
   case mpayment of

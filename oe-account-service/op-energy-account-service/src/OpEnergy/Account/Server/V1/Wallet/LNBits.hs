@@ -30,6 +30,7 @@ module OpEnergy.Account.Server.V1.Wallet.LNBits
   ( lnbitsWalletBackend
   ) where
 
+import           Control.Monad (when)
 import           Control.Monad.Trans.Except (ExceptT(..), runExceptT)
 import           Data.Int (Int64)
 import           Data.Maybe (fromMaybe, isJust)
@@ -293,10 +294,33 @@ payOwnInvoice pool params (Entity key payment)
       return $! Left walletInvoiceNotFound
   | otherwise = do
       let now = payInvoiceNow params
-      esettled <- eitherException $ flip runSqlPersistMPool pool
-        $ updateWhereCount
+      esettled <- eitherException $ flip runSqlPersistMPool pool $ do
+        settled <- updateWhereCount
           [ WalletPaymentId ==. key, WalletPaymentStatus ==. Pending ]
           [ WalletPaymentStatus =. Settled, WalletPaymentUpdatedAt =. now ]
+        -- the payer's side of the payment, written with the settling of
+        -- the invoice so the two are recorded together or not at all. The
+        -- sats never leave the wallet, so only the ledger moves, but the
+        -- history is built from these rows and the payer's would
+        -- otherwise show nothing for sats, which left the account
+        when (settled == (1 :: Int64)) $ do
+          _ <- insertUnique $ WalletPayment
+            { walletPaymentPersonId = payInvoicePersonId params
+            , walletPaymentDirection = Outgoing
+            , walletPaymentStatus = Settled
+            , walletPaymentAmountSats = walletPaymentAmountSats payment
+            -- nothing left the wallet, so nothing was charged for it
+            , walletPaymentFeeSats = Sats 0
+            , walletPaymentPaymentHash = walletPaymentPaymentHash payment
+            , walletPaymentInvoice = walletPaymentInvoice payment
+            , walletPaymentNote = walletPaymentNote payment
+            , walletPaymentExpiresAt = Nothing
+            , walletPaymentCreditedAt = Nothing
+            , walletPaymentCreatedAt = now
+            , walletPaymentUpdatedAt = now
+            }
+          return ()
+        return settled
       return $! case esettled of
         Left _ -> Left dbQueryError
         -- somebody settled it between the read and the write
@@ -463,6 +487,7 @@ recordSettled pool paymentHashV fee now =
   claimedOne $ eitherException $ flip runSqlPersistMPool pool
     $ updateWhereCount
       [ WalletPaymentPaymentHash ==. paymentHashV
+      , WalletPaymentDirection ==. Outgoing
       , WalletPaymentStatus ==. Pending
       ]
       [ WalletPaymentStatus =. Settled
@@ -481,6 +506,7 @@ recordFailed pool paymentHashV now =
   claimedOne $ eitherException $ flip runSqlPersistMPool pool
     $ updateWhereCount
       [ WalletPaymentPaymentHash ==. paymentHashV
+      , WalletPaymentDirection ==. Outgoing
       , WalletPaymentStatus ==. Pending
       ]
       [ WalletPaymentStatus =. Failed

@@ -248,6 +248,7 @@ reconcilePendingPayments =
       etouched <- liftIO $ eitherException $ flip runSqlPersistMPool pool
         $ updateWhereCount
           [ WalletPaymentPaymentHash ==. walletPaymentPaymentHash payment
+          , WalletPaymentDirection ==. walletPaymentDirection payment
           , WalletPaymentStatus ==. Pending
           ]
           [ WalletPaymentUpdatedAt =. now ]
@@ -291,6 +292,10 @@ reconcilePendingPayments =
       edone <- liftIO $ eitherException $ flip runSqlPersistMPool pool $ do
         claimed <- updateWhereCount
           [ WalletPaymentPaymentHash ==. paymentHashV
+          -- an invoice of this service, which one of its accounts paid,
+          -- has a row each way of the one hash: this finishes the one it
+          -- was handed
+          , WalletPaymentDirection ==. walletPaymentDirection payment
           , WalletPaymentStatus ==. Pending
           ]
           ( [ WalletPaymentStatus =. status

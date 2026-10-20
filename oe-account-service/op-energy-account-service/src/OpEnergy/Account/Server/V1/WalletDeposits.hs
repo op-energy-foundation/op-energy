@@ -79,8 +79,15 @@ creditDepositOnce paymentHashV now = runExceptT $ do
   if claimed /= (1 :: Int64)
     then return Nothing
     else do
+      -- the incoming row, named as such: an invoice of this service, which
+      -- one of its accounts paid, has an outgoing row of the same hash,
+      -- and crediting that one would credit the payer for paying
       (Entity _ payment) <- exceptTMaybeT walletInvoiceNotFound
-        $ selectFirst [ WalletPaymentPaymentHash ==. paymentHashV ] []
+        $ selectFirst
+          [ WalletPaymentPaymentHash ==. paymentHashV
+          , WalletPaymentDirection ==. Incoming
+          ]
+          []
       balance <- ExceptT $ adjustBalanceTx
         (walletPaymentPersonId payment)
         Credit
