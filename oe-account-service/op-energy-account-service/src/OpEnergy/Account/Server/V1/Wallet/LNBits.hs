@@ -30,8 +30,9 @@ module OpEnergy.Account.Server.V1.Wallet.LNBits
   ( lnbitsWalletBackend
   ) where
 
-import           Control.Monad (when)
+import           Control.Monad.IO.Class (MonadIO)
 import           Control.Monad.Trans.Except (ExceptT(..), runExceptT)
+import           Control.Monad.Trans.Reader (ReaderT)
 import           Data.Int (Int64)
 import           Data.Maybe (fromMaybe, isJust)
 import           Data.Pool (Pool)
@@ -40,7 +41,9 @@ import qualified Data.Text as Text
 import           Data.Time.Clock.POSIX (POSIXTime)
 
 import           Database.Persist
-import           Database.Persist.Sql (SqlBackend, updateWhereCount)
+import           Database.Persist.Sql
+                 ( SqlBackend, transactionUndo, updateWhereCount
+                 )
 import           Database.Persist.Postgresql (runSqlPersistMPool)
 import           Data.Aeson (decode)
 import           Servant.Client
@@ -56,9 +59,13 @@ import           Data.OpEnergy.Account.API.V2.Bolt11Invoice
 import           Data.OpEnergy.Account.API.V2.PaymentHash
                  ( PaymentHash(..), everifyPaymentHash
                  )
+import           Data.OpEnergy.Account.API.V2.LedgerReason (LedgerReason(..))
 import           Data.OpEnergy.Account.API.V2.WalletMode (WalletMode(..))
 import           Data.OpEnergy.Account.Client (withClientEither)
 
+import           OpEnergy.Account.Server.V1.LedgerEntry
+                 ( LedgerDirection(..), adjustBalanceTx
+                 )
 import           OpEnergy.Account.Server.V1.Person (PersonId)
 import           OpEnergy.Account.Server.V1.Wallet.Class
 import qualified OpEnergy.Account.Server.V1.Wallet.LNBits.Client
@@ -294,45 +301,70 @@ payOwnInvoice pool params (Entity key payment)
       return $! Left walletInvoiceNotFound
   | otherwise = do
       let now = payInvoiceNow params
+          amount = walletPaymentAmountSats payment
       esettled <- eitherException $ flip runSqlPersistMPool pool $ do
-        settled <- updateWhereCount
-          [ WalletPaymentId ==. key, WalletPaymentStatus ==. Pending ]
-          [ WalletPaymentStatus =. Settled, WalletPaymentUpdatedAt =. now ]
-        -- the payer's side of the payment, written with the settling of
-        -- the invoice so the two are recorded together or not at all. The
-        -- sats never leave the wallet, so only the ledger moves, but the
-        -- history is built from these rows and the payer's would
-        -- otherwise show nothing for sats, which left the account
-        when (settled == (1 :: Int64)) $ do
-          _ <- insertUnique $ WalletPayment
-            { walletPaymentPersonId = payInvoicePersonId params
-            , walletPaymentDirection = Outgoing
-            , walletPaymentStatus = Settled
-            , walletPaymentAmountSats = walletPaymentAmountSats payment
-            -- nothing left the wallet, so nothing was charged for it
-            , walletPaymentFeeSats = Sats 0
-            , walletPaymentPaymentHash = walletPaymentPaymentHash payment
-            , walletPaymentInvoice = walletPaymentInvoice payment
-            , walletPaymentNote = walletPaymentNote payment
-            , walletPaymentExpiresAt = Nothing
-            , walletPaymentCreditedAt = Nothing
-            , walletPaymentCreatedAt = now
-            , walletPaymentUpdatedAt = now
-            }
-          return ()
-        return settled
-      return $! case esettled of
-        Left _ -> Left dbQueryError
-        -- somebody settled it between the read and the write
-        Right (0 :: Int64) -> Left walletInvoiceNotFound
-        Right _ -> Right $! PaidInvoice
-          { paidInvoicePaymentHash = walletPaymentPaymentHash payment
-          , paidInvoiceAmountSats = walletPaymentAmountSats payment
-          -- nothing left the wallet, so nothing was charged for it
-          , paidInvoiceFeeSats = Sats 0
-          , paidInvoiceProgress = PaymentSettled
-          , paidInvoiceRecipientPersonId = Just (walletPaymentPersonId payment)
-          }
+        -- no reserve is taken: nothing leaves the wallet for a payment,
+        -- which is settled inside it, so there is no fee to cover
+        edebited <- adjustBalanceTx (payInvoicePersonId params) Debit amount
+          Withdrawal Nothing now
+        case edebited of
+          Left err -> return $! Left err
+          Right balanceAfter -> payOwnInvoiceTx
+            params payment key amount balanceAfter now
+      return $! either (const (Left dbQueryError)) id esettled
+
+-- | settles the invoice and records the payer's side of it, in the
+-- transaction, which has already taken the payer's balance. A step, which
+-- does not happen, takes the balance back with it
+payOwnInvoiceTx
+  :: MonadIO m
+  => PayInvoiceParams
+  -> WalletPayment
+  -> Key WalletPayment
+  -> Sats
+  -> Sats
+  -> POSIXTime
+  -> ReaderT SqlBackend m (Either CallstackError PaidInvoice)
+payOwnInvoiceTx params payment key amount balanceAfter now = do
+  settled <- updateWhereCount
+    [ WalletPaymentId ==. key, WalletPaymentStatus ==. Pending ]
+    [ WalletPaymentStatus =. Settled, WalletPaymentUpdatedAt =. now ]
+  if settled /= (1 :: Int64)
+    -- somebody settled it between the read and the write, so the balance,
+    -- which was taken for it, is given back by undoing the transaction
+    then do
+      transactionUndo
+      return $! Left walletInvoiceNotFound
+    else do
+      -- the payer's side of the payment, written with the settling of the
+      -- invoice so the two are recorded together or not at all. The sats
+      -- never leave the wallet, so only the ledger moves, but the history
+      -- is built from these rows and the payer's would otherwise show
+      -- nothing for sats, which left the account
+      _ <- insertUnique $ WalletPayment
+        { walletPaymentPersonId = payInvoicePersonId params
+        , walletPaymentDirection = Outgoing
+        , walletPaymentStatus = Settled
+        , walletPaymentAmountSats = amount
+        -- nothing left the wallet, so nothing was charged for it
+        , walletPaymentFeeSats = Sats 0
+        , walletPaymentPaymentHash = walletPaymentPaymentHash payment
+        , walletPaymentInvoice = walletPaymentInvoice payment
+        , walletPaymentNote = walletPaymentNote payment
+        , walletPaymentExpiresAt = Nothing
+        , walletPaymentCreditedAt = Nothing
+        , walletPaymentCreatedAt = now
+        , walletPaymentUpdatedAt = now
+        }
+      return $! Right $! PaidInvoice
+        { paidInvoicePaymentHash = walletPaymentPaymentHash payment
+        , paidInvoiceBalanceAfter = balanceAfter
+        , paidInvoiceAmountSats = amount
+        -- nothing left the wallet, so nothing was charged for it
+        , paidInvoiceFeeSats = Sats 0
+        , paidInvoiceProgress = PaymentSettled
+        , paidInvoiceRecipientPersonId = Just (walletPaymentPersonId payment)
+        }
 
 -- | pays an invoice, which is not this service's own, over lightning
 payOverLightning
@@ -346,8 +378,8 @@ payOverLightning url invoiceKey adminKey pool params = runExceptT $ do
   decoded <- ExceptT $ callLNBits url $ LNBits.decodeInvoice invoiceKey
     $ LNBits.DecodeRequest (unBolt11Invoice (payInvoiceBolt11 params))
   paymentHashV <- ExceptT $ return $! readDecodedHash decoded
-  ExceptT $ recordPendingPayment pool params paymentHashV
-  ExceptT $ sendPayment url adminKey pool params paymentHashV
+  balanceAfterDebit <- ExceptT $ recordPendingPayment pool params paymentHashV
+  ExceptT $ sendPayment url adminKey pool params paymentHashV balanceAfterDebit
 
 -- | the hash of a decoded invoice, as this service's own type
 readDecodedHash
@@ -366,15 +398,39 @@ recordPendingPayment
   :: Pool SqlBackend
   -> PayInvoiceParams
   -> PaymentHash
-  -> IO (Either CallstackError ())
+  -> IO (Either CallstackError Sats)
 recordPendingPayment pool params paymentHashV = do
   let now = payInvoiceNow params
       amount = fromMaybe (Sats 0) (payInvoiceAmountSats params)
       reserve = payInvoiceFeeReserveSats params
   erecorded <- eitherException $ flip runSqlPersistMPool pool $ do
-    -- insertUnique, as the uniqueness of the hash and of the account's own
-    -- payment of this invoice is what refuses a second attempt, which
-    -- arrives while the first is still in flight
+    -- taken in the transaction, which records the payment, so a payment,
+    -- which is recorded, has always been paid for, and a balance, which
+    -- is taken, always has the payment it was taken for to answer for it
+    edebited <- adjustBalanceTx (payInvoicePersonId params) Debit
+      (amount + reserve) Withdrawal Nothing now
+    case edebited of
+      -- nothing has been written, so there is nothing to undo
+      Left err -> return $! Left err
+      Right balanceAfter -> fmap (fmap (const balanceAfter))
+        $ recordPendingPaymentTx params paymentHashV amount reserve now
+  return $! either (const (Left dbQueryError)) id erecorded
+
+-- | writes the payment down, in the transaction, which has already taken
+-- the balance for it
+recordPendingPaymentTx
+  :: MonadIO m
+  => PayInvoiceParams
+  -> PaymentHash
+  -> Sats
+  -> Sats
+  -> POSIXTime
+  -> ReaderT SqlBackend m (Either CallstackError ())
+recordPendingPaymentTx params paymentHashV amount reserve now = do
+  -- insertUnique, as the uniqueness of the hash and of the account's own
+  -- payment of this invoice is what refuses a second attempt, which
+  -- arrives while the first is still in flight
+  recorded <- do
     minserted <- insertUnique $ WalletPayment
       { walletPaymentPersonId = payInvoicePersonId params
       , walletPaymentDirection = Outgoing
@@ -407,12 +463,14 @@ recordPendingPayment pool params paymentHashV = do
         , WalletPaymentFeeSats =. reserve
         , WalletPaymentUpdatedAt =. now
         ]
-  return $! case erecorded of
-    Left _ -> Left dbQueryError
+  if recorded
+    then return $! Right ()
     -- the account's own payment of this invoice is recorded and is either
-    -- still in flight or has already paid
-    Right False -> Left walletInvoiceAlreadyPaid
-    Right True -> Right ()
+    -- still in flight or has already paid, so the balance, which was
+    -- taken for this attempt, is given back by undoing the transaction
+    else do
+      transactionUndo
+      return $! Left walletInvoiceAlreadyPaid
 
 -- | asks the wallet to pay, and records what it answered
 sendPayment
@@ -421,13 +479,15 @@ sendPayment
   -> Pool SqlBackend
   -> PayInvoiceParams
   -> PaymentHash
+  -> Sats
   -> IO (Either CallstackError PaidInvoice)
-sendPayment url adminKey pool params paymentHashV = do
+sendPayment url adminKey pool params paymentHashV balanceAfterDebit = do
   let now = payInvoiceNow params
       amount = fromMaybe (Sats 0) (payInvoiceAmountSats params)
       reserve = payInvoiceFeeReserveSats params
       inFlight = Right $! PaidInvoice
         { paidInvoicePaymentHash = paymentHashV
+        , paidInvoiceBalanceAfter = balanceAfterDebit
         , paidInvoiceAmountSats = amount
         -- the reserve, as no fee has been charged yet. Whoever settles the
         -- payment gives back what the fee did not use
@@ -435,18 +495,21 @@ sendPayment url adminKey pool params paymentHashV = do
         , paidInvoiceProgress = PaymentInFlight
         , paidInvoiceRecipientPersonId = Nothing
         }
+      -- a payment, which this call did not take out of Pending, is still
+      -- the scheduler's to finish, and the balance it took is still taken:
+      -- reported as in flight, so nothing is given back for it twice
+      notMade err mbalance = case mbalance of
+        Nothing -> inFlight
+        Just _ -> Left err
   outcome <- callLNBitsOutcome url $ LNBits.payInvoice adminKey
     $ LNBits.PayInvoiceRequest (unBolt11Invoice (payInvoiceBolt11 params))
   case outcome of
-    -- the wallet says it did not make the payment, so the balance goes
-    -- back
+    -- the wallet says it did not make the payment, so everything, which
+    -- was taken for it, goes back with the recording of that
     CallRefused err -> do
-      recorded <- recordFailed pool paymentHashV now
-      -- only once the payment is out of Pending: the caller gives the
-      -- balance back on a Left, and a payment, which is still Pending, is
-      -- given back by the scheduler as well, which would give it back
-      -- twice. Left pending, it is given back once, by whichever asks next
-      return $! if recorded then Left err else inFlight
+      mbalance <- recordFailed pool paymentHashV (amount + reserve)
+        balanceAfterDebit now
+      return $! notMade err mbalance
     -- no answer: the wallet may have taken the payment before the call
     -- failed, so it is left pending rather than failed. The scheduler asks
     -- again, and nothing gives the balance back on a payment, which may
@@ -455,24 +518,22 @@ sendPayment url adminKey pool params paymentHashV = do
     CallAnswered answer -> case LNBits.paymentResponseStatus answer of
       "success" -> do
         let fee = msatsToSats (LNBits.paymentResponseFeeMsats answer)
-        recorded <- recordSettled pool paymentHashV fee now
-        -- as above: the caller releases the unused reserve for a payment,
-        -- which is settled, and the scheduler releases it for one, which
-        -- is still Pending. Reported as in flight unless this took it out
-        return $! if recorded
-          then Right $! PaidInvoice
+        mbalance <- recordSettled pool paymentHashV fee reserve
+          balanceAfterDebit now
+        return $! case mbalance of
+          Nothing -> inFlight
+          Just balanceAfter -> Right $! PaidInvoice
             { paidInvoicePaymentHash = paymentHashV
+            , paidInvoiceBalanceAfter = balanceAfter
             , paidInvoiceAmountSats = amount
             , paidInvoiceFeeSats = fee
             , paidInvoiceProgress = PaymentSettled
             , paidInvoiceRecipientPersonId = Nothing
             }
-          else inFlight
       "failed" -> do
-        recorded <- recordFailed pool paymentHashV now
-        return $! if recorded
-          then Left $! walletPaymentNotMade
-          else inFlight
+        mbalance <- recordFailed pool paymentHashV (amount + reserve)
+          balanceAfterDebit now
+        return $! notMade walletPaymentNotMade mbalance
       _ -> return inFlight
 
 -- | records a payment as made, with the fee it cost. Answers whether this
@@ -481,43 +542,88 @@ recordSettled
   :: Pool SqlBackend
   -> PaymentHash
   -> Sats
+  -> Sats
+  -> Sats
   -> POSIXTime
-  -> IO Bool
-recordSettled pool paymentHashV fee now =
-  claimedOne $ eitherException $ flip runSqlPersistMPool pool
-    $ updateWhereCount
-      [ WalletPaymentPaymentHash ==. paymentHashV
-      , WalletPaymentDirection ==. Outgoing
-      , WalletPaymentStatus ==. Pending
-      ]
-      [ WalletPaymentStatus =. Settled
-      , WalletPaymentFeeSats =. fee
-      , WalletPaymentUpdatedAt =. now
-      ]
+  -> IO (Maybe Sats)
+recordSettled pool paymentHashV fee reserve balanceAfterDebit now =
+  -- a fee above the reserve is recorded rather than taken further: the
+  -- sats are already gone and the account was told what it would pay. It
+  -- is asked rather than subtracted, as Sats counts upwards only
+  finishPayment pool paymentHashV Settled (Just fee)
+    (if fee > reserve then Sats 0 else reserve - fee)
+    "the fee reserve, which the payment did not use" balanceAfterDebit now
 
--- | records a payment, which the wallet says it did not make. Answers
--- whether this call is the one, which took it out of Pending
+-- | records a payment, which the wallet says it did not make, and gives
+-- back everything, which was taken for it. Answers the balance, which is
+-- the account's once that is done, or 'Nothing' for a call, which is not
+-- the one, which took the payment out of Pending
 recordFailed
   :: Pool SqlBackend
   -> PaymentHash
+  -> Sats
+  -> Sats
   -> POSIXTime
-  -> IO Bool
-recordFailed pool paymentHashV now =
-  claimedOne $ eitherException $ flip runSqlPersistMPool pool
-    $ updateWhereCount
+  -> IO (Maybe Sats)
+recordFailed pool paymentHashV taken balanceAfterDebit now =
+  finishPayment pool paymentHashV Failed Nothing taken
+    "a payment, which the wallet did not make" balanceAfterDebit now
+
+-- | takes a payment out of Pending and gives back the sats, which are no
+-- longer needed for it, in one transaction, so a payment, which is
+-- finished, has always had its balance moved with it.
+--
+-- Answers the balance for the caller, which took the payment out of
+-- Pending, and 'Nothing' for one, which did not: a payment, which is
+-- still Pending -- because another call finished it, or because this
+-- write never landed -- is the scheduler's to finish, and nothing is
+-- given back for it twice
+finishPayment
+  :: Pool SqlBackend
+  -> PaymentHash
+  -> WalletPaymentStatus
+  -> Maybe Sats
+  -> Sats
+  -> Text
+  -> Sats
+  -> POSIXTime
+  -> IO (Maybe Sats)
+finishPayment pool paymentHashV status mfee back reason balanceUnchanged now = do
+  edone <- eitherException $ flip runSqlPersistMPool pool $ do
+    mpayment <- selectFirst
       [ WalletPaymentPaymentHash ==. paymentHashV
       , WalletPaymentDirection ==. Outgoing
       , WalletPaymentStatus ==. Pending
       ]
-      [ WalletPaymentStatus =. Failed
-      , WalletPaymentUpdatedAt =. now
-      ]
-
--- | whether a write, which takes a payment out of Pending, is the one,
--- which took it. A write, which did not land at all, took nothing: the
--- payment is still Pending and is still the scheduler's to finish
-claimedOne :: IO (Either Text Int64) -> IO Bool
-claimedOne = fmap (either (const False) (== 1))
+      []
+    case mpayment of
+      Nothing -> return Nothing
+      Just (Entity key payment) -> do
+        claimed <- updateWhereCount
+          [ WalletPaymentId ==. key, WalletPaymentStatus ==. Pending ]
+          ( [ WalletPaymentStatus =. status
+            , WalletPaymentUpdatedAt =. now
+            ]
+         ++ maybe [] (\fee-> [ WalletPaymentFeeSats =. fee ]) mfee
+          )
+        if claimed /= (1 :: Int64)
+          then return Nothing
+          else if back == Sats 0
+            -- claimed, and nothing to give back: the balance stands as
+            -- the debit left it
+            then return (Just balanceUnchanged)
+            else do
+              egiven <- adjustBalanceTx (walletPaymentPersonId payment)
+                Credit back Refund (Just reason) now
+              case egiven of
+                -- the claim goes back with it, so the payment stays
+                -- Pending and the scheduler finishes it rather than it
+                -- being left finished with the account short
+                Left _ -> do
+                  transactionUndo
+                  return Nothing
+                Right balanceAfter -> return (Just balanceAfter)
+  return $! either (const Nothing) id edone
 
 -- | satoshi of a millisatoshi amount, rounded away from zero, so an
 -- amount, which is not a whole satoshi, is never reported as less than it

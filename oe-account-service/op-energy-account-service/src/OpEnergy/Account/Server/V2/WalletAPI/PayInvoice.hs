@@ -29,16 +29,13 @@ import           Control.Monad.Trans.Reader (ask)
 import           Data.Maybe (isJust)
 import           Data.Text (Text)
 import           Data.Text.Show (tshow)
-import           Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
-import           Data.Pool (Pool)
+import           Data.Time.Clock.POSIX (getPOSIXTime)
 import           Data.Word (Word64)
 import           Database.Persist (Entity(..))
 import           Database.Persist.Postgresql (runSqlPersistMPool)
-import           Database.Persist.Sql (SqlBackend)
 
 import qualified Data.OpEnergy.Account.API.V1.Account as API
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
-import           Data.OpEnergy.Account.API.V2.LedgerReason (LedgerReason(..))
 import           Data.OpEnergy.Account.API.V2.PayInvoiceRequest
                  ( PayInvoiceRequest(..)
                  )
@@ -55,11 +52,8 @@ import           OpEnergy.Account.Server.V1.Class
 import           OpEnergy.Account.Server.V1.Config
                  ( Config(..)
                  )
-import           OpEnergy.Account.Server.V1.LedgerEntry
-                 ( LedgerDirection(..), adjustBalanceTx
-                 )
 import           OpEnergy.Account.Server.V1.Person
-                 ( PersonId, personBalance
+                 ( personBalance
                  )
 import           OpEnergy.Account.Server.V1.Wallet.Class
 import           OpEnergy.Account.Server.V1.WalletDeposits
@@ -157,9 +151,11 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
   -- below nothing: a balance, which does not cover both, refuses the
   -- payment here rather than leaving the fee unpaid for afterwards
   let reserve = feeReserve (configWalletFeeReservePercent config) amount
-      taken = amount + reserve
-  balanceAfterDebit <- ExceptT $ liftIO $ flip runSqlPersistMPool pool
-    $ adjustBalanceTx key Debit taken Withdrawal Nothing now
+  -- the balance is the backend's to move: it takes the amount and the
+  -- reserve in the transaction, which records the payment, and gives back
+  -- what the payment did not use in the transaction, which finishes it.
+  -- So a Left leaves the balance as it was and there is nothing to give
+  -- back here, and a payment, which is recorded, has always been paid for
   epaid <- liftIO $ walletPayInvoice walletV $ PayInvoiceParams
     { payInvoicePersonId = key
     , payInvoiceBolt11 = requestInvoice
@@ -168,17 +164,7 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
     , payInvoiceNow = now
     }
   case epaid of
-    Left err -> do
-      -- the payment did not happen, so the balance goes straight back,
-      -- reserve and all. A backend only answers this way for a payment,
-      -- which can not still be travelling
-      erefunded <- liftIO $ flip runSqlPersistMPool pool
-        $ adjustBalanceTx key Credit taken Refund (Just "payment failed") now
-      logUnreconciled
-        ( "payment failed and the refund of " <> tshow (unSats taken)
-        <> " sats failed as well"
-        ) erefunded
-      throwE err
+    Left err -> throwE err
     Right paid -> do
       -- nothing made the amount debited and the amount the wallet reports
       -- paying agree, and the interface lets a backend report its own: a
@@ -207,20 +193,12 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
           ( "paid " <> tshow (unSats (paidInvoiceAmountSats paid))
           <> " sats, but crediting the receiving account failed"
           ) ecredited
-      -- what the fee did not use goes back, once the fee is known. A
-      -- payment, which is still in flight, has no fee yet: the whole
-      -- reserve stays taken and the scheduler releases it when the wallet
-      -- says what the payment cost
-      balanceAfterFee <- case paidInvoiceProgress paid of
-        PaymentInFlight -> return balanceAfterDebit
-        PaymentSettled -> releaseReserve pool key reserve
-          (paidInvoiceFeeSats paid) balanceAfterDebit now
       -- positional, as several wallet types share these field names
       return $! PayInvoiceResult
         (paidInvoicePaymentHash paid)
         (paidInvoiceAmountSats paid)
         (paidInvoiceFeeSats paid)
-        balanceAfterFee
+        (paidInvoiceBalanceAfter paid)
 
 -- | what is taken on top of the amount to cover a fee, which is only
 -- known once the payment has been made. It is a share of the amount, and
@@ -230,39 +208,6 @@ feeReserve percent (Sats amount) =
   -- rounded up, so the share of a small amount is a satoshi rather than
   -- none, and a payment of nothing reserves nothing
   Sats ((amount * percent + 99) `div` 100)
-
--- | gives back the part of the reserve, which the fee did not use.
---
--- A fee above the reserve is not taken further: the sats are already gone
--- from the wallet, and taking more from an account, which was told what it
--- would pay, is worse than recording that the reserve was too small
-releaseReserve
-  :: Pool SqlBackend
-  -> PersonId
-  -> Sats
-  -> Sats
-  -> Sats
-  -> POSIXTime
-  -> ExceptT CallstackError AppM Sats
-releaseReserve pool key reserve fee balanceAfterDebit now
-  | fee > reserve = do
-      lift $ runLogging $ $(logError)
-        ( "payInvoice: the payment cost " <> tshow (unSats fee)
-        <> " sats while " <> tshow (unSats reserve)
-        <> " sats were reserved for it, so the wallet is short by the "
-        <> "difference and needs manual reconciliation"
-        )
-      return balanceAfterDebit
-  | otherwise = do
-      let unused = reserve - fee
-      ereleased <- liftIO $ flip runSqlPersistMPool pool
-        $ adjustBalanceTx key Credit unused Refund
-          (Just "fee reserve not used") now
-      logUnreconciled
-        ( "paid, but giving back the " <> tshow (unSats unused)
-        <> " sats of the fee reserve, which were not used, failed"
-        ) ereleased
-      return $! either (const balanceAfterDebit) id ereleased
 
 -- | logs a balance change, which failed once the payment had already
 -- happened. The request is answered as the payment went, so a failure here

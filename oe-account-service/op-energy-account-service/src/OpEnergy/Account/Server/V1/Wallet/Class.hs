@@ -66,10 +66,10 @@ data PayInvoiceParams = PayInvoiceParams
     -- ^ amount the client believes the invoice is for. Used only when the
     -- backend can not tell the amount itself, and never trusted beyond that
   , payInvoiceFeeReserveSats :: Sats
-    -- ^ what the caller has taken from the balance on top of the amount,
-    -- to cover a fee it can not know yet. The backend records it against
-    -- the payment, so whoever settles the payment gives back what the fee
-    -- did not use
+    -- ^ what is taken from the balance on top of the amount, to cover a
+    -- fee, which can not be known yet. The backend takes it with the
+    -- amount and records it against the payment, so whoever settles the
+    -- payment gives back what the fee did not use
   , payInvoiceNow :: POSIXTime
   }
   deriving (Show, Generic)
@@ -87,6 +87,12 @@ data PaymentProgress
 -- | a payment, which has left this service
 data PaidInvoice = PaidInvoice
   { paidInvoicePaymentHash :: PaymentHash
+  , paidInvoiceBalanceAfter :: Sats
+    -- ^ what the paying account's balance is once the backend has moved
+    -- it. The backend takes the amount and the reserve in the transaction,
+    -- which records the payment, and gives back whatever the payment did
+    -- not use in the transaction, which finishes it, so a balance and the
+    -- payment it belongs to are never recorded apart
   , paidInvoiceAmountSats :: Sats
   , paidInvoiceFeeSats :: Sats
   , paidInvoiceProgress :: PaymentProgress
@@ -164,6 +170,15 @@ data WalletBackend = WalletBackend
     -- from the client
   , walletPayInvoice
       :: PayInvoiceParams -> IO (Either CallstackError PaidInvoice)
+    -- ^ pays an invoice and moves the paying account's balance for it.
+    --
+    -- The balance is the backend's to move, as only the backend knows the
+    -- payment it belongs to: it takes the amount and the reserve in the
+    -- transaction, which records the payment, and gives back what a
+    -- payment, which did not go, or a fee, which was smaller than the
+    -- reserve, left unused -- each in the transaction, which records
+    -- that. So a 'Left' means the balance stands as it did, and the
+    -- caller has nothing to give back
   , walletReadPayment
       :: Maybe (PaymentHash -> IO (Either CallstackError ObservedPayment))
     -- ^ 'Just' for a wallet, which settles payments elsewhere: this service
