@@ -4,8 +4,9 @@
  - One value of 'WalletBackend' is built at startup from config and kept in
  - 'OpEnergy.Account.Server.V1.Class.State', so no handler knows which
  - backend it talks to. The mock implementation lives in
- - "OpEnergy.Account.Server.V1.Wallet.Mock"; the LNBits one replaces it when
- - the node is available, with no change to the handlers or to the API.
+ - "OpEnergy.Account.Server.V1.Wallet.Mock" and the one, which talks to a
+ - real wallet, in "OpEnergy.Account.Server.V1.Wallet.LNBits"; which of
+ - them is built changes neither the handlers nor the API.
  -
  - The procedures answer about lightning only. Balances are moved by the
  - handlers through 'OpEnergy.Account.Server.V1.LedgerEntry.adjustBalanceTx',

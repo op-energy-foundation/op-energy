@@ -157,7 +157,7 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
       erefunded <- liftIO $ flip runSqlPersistMPool pool
         $ adjustBalanceTx key Credit taken Refund (Just "payment failed") now
       logUnreconciled
-        ( "payment failed and the refund of " <> tshow taken
+        ( "payment failed and the refund of " <> tshow (unSats taken)
         <> " sats failed as well"
         ) erefunded
       throwE err
@@ -171,9 +171,9 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
       -- until a backend with a node does otherwise
       when (paidInvoiceAmountSats paid /= amount)
         $ lift $ runLogging $ $(logError)
-          ( "payInvoice: debited " <> tshow amount
+          ( "payInvoice: debited " <> tshow (unSats amount)
           <> " sats while the wallet reports having paid "
-          <> tshow (paidInvoiceAmountSats paid)
+          <> tshow (unSats (paidInvoiceAmountSats paid))
           <> " sats, which differ and need manual reconciliation"
           )
       -- an invoice of this service stays inside it: the account it was
@@ -186,7 +186,7 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
         ecredited <- liftIO $ flip runSqlPersistMPool pool
           $ creditDepositOnce (paidInvoicePaymentHash paid) now
         logUnreconciled
-          ( "paid " <> tshow (paidInvoiceAmountSats paid)
+          ( "paid " <> tshow (unSats (paidInvoiceAmountSats paid))
           <> " sats, but crediting the receiving account failed"
           ) ecredited
       -- what the fee did not use goes back, once the fee is known. A
@@ -228,8 +228,8 @@ releaseReserve
 releaseReserve key reserve fee balanceAfterDebit now
   | fee > reserve = do
       lift $ runLogging $ $(logError)
-        ( "payInvoice: the payment cost " <> tshow fee
-        <> " sats while " <> tshow reserve
+        ( "payInvoice: the payment cost " <> tshow (unSats fee)
+        <> " sats while " <> tshow (unSats reserve)
         <> " sats were reserved for it, so the wallet is short by the "
         <> "difference and needs manual reconciliation"
         )
@@ -241,7 +241,7 @@ releaseReserve key reserve fee balanceAfterDebit now
         $ adjustBalanceTx key Credit unused Refund
           (Just "fee reserve not used") now
       logUnreconciled
-        ( "paid, but giving back the " <> tshow unused
+        ( "paid, but giving back the " <> tshow (unSats unused)
         <> " sats of the fee reserve, which were not used, failed"
         ) ereleased
       return $! either (const balanceAfterDebit) id ereleased
