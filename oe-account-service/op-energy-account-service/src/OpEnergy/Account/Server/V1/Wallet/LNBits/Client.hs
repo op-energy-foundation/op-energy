@@ -99,14 +99,18 @@ instance FromJSON DecodedInvoice where
 
 -- | a payment as LNBits reports it.
 --
--- The amounts are in millisatoshi and are negative for a payment, which
--- left the wallet, so they are Int64 here and converted where they are
--- used. The status is one of LNBits' own words for it, carried as it
--- arrived rather than parsed here
+-- The fee is in millisatoshi and is negative for a payment, which left
+-- the wallet, so it is Int64 here and converted where it is used. The
+-- status is one of LNBits' own words for it, carried as it arrived rather
+-- than parsed here.
+--
+-- There is no field for the amount: the only amount this service pays
+-- against is the invoice's own, read by 'decodeInvoice', and a field,
+-- which is parsed but never read, is one more way an answer can fail to
+-- be read at all
 data PaymentResponse = PaymentResponse
   { paymentResponsePaymentHash :: Text
   , paymentResponseBolt11 :: Text
-  , paymentResponseAmountMsats :: Int64
   , paymentResponseFeeMsats :: Int64
   , paymentResponseStatus :: Text
   }
@@ -116,7 +120,6 @@ instance FromJSON PaymentResponse where
   parseJSON = withObject "PaymentResponse" $ \v-> PaymentResponse
     <$> v .: "payment_hash"
     <*> v .: "bolt11"
-    <*> v .: "amount"
     <*> v .:? "fee" .!= 0
     -- an answer without a status is one, which has not been paid yet:
     -- LNBits leaves the field out until there is something to report

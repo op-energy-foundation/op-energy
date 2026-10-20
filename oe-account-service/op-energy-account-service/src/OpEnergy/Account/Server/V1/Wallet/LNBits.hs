@@ -76,9 +76,10 @@ import           OpEnergy.Error
 -- | wallet backend, which issues its invoices through the LNBits instance
 -- at the given URL.
 --
--- The invoice key reads and creates; the admin key spends. Only the
--- invoice key is used here, as this backend does not send: a path, which
--- only receives, never holds the key, which could empty the wallet
+-- The invoice key reads and creates, and is the one every reading path
+-- is given. The admin key spends and reaches one procedure only,
+-- 'sendPayment', so a path, which does not pay, never holds the key,
+-- which could empty the wallet
 lnbitsWalletBackend
   :: BaseUrl
   -> Text
@@ -399,8 +400,12 @@ sendPayment url adminKey pool params paymentHashV = do
     -- the wallet says it did not make the payment, so the balance goes
     -- back
     CallRefused err -> do
-      _ <- recordFailed pool paymentHashV now
-      return $! Left err
+      recorded <- recordFailed pool paymentHashV now
+      -- only once the payment is out of Pending: the caller gives the
+      -- balance back on a Left, and a payment, which is still Pending, is
+      -- given back by the scheduler as well, which would give it back
+      -- twice. Left pending, it is given back once, by whichever asks next
+      return $! if recorded then Left err else inFlight
     -- no answer: the wallet may have taken the payment before the call
     -- failed, so it is left pending rather than failed. The scheduler asks
     -- again, and nothing gives the balance back on a payment, which may
@@ -409,50 +414,67 @@ sendPayment url adminKey pool params paymentHashV = do
     CallAnswered answer -> case LNBits.paymentResponseStatus answer of
       "success" -> do
         let fee = msatsToSats (LNBits.paymentResponseFeeMsats answer)
-        _ <- recordSettled pool paymentHashV fee now
-        return $! Right $! PaidInvoice
-          { paidInvoicePaymentHash = paymentHashV
-          , paidInvoiceAmountSats = amount
-          , paidInvoiceFeeSats = fee
-          , paidInvoiceProgress = PaymentSettled
-          , paidInvoiceRecipientPersonId = Nothing
-          }
+        recorded <- recordSettled pool paymentHashV fee now
+        -- as above: the caller releases the unused reserve for a payment,
+        -- which is settled, and the scheduler releases it for one, which
+        -- is still Pending. Reported as in flight unless this took it out
+        return $! if recorded
+          then Right $! PaidInvoice
+            { paidInvoicePaymentHash = paymentHashV
+            , paidInvoiceAmountSats = amount
+            , paidInvoiceFeeSats = fee
+            , paidInvoiceProgress = PaymentSettled
+            , paidInvoiceRecipientPersonId = Nothing
+            }
+          else inFlight
       "failed" -> do
-        _ <- recordFailed pool paymentHashV now
-        return $! Left $! walletAPIError "the wallet could not pay the invoice"
+        recorded <- recordFailed pool paymentHashV now
+        return $! if recorded
+          then Left $! walletAPIError "the wallet could not pay the invoice"
+          else inFlight
       _ -> return inFlight
 
--- | records a payment as made, with the fee it cost
+-- | records a payment as made, with the fee it cost. Answers whether this
+-- call is the one, which took the payment out of Pending
 recordSettled
   :: Pool SqlBackend
   -> PaymentHash
   -> Sats
   -> POSIXTime
-  -> IO (Either Text Int64)
+  -> IO Bool
 recordSettled pool paymentHashV fee now =
-  eitherException $ flip runSqlPersistMPool pool $ updateWhereCount
-    [ WalletPaymentPaymentHash ==. paymentHashV
-    , WalletPaymentStatus ==. Pending
-    ]
-    [ WalletPaymentStatus =. Settled
-    , WalletPaymentFeeSats =. fee
-    , WalletPaymentUpdatedAt =. now
-    ]
+  claimedOne $ eitherException $ flip runSqlPersistMPool pool
+    $ updateWhereCount
+      [ WalletPaymentPaymentHash ==. paymentHashV
+      , WalletPaymentStatus ==. Pending
+      ]
+      [ WalletPaymentStatus =. Settled
+      , WalletPaymentFeeSats =. fee
+      , WalletPaymentUpdatedAt =. now
+      ]
 
--- | records a payment, which the wallet says it did not make
+-- | records a payment, which the wallet says it did not make. Answers
+-- whether this call is the one, which took it out of Pending
 recordFailed
   :: Pool SqlBackend
   -> PaymentHash
   -> POSIXTime
-  -> IO (Either Text Int64)
+  -> IO Bool
 recordFailed pool paymentHashV now =
-  eitherException $ flip runSqlPersistMPool pool $ updateWhereCount
-    [ WalletPaymentPaymentHash ==. paymentHashV
-    , WalletPaymentStatus ==. Pending
-    ]
-    [ WalletPaymentStatus =. Failed
-    , WalletPaymentUpdatedAt =. now
-    ]
+  claimedOne $ eitherException $ flip runSqlPersistMPool pool
+    $ updateWhereCount
+      [ WalletPaymentPaymentHash ==. paymentHashV
+      , WalletPaymentStatus ==. Pending
+      ]
+      [ WalletPaymentStatus =. Failed
+      , WalletPaymentUpdatedAt =. now
+      ]
+
+-- | whether a write, which takes a payment out of Pending, is the one,
+-- which took it. A write, which did not land at all, took nothing: the
+-- payment is still Pending and is still the scheduler's to finish
+claimedOne :: IO (Either Text Int64) -> IO Bool
+claimedOne = fmap (either (const False) (== 1))
 
 -- | satoshi of a millisatoshi amount, rounded away from zero, so an
 -- amount, which is not a whole satoshi, is never reported as less than it
@@ -490,13 +512,20 @@ callLNBitsOutcome url call = do
 -- 520 for a balance, which does not cover it -- and says so in the body,
 -- which is read here rather than guessed at from the status code. A
 -- refusal before the request was acted on at all, which is what a 4xx is,
--- says the same thing
+-- says the same thing -- except for the few, which a hop in front of the
+-- wallet answers once it has already passed the request on. Those say
+-- nothing about whether the wallet went on to pay, so they are not read
+-- as a refusal: giving the balance back on one would pay it twice
 refusalSaysNotPaid :: ClientError -> Bool
 refusalSaysNotPaid (FailureResponse _request response) =
   bodySaysFailed || requestWasRefused
   where
     code = statusCode (responseStatusCode response)
-    requestWasRefused = code >= 400 && code < 500
+    requestWasRefused =
+      code >= 400 && code < 500 && notElem code requestWasDropped
+    -- 408 and 429 are answered by a proxy as much as by the wallet, and
+    -- 499 only ever by one
+    requestWasDropped = [ 408, 429, 499 ]
     bodySaysFailed = case decode (responseBody response) of
       Just refused -> LNBits.refusedPaymentStatus refused == "failed"
       Nothing -> False
