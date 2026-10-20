@@ -107,6 +107,11 @@ data Config = Config
   , configLNBitsAdminKey :: Text
     -- ^ LNBits admin key: spends the wallet. A secret, which is as good as
     -- its balance
+  , configWalletMaxPendingInvoices :: Word32
+    -- ^ how many invoices of one account may be waiting to be paid at
+    -- once. Each one is asked about by the scheduler until it is paid or
+    -- expires, so without a bound one account decides how often this
+    -- service calls the wallet
   , configWalletFeeReservePercent :: Word64
     -- ^ how much of a payment's amount is taken from the balance on top of
     -- it, to cover a fee, which is only known once the payment has been
@@ -148,6 +153,7 @@ instance FromJSON Config where
     <*> ((v .:? "LNBITS_API_URL" .!= (showBaseUrl $ configLNBitsURL defaultConfig)) >>= parseBaseUrl)
     <*> ( v .:? "LNBITS_INVOICE_KEY" .!= (configLNBitsInvoiceKey defaultConfig))
     <*> ( v .:? "LNBITS_ADMIN_KEY" .!= (configLNBitsAdminKey defaultConfig))
+    <*> ( v .:? "WALLET_MAX_PENDING_INVOICES" .!= (configWalletMaxPendingInvoices defaultConfig))
     <*> ( v .:? "WALLET_FEE_RESERVE_PERCENT" .!= (configWalletFeeReservePercent defaultConfig))
 
 -- need to get Key from json, which represented as base64-encoded string
@@ -192,6 +198,7 @@ defaultConfig = Config
   , configLNBitsURL = BaseUrl Http "127.0.0.1" 5000 ""
   , configLNBitsInvoiceKey = ""
   , configLNBitsAdminKey = ""
+  , configWalletMaxPendingInvoices = 10
   -- the demo LNBits instance charges 5% per payment, which is far above
   -- what routing over a node costs, so this covers both
   , configWalletFeeReservePercent = 5
@@ -251,6 +258,9 @@ everifyWalletConfig config
       , require (configWalletMaxWithdrawalSats config <= maxStorableSats)
           "WALLET_MAX_WITHDRAWAL_SATS must not be above the largest amount \
           \the DB stores"
+      , require (configWalletMaxPendingInvoices config > 0)
+          "WALLET_MAX_PENDING_INVOICES must be above 0: no account could \
+          \ask to be paid at all"
       , require (configWalletFeeReservePercent config <= 100)
           "WALLET_FEE_RESERVE_PERCENT must not be above 100: a payment \
           \would reserve more than it sends, so an account could not \

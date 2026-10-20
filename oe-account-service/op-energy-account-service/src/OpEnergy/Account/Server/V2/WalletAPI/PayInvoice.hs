@@ -55,7 +55,9 @@ import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.Account.Server.V1.LedgerEntry
                  ( LedgerDirection(..), adjustBalanceTx
                  )
-import           OpEnergy.Account.Server.V1.Person (PersonId)
+import           OpEnergy.Account.Server.V1.Person
+                 ( PersonId, personBalance
+                 )
 import           OpEnergy.Account.Server.V1.Wallet.Class
 import           OpEnergy.Account.Server.V1.WalletDeposits
                  ( creditDepositOnce
@@ -64,6 +66,7 @@ import           OpEnergy.Error
                  ( eitherThrowJSON, runExceptPrefixT
                  , CallstackError, accountNotFound, describeError
                  , walletAmountAboveMaximum, walletAmountBelowMinimum
+                 , insufficientBalance
                  , walletAmountRequired, walletInvoiceAlreadyPaid
                  , walletInvoiceNotFound, walletSelfPaymentNotAllowed
                  )
@@ -88,9 +91,16 @@ payInvoice
 payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
     let name = "V2.payInvoice"
     in profile name $ runExceptPrefixT name $ do
-  (Entity key _) <- exceptTMaybeT accountNotFound
+  (Entity key person) <- exceptTMaybeT accountNotFound
     $ mgetPersonByAccountToken token
   State{ config = config, accountDBPool = pool, wallet = walletV } <- lift ask
+  -- an account, which can not cover the smallest amount this wallet takes,
+  -- can not pay any invoice. It is refused before the wallet is asked to
+  -- read one: an account is free to create, so a request, which can not
+  -- succeed, would otherwise be a way to have this service call the wallet
+  -- as often as the caller likes
+  when (personBalance person < configWalletMinInvoiceSats config)
+    $ throwE insufficientBalance
   -- the amount is needed before the payment, as the balance is taken first.
   -- An invoice this service issued is paid for the amount it was created
   -- with, whatever the client believes; for any other invoice the client has
