@@ -33,6 +33,7 @@ module OpEnergy.Account.Server.V1.Wallet.LNBits
   ) where
 
 import           Control.Monad.IO.Class (MonadIO)
+import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Except (ExceptT(..), runExceptT)
 import           Control.Monad.Trans.Reader (ReaderT)
 import           Data.Int (Int64)
@@ -248,10 +249,31 @@ resolveInvoice url invoiceKey pool asker invoiceV = do
       , resolvedInvoicePayable = walletPaymentStatus payment == Pending
       , resolvedInvoicePaidByAsker = paidByAsker
       }
-    Nothing -> do
-      edecoded <- callLNBits url $ LNBits.decodeInvoice invoiceKey
+    -- the string did not name one of ours, which does not mean it is
+    -- another wallet's: what names a payment is its hash, and one hash
+    -- can be carried by more than one invoice. So the wallet reads it and
+    -- the hash it answers is looked for as well
+    Nothing -> runExceptT $ do
+      decoded <- ExceptT $ callLNBits url $ LNBits.decodeInvoice invoiceKey
         $ LNBits.DecodeRequest (unBolt11Invoice invoiceV)
-      return $! fmap (Just . resolved paidByAsker) edecoded
+      paymentHashV <- ExceptT $ return $! readDecodedHash decoded
+      mbyHash <- lift $ flip runSqlPersistMPool pool $ selectFirst
+        [ WalletPaymentPaymentHash ==. paymentHashV
+        , WalletPaymentDirection ==. Incoming
+        ]
+        [ Desc WalletPaymentId ]
+      return $! Just $! case mbyHash of
+        -- an invoice of this service under a string it was not issued as.
+        -- It is answered from its own row, so the amount is the one it was
+        -- created for and the account, which is owed it, is named -- which
+        -- is what refuses an account paying its own invoice
+        Just (Entity _ payment) -> ResolvedInvoice
+          { resolvedInvoiceAmountSats = walletPaymentAmountSats payment
+          , resolvedInvoicePersonId = Just (walletPaymentPersonId payment)
+          , resolvedInvoicePayable = walletPaymentStatus payment == Pending
+          , resolvedInvoicePaidByAsker = paidByAsker
+          }
+        Nothing -> resolved paidByAsker decoded
   where
     resolved paidByAsker decoded = ResolvedInvoice
       { resolvedInvoiceAmountSats =
@@ -379,8 +401,23 @@ payOverLightning url invoiceKey adminKey pool params = runExceptT $ do
   decoded <- ExceptT $ callLNBits url $ LNBits.decodeInvoice invoiceKey
     $ LNBits.DecodeRequest (unBolt11Invoice (payInvoiceBolt11 params))
   paymentHashV <- ExceptT $ return $! readDecodedHash decoded
-  balanceAfterDebit <- ExceptT $ recordPendingPayment pool params paymentHashV
-  ExceptT $ sendPayment url adminKey pool params paymentHashV balanceAfterDebit
+  -- the hash names the payment, the string it arrived as does not: an
+  -- invoice of this service, which was handed in under another encoding
+  -- of its hash, is settled inside the service rather than paid out to
+  -- the wallet, which would settle this service's own invoice from the
+  -- shared wallet and credit the account it was created for
+  mours <- lift $ flip runSqlPersistMPool pool $ selectFirst
+    [ WalletPaymentPaymentHash ==. paymentHashV
+    , WalletPaymentDirection ==. Incoming
+    ]
+    [ Desc WalletPaymentId ]
+  case mours of
+    Just ours -> ExceptT $ payOwnInvoice pool params ours
+    Nothing -> do
+      balanceAfterDebit <- ExceptT
+        $ recordPendingPayment pool params paymentHashV
+      ExceptT
+        $ sendPayment url adminKey pool params paymentHashV balanceAfterDebit
 
 -- | the hash of a decoded invoice, as this service's own type
 readDecodedHash

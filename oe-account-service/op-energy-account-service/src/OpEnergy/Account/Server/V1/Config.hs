@@ -17,7 +17,7 @@ import           Data.OpEnergy.API.V1.Positive
 import           Control.Monad.Catch
 import           Control.Monad.Logger(LogLevel(..))
 
-import           Data.Aeson(FromJSON, withText, withObject, (.:?), (.!=))
+import           Data.Aeson(FromJSON, withText, withObject, (.:), (.:?), (.!=))
 import           Data.Aeson.Types (Parser)
 import qualified Data.Aeson as A
 import           Web.ClientSession (Key)
@@ -165,7 +165,11 @@ instance FromJSON Config where
     <*> ( v .:? "BLOCKSPAN_DEFAULT_SIZE" .!= (configBlockSpanDefaultSize defaultConfig))
     <*> ( v .:? "INTERNAL_SERVICE_SHARED_SECRET" .!= (configInternalServiceSharedSecret defaultConfig))
     <*> ( v .:? "STARTING_BALANCE_SATS" .!= (configStartingBalanceSats defaultConfig))
-    <*> ( v .:? "WALLET_BACKEND" .!= (configWalletBackend defaultConfig))
+    -- required rather than defaulted: the mock backend lets any account
+    -- settle its own invoice, so a service, which is given no backend and
+    -- quietly takes the mock, hands out balance for nothing. A deployment
+    -- says which wallet it runs, or does not start
+    <*> ( v .: "WALLET_BACKEND")
     <*> ( v .:? "WALLET_MIN_INVOICE_SATS" .!= (configWalletMinInvoiceSats defaultConfig))
     <*> ( v .:? "WALLET_MAX_INVOICE_SATS" .!= (configWalletMaxInvoiceSats defaultConfig))
     <*> ( v .:? "WALLET_MAX_WITHDRAWAL_SATS" .!= (configWalletMaxWithdrawalSats defaultConfig))
