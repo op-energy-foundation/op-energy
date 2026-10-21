@@ -17,13 +17,18 @@ let
     $$
     ;
   '';
+  # the config key, which a credential is written to: the name without its
+  # _SECRET suffix, which is what credentials_locations below promises
+  credential_assignment = name:
+    ".${lib.removeSuffix "_SECRET" name} = \\\"$(cat $CREDENTIALS_DIRECTORY/${name})\\\"";
+  # one assignment per credential of the set, rather than a list written
+  # out here, so a deployment, which needs another credential -- the LNBits
+  # keys of the lnbits wallet backend, say -- adds it to
+  # credentials_locations instead of changing this module
+  credentials_filter = lib.concatStringsSep " | "
+    (map credential_assignment (builtins.attrNames cfg.credentials_locations));
   inject_credentials = src_file: file: pkgs.writeScriptBin "inject_credentials" ''
-    cat ${src_file} | jq " \
-        .DB_PASSWORD = \"$(cat $CREDENTIALS_DIRECTORY/DB_PASSWORD_SECRET)\" \
-      | .SECRET_SALT = \"$(cat $CREDENTIALS_DIRECTORY/SECRET_SALT_SECRET)\" \
-      | .ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY = \"$(cat $CREDENTIALS_DIRECTORY/ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY_SECRET)\" \
-      | .INTERNAL_SERVICE_SHARED_SECRET = \"$(cat $CREDENTIALS_DIRECTORY/INTERNAL_SERVICE_SHARED_SECRET_SECRET)\"
-      " > ${file}
+    cat ${src_file} | jq "${credentials_filter}" > ${file}
     '';
 
   cfg = config.services.op-energy-account-service;
@@ -56,6 +61,10 @@ in
         File path is expected to be only readable by the root user.
         In the usage example, DB_PASSWORD_SECRET will be replaced within config located at
         $OPENERGY_ACCOUNT_SERVICE_CONFIG_FILE with a content of the /etc/nixos/private/DB_PASSWORD_SECRET
+        Every name of the set is loaded and written this way, under the name
+        without its _SECRET suffix, so a deployment, which needs another
+        credential, adds it here. A value, which is not a secret, belongs in
+        extraConfig instead, which lands in the world readable store.
         '';
       example = {
         DB_PASSWORD_SECRET =  "/etc/nixos/private/OP_ENERGY_ACCOUNT_DB_PASSWORD_SECRET";
@@ -297,12 +306,8 @@ in
           Restart = "always"; # we want to keep service always running, especially, now development instance is relying on ssh tunnel which can restart as well leading to op-energy restart as well
           RestartSec = "10s";
           LoadCredential =
-            # TODO: function: key:dir:file -> "key:dir/file"
-            [ "DB_PASSWORD_SECRET:${cfg.credentials_locations.DB_PASSWORD_SECRET}"
-              "ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY_SECRET:${cfg.credentials_locations.ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY_SECRET}"
-              "INTERNAL_SERVICE_SHARED_SECRET_SECRET:${cfg.credentials_locations.INTERNAL_SERVICE_SHARED_SECRET_SECRET}"
-              "SECRET_SALT_SECRET:${cfg.credentials_locations.SECRET_SALT_SECRET}"
-            ];
+            lib.mapAttrsToList (name: path: "${name}:${path}")
+              cfg.credentials_locations;
           User =  "op-energy-account";
           Group = "op-energy-account";
         };
