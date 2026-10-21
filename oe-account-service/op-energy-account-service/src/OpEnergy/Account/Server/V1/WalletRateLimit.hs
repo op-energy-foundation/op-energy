@@ -61,13 +61,15 @@ takeWalletAttempt
   => WalletAttempts
   -> Word32
   -- ^ how many attempts one account may make in a window
+  -> Int
+  -- ^ how many accounts may be counted at once
   -> POSIXTime
   -- ^ how long a window lasts
   -> POSIXTime
   -- ^ now
   -> PersonId
   -> m Bool
-takeWalletAttempt (WalletAttempts attemptsV) limit window now key =
+takeWalletAttempt (WalletAttempts attemptsV) limit maxAccounts window now key =
   liftIO $ atomically $ do
     attempts <- TVar.readTVar attemptsV
     let current = case Map.lookup key attempts of
@@ -80,11 +82,16 @@ takeWalletAttempt (WalletAttempts attemptsV) limit window now key =
             , windowAttempts = 0
             }
         taken = current { windowAttempts = windowAttempts current + 1 }
-    if windowAttempts current >= limit
+    -- an account, which is not counted yet, needs room to be counted in.
+    -- Without a bound the map holds every account, which ever paid, and
+    -- this is the one place, which adds to it
+    if Map.notMember key attempts && Map.size attempts >= maxAccounts
       then return False
-      else do
-        TVar.writeTVar attemptsV $! Map.insert key taken attempts
-        return True
+      else if windowAttempts current >= limit
+        then return False
+        else do
+          TVar.writeTVar attemptsV $! Map.insert key taken attempts
+          return True
 
 -- | drops the accounts, whose window is over, so the map holds the
 -- accounts, which are spending now, rather than every account, which ever

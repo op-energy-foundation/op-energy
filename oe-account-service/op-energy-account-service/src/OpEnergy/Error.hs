@@ -50,7 +50,9 @@ import           Control.Monad.Trans.Except(ExceptT, runExceptT)
 import           Control.Exception.Safe (SomeException)
 import qualified Control.Exception.Safe as E
 
-import           Servant(ServerError, err400, err401, err500)
+import           Servant
+                 ( ServerError(..), err400, err401, err500
+                 )
 import           Data.Text.Show( tshow)
 import           Data.OpEnergy.API.V1.Error(throwJSON)
 
@@ -211,8 +213,22 @@ describeError (CallstackError callstack err) =
   callstack <> ": " <> snd (errorToServerError err)
 
 -- | converts Error into printable version
+-- | 429, which servant does not name
+tooManyRequests :: ServerError
+tooManyRequests = ServerError
+  { errHTTPCode = 429
+  , errReasonPhrase = "Too Many Requests"
+  , errBody = ""
+  , errHeaders = []
+  }
+
 errorToServerError :: Error -> (ServerError, Text)
 errorToServerError (BadRequest InvalidServiceSecret) = (err401, tshow InvalidServiceSecret)
+-- a refusal for asking too often is answered as such, so a client can
+-- tell it apart from a request, which is wrong, and wait rather than
+-- change what it sends
+errorToServerError (BadRequest WalletTooManyPayAttempts) =
+  (tooManyRequests, tshow WalletTooManyPayAttempts)
 errorToServerError (BadRequest specificError) = (err400, tshow specificError)
 errorToServerError (Internal specificError) = (err500, tshow specificError)
 errorToServerError (BlockspanAPI specificError) = (err500, tshow specificError)

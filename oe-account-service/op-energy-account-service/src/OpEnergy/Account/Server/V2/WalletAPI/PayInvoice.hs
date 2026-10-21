@@ -65,8 +65,8 @@ import           OpEnergy.Account.Server.V1.WalletRateLimit
 import           OpEnergy.Error
                  ( eitherThrowJSON, runExceptPrefixT
                  , CallstackError, accountNotFound, describeError
+                 , eitherException, insufficientBalance, unspecified
                  , walletAmountAboveMaximum, walletAmountBelowMinimum
-                 , insufficientBalance
                  , walletAmountRequired, walletInvoiceAlreadyPaid
                  , walletInvoiceNotFound, walletSelfPaymentNotAllowed
                  , walletTooManyPayAttempts
@@ -111,6 +111,7 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
   -- calling too often, is refused for every account at once
   allowed <- lift $ takeWalletAttempt attemptsV
     (configWalletMaxPayAttemptsPerWindow config)
+    (configWalletMaxPayAttemptAccounts config)
     (fromIntegral (configWalletPayAttemptWindowSecs config))
     now key
   when (not allowed) $ throwE walletTooManyPayAttempts
@@ -184,7 +185,12 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
   -- creditedAt is unset, so a credit written beside the claim is made
   -- again by the next tick
   when (isJust (paidInvoiceRecipientPersonId paid)) $ do
-    ecredited <- liftIO $ flip runSqlPersistMPool pool
+    -- guarded: the payment has already happened, so a pool failure here
+    -- must be written down rather than thrown, which would answer the
+    -- payer with a bare 500 and name nothing. creditWaitingDeposits
+    -- credits it on the next tick either way
+    ecredited <- fmap (either (Left . unspecified) id) $ liftIO
+      $ eitherException $ flip runSqlPersistMPool pool
       $ creditDepositOnce (paidInvoicePaymentHash paid) now
     logUnreconciled
       ( "paid " <> tshow (unSats (paidInvoiceAmountSats paid))
@@ -218,8 +224,14 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
 feeReserve :: Word64 -> Sats -> Sats
 feeReserve percent (Sats amount) =
   -- rounded up, so the share of a small amount is a satoshi rather than
-  -- none, and a payment of nothing reserves nothing
-  Sats ((amount * percent + 99) `div` 100)
+  -- none, and a payment of nothing reserves nothing.
+  --
+  -- Worked out as Integer: the product of an amount and a percent
+  -- overflows Word64 well below the amounts everifyWalletConfig admits,
+  -- and the amount itself is bounded by WALLET_MAX_WITHDRAWAL_SATS, so
+  -- the result always fits what it is converted back to
+  Sats $! fromIntegral
+    ((toInteger amount * toInteger percent + 99) `div` 100)
 
 -- | logs a balance change, which failed once the payment had already
 -- happened. The request is answered as the payment went, so a failure here

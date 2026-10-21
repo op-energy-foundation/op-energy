@@ -125,6 +125,19 @@ data Config = Config
   , configWalletPayAttemptWindowSecs :: Word64
     -- ^ how long the window, which counts an account's payment attempts,
     -- lasts
+  , configWalletMaxPayAttemptAccounts :: Int
+    -- ^ how many accounts the count of payment attempts holds at once. It
+    -- is held in memory, so it is bounded: an account, which does not fit,
+    -- is refused rather than letting the count grow without end
+  , configWalletReconcileIntervalSecs :: Word64
+    -- ^ how long to leave a payment alone between asking the wallet about
+    -- it. Every ask is a call, so without this the scheduler asks about
+    -- every waiting payment on every tick
+  , configWalletUnknownPaymentGraceSecs :: Word64
+    -- ^ how long an outgoing payment, which the wallet does not have, is
+    -- left before its sats are given back. A wallet, which was unreachable
+    -- when the payment was sent, never had it, so it would otherwise be
+    -- held for good
   }
   deriving Show
 instance FromJSON Config where
@@ -165,6 +178,9 @@ instance FromJSON Config where
     <*> ( v .:? "WALLET_FEE_RESERVE_PERCENT" .!= (configWalletFeeReservePercent defaultConfig))
     <*> ( v .:? "WALLET_MAX_PAY_ATTEMPTS_PER_WINDOW" .!= (configWalletMaxPayAttemptsPerWindow defaultConfig))
     <*> ( v .:? "WALLET_PAY_ATTEMPT_WINDOW_SECS" .!= (configWalletPayAttemptWindowSecs defaultConfig))
+    <*> ( v .:? "WALLET_MAX_PAY_ATTEMPT_ACCOUNTS" .!= (configWalletMaxPayAttemptAccounts defaultConfig))
+    <*> ( v .:? "WALLET_RECONCILE_INTERVAL_SECS" .!= (configWalletReconcileIntervalSecs defaultConfig))
+    <*> ( v .:? "WALLET_UNKNOWN_PAYMENT_GRACE_SECS" .!= (configWalletUnknownPaymentGraceSecs defaultConfig))
 
 -- need to get Key from json, which represented as base64-encoded string
 instance FromJSON Key where
@@ -217,6 +233,14 @@ defaultConfig = Config
   -- wallet refuse this service
   , configWalletMaxPayAttemptsPerWindow = 10
   , configWalletPayAttemptWindowSecs = 60
+  , configWalletMaxPayAttemptAccounts = 10000
+  -- a payment of a node takes seconds, not milliseconds, so asking twice
+  -- a minute finishes one about as quickly as asking every tick while
+  -- making a thirtieth of the calls
+  , configWalletReconcileIntervalSecs = 30
+  -- longer than any htlc may live, so a payment, which is given up on
+  -- here, can no longer be in flight at the node
+  , configWalletUnknownPaymentGraceSecs = 86400
   }
 
 -- | the largest amount, which survives a round trip through the DB:
@@ -283,6 +307,13 @@ everifyWalletConfig config
       , require (configWalletMaxPayAttemptsPerWindow config > 0)
           "WALLET_MAX_PAY_ATTEMPTS_PER_WINDOW must be above 0: no account \
           \could pay an invoice at all"
+      , require (configWalletMaxPayAttemptAccounts config > 0)
+          "WALLET_MAX_PAY_ATTEMPT_ACCOUNTS must be above 0: no account \
+          \could pay an invoice at all"
+      , require (configWalletUnknownPaymentGraceSecs config > 0)
+          "WALLET_UNKNOWN_PAYMENT_GRACE_SECS must be above 0: a payment \
+          \would be given up on as soon as the wallet was asked about it, \
+          \while it may still be in flight"
       , require (configWalletPayAttemptWindowSecs config > 0)
           "WALLET_PAY_ATTEMPT_WINDOW_SECS must be above 0: a window, which \
           \is over as soon as it starts, counts nothing and bounds nothing"

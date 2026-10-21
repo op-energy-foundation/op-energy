@@ -49,13 +49,18 @@ accountServer
 
 -- | one iteration that called from scheduler thread.
 --
--- Asking the wallet comes first, so a payment, which is found settled, is
--- credited by the same iteration rather than by the next one
+-- A payment, which the wallet reports settled, is credited by the next
+-- iteration rather than this one: asking the wallet is the step, which
+-- can be slow, so it comes last and the steps, which only touch the DB,
+-- run whatever the wallet is doing
 schedulerIteration :: (MonadIO m, MonadMonitor m) => AppT m ()
 schedulerIteration = do
-  reconcilePendingPayments
-  creditWaitingDeposits
+  -- the two cheap steps come first: reconcilePendingPayments calls the
+  -- wallet once per payment and a wallet, which answers slowly, would
+  -- otherwise hold up crediting the deposits, which are already settled
   forgetSpentPayAttempts
+  creditWaitingDeposits
+  reconcilePendingPayments
 
 -- | drops the accounts, whose window of payment attempts is over, so what
 -- counts them holds the accounts, which are paying now, rather than every

@@ -71,6 +71,9 @@ creditDepositOnce paymentHashV now = runExceptT $ do
   claimed <- lift $ updateWhereCount
     [ WalletPaymentPaymentHash ==. paymentHashV
     , WalletPaymentDirection ==. Incoming
+    -- only a payment, which has been paid: the status is what says the
+    -- sats arrived, and crediting one, which has not, invents them
+    , WalletPaymentStatus ==. Settled
     , WalletPaymentCreditedAt ==. Nothing
     ]
     [ WalletPaymentCreditedAt =. Just now

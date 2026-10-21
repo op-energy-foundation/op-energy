@@ -55,6 +55,7 @@ import           Data.OpEnergy.Account.API.V2.PaymentHash
 import           OpEnergy.Account.Server.V1.Class
                  ( AppT, State(..), profile, runLogging
                  )
+import           OpEnergy.Account.Server.V1.Config (Config(..))
 import           OpEnergy.Account.Server.V1.LedgerEntry
                  ( LedgerDirection(..), adjustBalanceTx
                  )
@@ -88,7 +89,10 @@ reconcilePendingPayments :: (MonadIO m, MonadMonitor m) => AppT m ()
 reconcilePendingPayments =
     let name = "V1.reconcilePendingPayments"
     in profile name $ do
-  State{ accountDBPool = pool, wallet = walletV } <- ask
+  State{ accountDBPool = pool, config = config, wallet = walletV } <- ask
+  now <- liftIO getPOSIXTime
+  let notAskedSince = now
+        - fromIntegral (configWalletReconcileIntervalSecs config)
   case walletReadPayment walletV of
     -- a backend, which settles its own payments, has nothing to be asked
     Nothing -> return ()
@@ -100,9 +104,15 @@ reconcilePendingPayments =
         -- oldest asked-about first, rather than lowest id first: a payment
         -- the wallet keeps answering the same way about is asked about
         -- again at the back of the queue, so it can not hold a place in
-        -- every tick and leave newer payments never looked at
+        -- every tick and leave newer payments never looked at.
+        --
+        -- One, which was asked about recently, is left out: every ask is
+        -- a call to the wallet, and a payment does not finish quickly
+        -- enough to be worth asking about on every tick
         $ selectList
-          [ WalletPaymentStatus ==. Pending ]
+          [ WalletPaymentStatus ==. Pending
+          , WalletPaymentUpdatedAt <=. notAskedSince
+          ]
           [ Asc WalletPaymentUpdatedAt, LimitTo maxPaymentsPerTick ]
       case ewaiting of
         Left err -> runLogging $ $(logError)
@@ -210,18 +220,37 @@ reconcilePendingPayments =
       -- wallet, which answers this way about an invoice it does have,
       -- would otherwise have it abandoned
       Incoming -> park pool payment
-      -- the balance was taken for this payment. It is not given back
-      -- here: a wallet, which does not have a payment it did make,
-      -- would have it refunded while its sats are gone, which is worse
-      -- than leaving it to be looked at
+      -- the balance was taken for this payment, so it is not given back
+      -- at once: a wallet, which has just been asked to pay and does not
+      -- say so yet, may be paying, and refunding it then pays it twice.
+      --
+      -- It is given back once the payment is older than any payment can
+      -- still be in flight. A wallet, which was unreachable when the
+      -- payment was sent, never received it and will never have it, so
+      -- the sats would otherwise be held for good
       Outgoing -> do
-        runLogging $ $(logError)
-          ( "reconcilePendingPayments: the wallet does not have the "
-          <> "outgoing payment "
-          <> unPaymentHash (walletPaymentPaymentHash payment)
-          <> ", whose balance is taken, so it needs manual reconciliation"
-          )
-        park pool payment
+        State{ config = config } <- ask
+        now <- liftIO getPOSIXTime
+        let grace =
+              fromIntegral (configWalletUnknownPaymentGraceSecs config)
+        if walletPaymentCreatedAt payment + grace < now
+          then do
+            runLogging $ $(logError)
+              ( "reconcilePendingPayments: the wallet still does not have "
+              <> "the outgoing payment "
+              <> unPaymentHash (walletPaymentPaymentHash payment)
+              <> ", which can no longer be in flight, so what was taken "
+              <> "for it is given back"
+              )
+            recordFailure pool payment
+          else do
+            runLogging $ $(logError)
+              ( "reconcilePendingPayments: the wallet does not have the "
+              <> "outgoing payment "
+              <> unPaymentHash (walletPaymentPaymentHash payment)
+              <> " yet, whose balance is taken"
+              )
+            park pool payment
 
     -- a payment the wallet is not finished with. An invoice, whose expiry
     -- has passed, is written off here: the wallet goes on answering that
