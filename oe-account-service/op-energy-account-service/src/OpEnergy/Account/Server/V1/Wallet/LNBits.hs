@@ -605,51 +605,45 @@ finishPayment pool personKey paymentHashV startedAt status mfee back reason
     balanceUnchanged
     now = do
   edone <- eitherException $ flip runSqlPersistMPool pool $ do
-    -- scoped to the account, which paid: two accounts may each be paying
-    -- the same invoice of another wallet, so the hash alone names a row
-    -- of whichever got there first and would give its sats to the wrong
-    -- one
-    mpayment <- selectFirst
+    -- claimed in one write rather than read and then written: a read,
+    -- which takes no lock, lets the payment be finished and taken up
+    -- again between the two, and the write would then land on the new
+    -- attempt.
+    --
+    -- Scoped to the account, as two accounts may each be paying the same
+    -- invoice of another wallet, and to when the attempt started, as a
+    -- payment, which failed and was tried again, is the same row holding
+    -- another attempt with another amount and another reserve. The hash
+    -- with the account and the direction is unique, so this is one row
+    claimed <- updateWhereCount
       [ WalletPaymentPaymentHash ==. paymentHashV
       , WalletPaymentPersonId ==. personKey
       , WalletPaymentDirection ==. Outgoing
-      -- when it started as well as whose it is: a payment, which failed
-      -- and was tried again, is the same row holding another attempt,
-      -- with another amount and another reserve, and a call, which is
-      -- answering about the attempt before it, must not finish that one
       , WalletPaymentCreatedAt ==. startedAt
       , WalletPaymentStatus ==. Pending
       ]
-      []
-    case mpayment of
-      Nothing -> return Nothing
-      Just (Entity paymentKey payment) -> do
-        claimed <- updateWhereCount
-          [ WalletPaymentId ==. paymentKey
-          , WalletPaymentStatus ==. Pending
-          ]
-          ( [ WalletPaymentStatus =. status
-            , WalletPaymentUpdatedAt =. now
-            ]
-         ++ maybe [] (\fee-> [ WalletPaymentFeeSats =. fee ]) mfee
-          )
-        if claimed /= (1 :: Int64)
-          then return Nothing
-          else if back == Sats 0
-            -- claimed, and nothing to give back: the balance stands as
-            -- the debit left it
-            then return (Just balanceUnchanged)
-            else do
-              egiven <- adjustBalanceTx (walletPaymentPersonId payment)
-                Credit back Refund (Just reason) now
-              case egiven of
-                -- the claim goes back with it, so the payment stays
-                -- Pending and the scheduler finishes it rather than it
-                -- being left finished with the account short
-                Left _ -> do
-                  transactionUndo
-                  return Nothing
-                Right balanceAfter -> return (Just balanceAfter)
+      ( [ WalletPaymentStatus =. status
+        , WalletPaymentUpdatedAt =. now
+        ]
+     ++ maybe [] (\fee-> [ WalletPaymentFeeSats =. fee ]) mfee
+      )
+    if claimed /= (1 :: Int64)
+      then return Nothing
+      else if back == Sats 0
+        -- claimed, and nothing to give back: the balance stands as the
+        -- debit left it
+        then return (Just balanceUnchanged)
+        else do
+          egiven <- adjustBalanceTx personKey
+            Credit back Refund (Just reason) now
+          case egiven of
+            -- the claim goes back with it, so the payment stays Pending
+            -- and the scheduler finishes it rather than it being left
+            -- finished with the account short
+            Left _ -> do
+              transactionUndo
+              return Nothing
+            Right balanceAfter -> return (Just balanceAfter)
   return $! either (const Nothing) id edone
 
 -- | satoshi of a millisatoshi amount, rounded away from zero, so an
