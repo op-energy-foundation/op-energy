@@ -511,7 +511,7 @@ sendPayment url adminKey pool params paymentHashV balanceAfterDebit = do
     -- was taken for it, goes back with the recording of that
     CallRefused err -> do
       mbalance <- recordFailed pool (payInvoicePersonId params) paymentHashV
-        (amount + reserve)
+        now (amount + reserve)
         balanceAfterDebit now
       return $! notMade err mbalance
     -- no answer: the wallet may have taken the payment before the call
@@ -523,7 +523,7 @@ sendPayment url adminKey pool params paymentHashV balanceAfterDebit = do
       "success" -> do
         let fee = msatsToSats (LNBits.paymentResponseFeeMsats answer)
         mbalance <- recordSettled pool (payInvoicePersonId params) paymentHashV
-          fee reserve
+          now fee reserve
           balanceAfterDebit now
         return $! case mbalance of
           Nothing -> inFlight
@@ -537,7 +537,7 @@ sendPayment url adminKey pool params paymentHashV balanceAfterDebit = do
             }
       "failed" -> do
         mbalance <- recordFailed pool (payInvoicePersonId params) paymentHashV
-          (amount + reserve)
+          now (amount + reserve)
           balanceAfterDebit now
         return $! notMade walletPaymentNotMade mbalance
       _ -> return inFlight
@@ -548,16 +548,18 @@ recordSettled
   :: Pool SqlBackend
   -> PersonId
   -> PaymentHash
+  -> POSIXTime
   -> Sats
   -> Sats
   -> Sats
   -> POSIXTime
   -> IO (Maybe Sats)
-recordSettled pool key paymentHashV fee reserve balanceAfterDebit now =
+recordSettled pool personKey paymentHashV startedAt fee reserve
+    balanceAfterDebit now =
   -- a fee above the reserve is recorded rather than taken further: the
   -- sats are already gone and the account was told what it would pay. It
   -- is asked rather than subtracted, as Sats counts upwards only
-  finishPayment pool key paymentHashV Settled (Just fee)
+  finishPayment pool personKey paymentHashV startedAt Settled (Just fee)
     (if fee > reserve then Sats 0 else reserve - fee)
     "the fee reserve, which the payment did not use" balanceAfterDebit now
 
@@ -569,12 +571,13 @@ recordFailed
   :: Pool SqlBackend
   -> PersonId
   -> PaymentHash
+  -> POSIXTime
   -> Sats
   -> Sats
   -> POSIXTime
   -> IO (Maybe Sats)
-recordFailed pool key paymentHashV taken balanceAfterDebit now =
-  finishPayment pool key paymentHashV Failed Nothing taken
+recordFailed pool personKey paymentHashV startedAt taken balanceAfterDebit now =
+  finishPayment pool personKey paymentHashV startedAt Failed Nothing taken
     "a payment, which the wallet did not make" balanceAfterDebit now
 
 -- | takes a payment out of Pending and gives back the sats, which are no
@@ -590,6 +593,7 @@ finishPayment
   :: Pool SqlBackend
   -> PersonId
   -> PaymentHash
+  -> POSIXTime
   -> WalletPaymentStatus
   -> Maybe Sats
   -> Sats
@@ -597,7 +601,8 @@ finishPayment
   -> Sats
   -> POSIXTime
   -> IO (Maybe Sats)
-finishPayment pool key paymentHashV status mfee back reason balanceUnchanged
+finishPayment pool personKey paymentHashV startedAt status mfee back reason
+    balanceUnchanged
     now = do
   edone <- eitherException $ flip runSqlPersistMPool pool $ do
     -- scoped to the account, which paid: two accounts may each be paying
@@ -606,16 +611,23 @@ finishPayment pool key paymentHashV status mfee back reason balanceUnchanged
     -- one
     mpayment <- selectFirst
       [ WalletPaymentPaymentHash ==. paymentHashV
-      , WalletPaymentPersonId ==. key
+      , WalletPaymentPersonId ==. personKey
       , WalletPaymentDirection ==. Outgoing
+      -- when it started as well as whose it is: a payment, which failed
+      -- and was tried again, is the same row holding another attempt,
+      -- with another amount and another reserve, and a call, which is
+      -- answering about the attempt before it, must not finish that one
+      , WalletPaymentCreatedAt ==. startedAt
       , WalletPaymentStatus ==. Pending
       ]
       []
     case mpayment of
       Nothing -> return Nothing
-      Just (Entity key payment) -> do
+      Just (Entity paymentKey payment) -> do
         claimed <- updateWhereCount
-          [ WalletPaymentId ==. key, WalletPaymentStatus ==. Pending ]
+          [ WalletPaymentId ==. paymentKey
+          , WalletPaymentStatus ==. Pending
+          ]
           ( [ WalletPaymentStatus =. status
             , WalletPaymentUpdatedAt =. now
             ]

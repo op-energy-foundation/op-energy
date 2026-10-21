@@ -302,9 +302,12 @@ reconcilePendingPayments =
     touch pool key payment now = do
       etouched <- liftIO $ eitherException $ flip runSqlPersistMPool pool
         -- the row itself, not its hash: two accounts may each hold a
-        -- payment of one hash, and this is the one, which was read
+        -- payment of one hash, and this is the one, which was read.
+        -- Matched on when it started as well, as a row, which is taken up
+        -- again, is the same row holding a different attempt
         $ updateWhereCount
           [ WalletPaymentId ==. key
+          , WalletPaymentCreatedAt ==. walletPaymentCreatedAt payment
           , WalletPaymentStatus ==. Pending
           ]
           [ WalletPaymentUpdatedAt =. now ]
@@ -349,9 +352,16 @@ reconcilePendingPayments =
       edone <- liftIO $ eitherException $ flip runSqlPersistMPool pool $ do
         -- the row itself: a hash names a row each way round, and an
         -- outgoing one of it per account, so only its id finishes the
-        -- payment, which was read
+        -- payment, which was read.
+        --
+        -- When it started pins the attempt as well as the row. A payment,
+        -- which failed and was tried again, is the same row with another
+        -- amount and another reserve, and this tick is holding what the
+        -- attempt before it looked like: without this it would finish the
+        -- new attempt and give back the old one's sats
         claimed <- updateWhereCount
           [ WalletPaymentId ==. key
+          , WalletPaymentCreatedAt ==. walletPaymentCreatedAt payment
           , WalletPaymentStatus ==. Pending
           ]
           ( [ WalletPaymentStatus =. status
