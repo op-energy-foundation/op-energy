@@ -67,7 +67,9 @@ accept idText token =
   (AccountV2.WhoAmIResult takerUUIDV takerDisplayNameV _balance) <-
     ExceptT $ AccountClient.verifyAccountToken token
 
-  State{ offerDBPool = pool, currentTip = currentTipV } <- lift ask
+  State{ offerDBPool = pool
+       , currentUnconfirmedTip = currentUnconfirmedTipV
+       } <- lift ask
   offerVal <- exceptTMaybeT offerNotFound
     $! liftIO $ flip runSqlPersistMPool pool $ get key
 
@@ -77,7 +79,7 @@ accept idText token =
   -- The expiry sweep closes an offer, which can't be accepted anymore, but
   -- it runs once per scheduler tick, so it may not have run since the tip
   -- moved. Without a known tip, this can't be checked.
-  tip <- exceptTMaybeT chainTipUnknown $ liftIO $ TVar.readTVarIO currentTipV
+  tip <- exceptTMaybeT chainTipUnknown $ liftIO $ TVar.readTVarIO currentUnconfirmedTipV
   unless (isOfferAcceptableAt tip offerVal) $ throwE offerExpired
 
   -- balances and offers change from here on: in withLiveEventOrder, so the

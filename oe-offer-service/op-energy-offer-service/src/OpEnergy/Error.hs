@@ -14,6 +14,8 @@ module OpEnergy.Error
   , potDoesNotCoverFee
 
   , accountServiceUnavailable
+  , accountServiceRefused
+  , isAccountServiceRefused
   , blockspanRequestFailed
   , chainTipUnknown
 
@@ -27,6 +29,7 @@ module OpEnergy.Error
   , offerExpired
   , offerChanged
   , cannotAcceptOwnOffer
+  , catchBadRequest
   ) where
 
 import           Data.Text(Text)
@@ -82,6 +85,11 @@ data Error
   = BadRequest BadRequestError
   | Internal InternalError
   | AccountServiceUnavailable Text
+    -- ^ the account service could not be reached, so it is not known
+    -- whether it has carried out the request
+  | AccountServiceRefused Text
+    -- ^ the account service has answered the request with an error, so it
+    -- has not carried it out
   | BlockspanRequestFailed Text
   | ChainTipUnknown
     -- ^ the service has not received the chain tip yet
@@ -97,6 +105,21 @@ potDoesNotCoverFee potSats feeSats = CallstackError "" $! Internal $! PotDoesNot
 
 accountServiceUnavailable :: Text -> CallstackError
 accountServiceUnavailable = CallstackError "" . AccountServiceUnavailable
+accountServiceRefused :: Text -> CallstackError
+accountServiceRefused = CallstackError "" . AccountServiceRefused
+
+-- | 'True' for the error of a request, which the account service itself has
+-- answered with an error: it has carried nothing out, so its caller may
+-- repeat the request. Any other error, a lost connection above all, leaves
+-- the outcome of the request unknown, so repeating it could carry it out a
+-- second time.
+--
+-- Example: the settlement sweep takes a settlement back and settles the
+-- contract again on a later tick when its payout was refused, while a
+-- payout of an unknown outcome is logged for reconciliation instead.
+isAccountServiceRefused :: CallstackError -> Bool
+isAccountServiceRefused (CallstackError _ (AccountServiceRefused _)) = True
+isAccountServiceRefused _ = False
 blockspanRequestFailed :: Text -> CallstackError
 blockspanRequestFailed = CallstackError "" . BlockspanRequestFailed
 chainTipUnknown :: CallstackError
@@ -136,6 +159,7 @@ errorToServerError (BadRequest CannotAcceptOwnOffer) = (err403, tshow CannotAcce
 errorToServerError (BadRequest specificError) = (err400, tshow specificError)
 errorToServerError (Internal specificError) = (err500, tshow specificError)
 errorToServerError (AccountServiceUnavailable reason) = (err502, "account service unavailable: " <> reason)
+errorToServerError (AccountServiceRefused reason) = (err502, "account service refused the request: " <> reason)
 errorToServerError (BlockspanRequestFailed reason) = (err502, "blockspan request failed: " <> reason)
 errorToServerError ChainTipUnknown =
   (err503, "the chain tip is not known yet, try again shortly")
@@ -190,3 +214,22 @@ runExceptPrefixT prefix payload = do
     )
     Right
     eret
+
+-- | runs @payload@. If @payload@ throws BadRequest error, will catch it and
+-- will return such error as a value (ie,
+-- `Right (Left (CallstackError callstack (BadRequest ...)))`
+-- any other error returned as error `(Left ...)`
+-- the success value will be returned as `Right (Right successValue))`
+catchBadRequest
+  :: Monad m
+  => m (Either CallstackError r)
+  -> m (Either CallstackError (Either CallstackError r))
+catchBadRequest payload = do
+  eresult <- payload
+  case eresult of
+    Left (CallstackError _callstack (BadRequest _specificError )) ->
+      returnExceptionAsValue eresult
+      where
+        returnExceptionAsValue = return . Right
+    Left nonCatchableError -> return (Left nonCatchableError)
+    Right _successValue -> return (Right (Right _successValue))

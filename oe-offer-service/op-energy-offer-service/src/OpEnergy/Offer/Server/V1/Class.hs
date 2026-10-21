@@ -29,6 +29,7 @@ import           Control.Exception.Safe (SomeException)
 import qualified Control.Exception.Safe as E
 
 import           Data.OpEnergy.API.V1.Block(BlockHeight)
+import           OpEnergy.Error(CallstackError, dbQueryError)
 import           OpEnergy.Offer.Server.V1.Config
 import           OpEnergy.Offer.Server.V1.Metrics
 import           OpEnergy.Offer.Server.V1.LiveEvent (LiveEvent)
@@ -45,7 +46,7 @@ data State = State
   , logFunc :: LogFunc
   , logLevel :: TVar LogLevel
   , metrics :: MetricsState
-  , currentTip :: TVar (Maybe BlockHeight)
+  , currentUnconfirmedTip :: TVar (Maybe BlockHeight)
     -- ^ chain tip height (blockspan service's newest confirmed block plus the
     -- amount of blocks it waits for confirmation), followed from its
     -- websocket by "OpEnergy.Offer.Server.V1.BlockspanClient". 'Nothing'
@@ -76,7 +77,7 @@ type AppM = ReaderT State Handler
 defaultState :: (MonadLoggerIO m ) => Config-> MetricsState-> LogFunc-> Pool SqlBackend-> m State
 defaultState config metrics logFunc offerDBPool = do
   logLevelV <- liftIO $ TVar.newTVarIO (configLogLevelMin config)
-  currentTipV <- liftIO $ TVar.newTVarIO Nothing
+  currentUnconfirmedTipV <- liftIO $ TVar.newTVarIO Nothing
   currentTipMediantimeV <- liftIO $ TVar.newTVarIO Nothing
   liveEventsV <- liftIO $ TChan.newBroadcastTChanIO
   liveEventSeqV <- liftIO $ TVar.newTVarIO 0
@@ -87,7 +88,7 @@ defaultState config metrics logFunc offerDBPool = do
     , logFunc = logFunc
     , logLevel = logLevelV
     , metrics = metrics
-    , currentTip = currentTipV
+    , currentUnconfirmedTip = currentUnconfirmedTipV
     , currentTipMediantime = currentTipMediantimeV
     , liveEvents = liveEventsV
     , liveEventSeq = liveEventSeqV
@@ -145,12 +146,15 @@ withDBTransactionIO
   :: State
   -> Text
   -> (ReaderT SqlBackend (Control.Monad.Logger.NoLoggingT (ResourceT IO))) r
-  -> IO (Maybe r)
+  -> IO (Either CallstackError r)
 withDBTransactionIO state header next = profileM newHeader metricsV $ do
+  -- E is Control.Exception.Safe, so an asynchronous exception -- the
+  -- cancellation a scheduler is shut down with -- passes through rather
+  -- than being reported here as a failed query
   E.handle (\(err::SomeException) -> do
                runLoggingIO state $ $(logError) (newHeader <> ": " <> Text.pack (show err))
-               return Nothing
-           ) $ flip runSqlPersistMPool pool (Just <$> next)
+               return $! Left dbQueryError
+           ) $ flip runSqlPersistMPool pool (Right <$> next)
   where
     newHeader = header <> ".DBT"
     metricsV = dynamicHistograms (metrics state)
@@ -162,7 +166,7 @@ withDBTransaction
      )
   => Text
   -> (ReaderT SqlBackend (Control.Monad.Logger.NoLoggingT (ResourceT IO))) r
-  -> AppT m (Maybe r)
+  -> AppT m (Either CallstackError r)
 withDBTransaction name next = profile name $ do
   header <- asks callStack
   state <- ask

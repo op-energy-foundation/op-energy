@@ -36,8 +36,10 @@ getMine token =
   in profile name $ runExceptPrefixT name $ do
   (AccountV2.WhoAmIResult personUUIDV _displayName _balance) <-
     ExceptT $ AccountClient.verifyAccountToken token
-  State{ offerDBPool = pool, currentTip = currentTipV } <- lift ask
-  mTip <- liftIO $ TVar.readTVarIO currentTipV
+  State{ offerDBPool = pool
+       , currentUnconfirmedTip = currentUnconfirmedTipV
+       } <- lift ask
+  mTip <- liftIO $ TVar.readTVarIO currentUnconfirmedTipV
   -- TODO: expose pagination params in the API type (mid-term)
   let maxResults = 200
   (offerRows, contractRows) <- liftIO $ flip runSqlPersistMPool pool $ do

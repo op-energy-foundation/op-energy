@@ -108,7 +108,7 @@ webSocketConnection :: MonadIO m => WS.Connection -> AppT m ()
 webSocketConnection conn = do
   state@State{ liveEvents = liveEventsV
              , liveEventSeq = liveEventSeqV
-             , currentTip = currentTipV
+             , currentUnconfirmedTip = currentUnconfirmedTipV
              , currentTipMediantime = currentTipMediantimeV
              } <- ask
   liftIO $ do
@@ -119,7 +119,7 @@ webSocketConnection conn = do
     (eventsV, lastSeqNo, mtip, mmediantime) <- STM.atomically $ (,,,)
       <$> TChan.dupTChan liveEventsV
       <*> TVar.readTVar liveEventSeqV
-      <*> TVar.readTVar currentTipV
+      <*> TVar.readTVar currentUnconfirmedTipV
       <*> TVar.readTVar currentTipMediantimeV
     personV <- TVar.newTVarIO Nothing
     sendLock <- MVar.newMVar ()

@@ -23,6 +23,7 @@ module OpEnergy.Offer.Server.V1.PlatformStats
 
 import           Data.Word(Word64)
 import           Data.Time.Clock(UTCTime)
+import           Control.Monad(forM_)
 import           Control.Monad.IO.Class(MonadIO)
 import           Control.Monad.Trans.Reader(ReaderT)
 
@@ -59,5 +60,25 @@ addCollectedFeeTx feeSats now = do
       }
     Just (Entity statsId _) -> update statsId
       [ PlatformStatsTotalFeesCollectedSats +=. feeSats
+      , PlatformStatsLastUpdated =. now
+      ]
+
+-- | takes the given fee back out of the platform's total, for a settlement
+-- which is taken back. Should be called within the same transaction as the
+-- contract, whose fee it is, is brought back to its live state. Does not
+-- take the total below zero, although the fee of a settlement has always
+-- been added by 'addCollectedFeeTx' before.
+removeCollectedFeeTx
+  :: MonadIO m
+  => Word64
+  -> UTCTime
+  -> ReaderT SqlBackend m ()
+removeCollectedFeeTx feeSats now = do
+  mstats <- selectFirst [] []
+  forM_ mstats $ \(Entity statsId stats) ->
+    let collectedSats = platformStatsTotalFeesCollectedSats stats
+    in update statsId
+      [ PlatformStatsTotalFeesCollectedSats
+          =. collectedSats - min feeSats collectedSats
       , PlatformStatsLastUpdated =. now
       ]
