@@ -59,6 +59,7 @@ import           OpEnergy.Error
                    ( runExceptPrefixT, describeError
                    , CallstackError, potDoesNotCoverFee
                    , isAccountServiceRefused
+                   , isAccountUnknown
                    )
 
 -- | Settles every live contract, whose target block has got
@@ -131,7 +132,9 @@ getTargetBlockMediantimes contracts =
 -- | settles the given contract with 'settleContract', logging whatever kept
 -- it from being settled: the mediantime of its target block is missing from
 -- the given mediantimes, or its settlement itself failed. The contract
--- stays live in both cases, so a later tick settles it.
+-- stays live in both cases, so a later tick settles it -- except for a
+-- payout, whose rollback failed itself: that one is left settled with an
+-- unpaid winner, which 'settleContract' logs for reconciliation.
 settleContractLogging
   :: (MonadIO m, MonadMonitor m)
   => Map BlockHeight Word64
@@ -246,23 +249,38 @@ settleContract actualMtpEpoch (Entity contractId contract@Contract{..}) =
         ecredited <- lift
           $ AccountClient.creditBalance winnerUUID (Sats payoutSats)
         case ecredited of
-          -- the account service has credited nothing, so the settlement is
-          -- taken back and a later tick settles the contract again
+          -- the account service has credited nothing and can credit it
+          -- later, so the settlement is taken back and a later tick
+          -- settles the contract again. A payout, which it can not credit
+          -- later either -- an account it does not have -- is not taken
+          -- back: the contract would return to Live for the next tick to
+          -- try the same payout, and every tick after that, for good
           Left err | isAccountServiceRefused err -> do
-            rolledBack <- ExceptT
+            -- the rollback is answered before it is reported, so a rollback,
+            -- which fails itself, is logged as what it leaves behind: a
+            -- settled contract with an unpaid winner, which no later tick
+            -- looks at again
+            erolledBack <- lift
               $ rollbackSettlement contractId platformFeeSats now
             lift $ runLogging $ $(logError)
               ( "contract " <> tshow (fromSqlKey contractId)
               <> ": the account service refused the payout of "
               <> tshow payoutSats <> " sats to " <> tshow winnerUUID
               <> ", so its settlement was "
-              <> ( if rolledBack
-                     then "taken back and a later tick settles it again"
-                     else "left in place, as it was not settled anymore"
+              <> ( case erolledBack of
+                     Right True ->
+                       "taken back and a later tick settles it again"
+                     Right False ->
+                       "left in place, as it was not settled anymore"
+                     Left rollbackErr ->
+                       "left settled, as taking it back failed: the winner is "
+                       <> "unpaid and a settled contract is not swept again, "
+                       <> "so this needs manual reconciliation: "
+                       <> describeError rollbackErr
                  )
               <> ": " <> describeError err
               )
-            return False
+            either throwE (const (return False)) erolledBack
           _ -> do
             lift $ runLogging $ case ecredited of
               Right _ -> $(logInfo)
@@ -270,14 +288,25 @@ settleContract actualMtpEpoch (Entity contractId contract@Contract{..}) =
                 <> tshow winnerSide <> " won, " <> tshow payoutSats
                 <> " sats credited to " <> tshow winnerUUID
                 )
-              Left err -> $(logError)
-                ( "contract " <> tshow (fromSqlKey contractId) <> " settled ("
-                <> tshow winnerSide <> " won) but it is not known whether its "
-                <> "payout of " <> tshow payoutSats <> " sats reached "
-                <> tshow winnerUUID
-                <> " -- crediting again could pay it twice, so this needs "
-                <> "manual reconciliation: " <> describeError err
-                )
+              Left err
+                | isAccountUnknown err -> $(logError)
+                  ( "contract " <> tshow (fromSqlKey contractId)
+                  <> " settled (" <> tshow winnerSide <> " won) but the "
+                  <> "account service does not have " <> tshow winnerUUID
+                  <> ", so its payout of " <> tshow payoutSats
+                  <> " sats was not made and can not be made by a later "
+                  <> "tick either: the contract is left settled with its "
+                  <> "winner unpaid, which needs manual reconciliation: "
+                  <> describeError err
+                  )
+                | otherwise -> $(logError)
+                  ( "contract " <> tshow (fromSqlKey contractId)
+                  <> " settled (" <> tshow winnerSide
+                  <> " won) but it is not known whether its payout of "
+                  <> tshow payoutSats <> " sats reached " <> tshow winnerUUID
+                  <> " -- crediting again could pay it twice, so this needs "
+                  <> "manual reconciliation: " <> describeError err
+                  )
             -- sent to every connection, so without yourRole. No chain tip is
             -- needed: a settled contract's confirmations don't depend on it
             lift $ publishLiveEvent $! LiveEvent

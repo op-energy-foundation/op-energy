@@ -32,7 +32,8 @@ import qualified Prometheus as P
 
 import           OpEnergy.Error
                    ( CallstackError, authenticationFailure, accountServiceUnavailable
-                   , accountServiceRefused, insufficientBalance
+                   , accountServiceRefused, accountUnknown
+                   , insufficientBalance
                    )
 
 verifyAccountToken :: (MonadIO m) => AccountAPI.AccountToken -> AppT m (Either CallstackError WhoAmIResult)
@@ -61,13 +62,27 @@ creditBalance :: (MonadIO m) => AccountAPI.UUID AccountAPI.Person -> Sats -> App
 creditBalance personUUIDV amountSats =
   adjustBalance Client.creditBalance classifyCredit personUUIDV amountSats
   where
-    -- an answer from the account service tells the caller that the credit
-    -- did not happen, while a lost connection leaves that unknown: the
-    -- former can be repeated, the latter can not
+    -- Only the two answers, which the credit handler gives before it touches
+    -- the balance, tell the caller that the credit did not happen: 401 for a
+    -- wrong service secret and 400 for an account, which is not there. Every
+    -- other failure -- a 500 from around the update, a reply which does not
+    -- decode, a lost connection -- leaves it unknown whether the balance was
+    -- changed. Only a refused credit can be repeated, so the unknown ones
+    -- must not be reported as one
     classifyCredit :: ClientError -> CallstackError
     classifyCredit (ConnectionError err) =
       accountServiceUnavailable (Text.pack (show err))
-    classifyCredit err = accountServiceRefused (Text.pack (show err))
+    -- 400 is the account service answering that it does not have the
+    -- account, and 401 that it did not accept this service's secret. Both
+    -- credited nothing, and they are told apart as only the second one can
+    -- be carried out later: a secret is put right where the services are
+    -- configured, while an account, which is not there, stays that way
+    classifyCredit err@(FailureResponse _ response)
+      | statusCode (responseStatusCode response) == 400 =
+        accountUnknown (Text.pack (show err))
+      | statusCode (responseStatusCode response) == 401 =
+        accountServiceRefused (Text.pack (show err))
+    classifyCredit err = accountServiceUnavailable (Text.pack (show err))
 
 adjustBalance
   :: (MonadIO m)
