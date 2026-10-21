@@ -76,9 +76,9 @@ mkDerivation {
   enableSharedLibraries = false;
   enableLibraryForGhci = false;
   enableSeparateBinOutput = false;
-  testHaskellDepends = [ base hspec text ];
+  testHaskellDepends = [ base hspec text persistent ];
   doBenchmark = false;
   doHaddock = false; # we are not using it without sources, so not useful for now, but consumes CI ram during build
-  doCheck = false;
+  doCheck = true; # the wallet's arithmetic and its rate limit are tested
   license = lib.licenses.bsd3;
 }

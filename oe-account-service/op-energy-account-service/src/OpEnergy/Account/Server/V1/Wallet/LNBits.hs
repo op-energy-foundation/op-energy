@@ -28,6 +28,8 @@
 {-# LANGUAGE ScopedTypeVariables        #-}
 module OpEnergy.Account.Server.V1.Wallet.LNBits
   ( lnbitsWalletBackend
+  -- * exported to be tested
+  , msatsToSats
   ) where
 
 import           Control.Monad.IO.Class (MonadIO)
@@ -650,7 +652,11 @@ finishPayment pool personKey paymentHashV startedAt status mfee back reason
 -- amount, which is not a whole satoshi, is never reported as less than it
 -- is. LNBits reports what left the wallet as negative
 msatsToSats :: Int64 -> Sats
-msatsToSats msats = Sats (fromIntegral ((abs msats + 999) `div` 1000))
+msatsToSats msats =
+  -- worked out as Integer: adding the 999, which rounds up, overflows
+  -- Int64 near its largest amount and answers something negative, and
+  -- abs of the smallest Int64 is itself, which is negative as well
+  Sats (fromIntegral ((abs (toInteger msats) + 999) `div` 1000))
 
 -- | what became of a call, for a caller, which has to tell the wallet
 -- refusing a payment from not hearing back about one

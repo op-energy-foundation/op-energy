@@ -16,6 +16,8 @@
 {-# LANGUAGE OverloadedStrings          #-}
 module OpEnergy.Account.Server.V2.WalletAPI.PayInvoice
   ( payInvoiceHandler
+  -- * exported to be tested
+  , feeReserve
   , payInvoice
   ) where
 
