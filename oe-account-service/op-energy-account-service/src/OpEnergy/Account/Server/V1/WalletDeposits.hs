@@ -23,7 +23,7 @@ module OpEnergy.Account.Server.V1.WalletDeposits
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Logger (logError)
 import           Control.Monad.Trans (lift)
-import           Control.Monad.Trans.Except (ExceptT(..), runExceptT)
+import           Control.Monad.Trans.Except (runExceptT, throwE)
 import           Control.Monad.Trans.Reader (ReaderT, ask)
 import           Data.Time.Clock.POSIX (getPOSIXTime)
 import           Database.Persist.Postgresql (runSqlPersistMPool)
@@ -31,7 +31,9 @@ import           Prometheus (MonadMonitor)
 import           Data.Int (Int64)
 import           Data.Time.Clock.POSIX (POSIXTime)
 import           Database.Persist
-import           Database.Persist.Sql (SqlBackend, updateWhereCount)
+import           Database.Persist.Sql
+                 ( SqlBackend, transactionUndo, updateWhereCount
+                 )
 
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
 import           Data.OpEnergy.Account.API.V2.LedgerReason (LedgerReason(..))
@@ -46,9 +48,7 @@ import           OpEnergy.Account.Server.V1.LedgerEntry
 import           OpEnergy.Account.Server.V1.WalletPayment
 import           OpEnergy.Error
                  ( CallstackError, describeError, eitherException
-                 , walletInvoiceNotFound
                  )
-import           OpEnergy.ExceptMaybe (exceptTMaybeT)
 
 -- | credits the account of an incoming payment, unless it has been credited
 -- already. Returns the balance it produced, or Nothing when somebody else
@@ -68,27 +68,51 @@ creditDepositOnce
   -> POSIXTime
   -> ReaderT SqlBackend m (Either CallstackError (Maybe Sats))
 creditDepositOnce paymentHashV now = runExceptT $ do
-  claimed <- lift $ updateWhereCount
+  -- the row is read before it is claimed and the claim names its id, so
+  -- what is credited is the row, which was claimed. Deriving it again
+  -- from the hash afterwards would not: a payment, which is credited,
+  -- records the second it happened in, so a second read can not tell two
+  -- of them apart
+  mwaiting <- lift $ selectFirst
     [ WalletPaymentPaymentHash ==. paymentHashV
     , WalletPaymentDirection ==. Incoming
+    -- only a payment, which has been paid: the status is what says the
+    -- sats arrived, and crediting one, which has not, invents them
+    , WalletPaymentStatus ==. Settled
     , WalletPaymentCreditedAt ==. Nothing
     ]
-    [ WalletPaymentCreditedAt =. Just now
-    , WalletPaymentUpdatedAt =. now
-    ]
-  if claimed /= (1 :: Int64)
-    then return Nothing
-    else do
-      (Entity _ payment) <- exceptTMaybeT walletInvoiceNotFound
-        $ selectFirst [ WalletPaymentPaymentHash ==. paymentHashV ] []
-      balance <- ExceptT $ adjustBalanceTx
-        (walletPaymentPersonId payment)
-        Credit
-        (walletPaymentAmountSats payment)
-        Deposit
-        (Just (ledgerReference "payment" (unPaymentHash paymentHashV)))
-        now
-      return $! Just balance
+    []
+  case mwaiting of
+    Nothing -> return Nothing
+    Just (Entity key payment) -> do
+      claimed <- lift $ updateWhereCount
+        [ WalletPaymentId ==. key
+        , WalletPaymentCreditedAt ==. Nothing
+        ]
+        [ WalletPaymentCreditedAt =. Just now
+        , WalletPaymentUpdatedAt =. now
+        ]
+      if claimed /= (1 :: Int64)
+        -- another caller claimed it between the read and the write, and
+        -- it is that caller, which credits it
+        then return Nothing
+        else do
+          ebalance <- lift $ adjustBalanceTx
+            (walletPaymentPersonId payment)
+            Credit
+            (walletPaymentAmountSats payment)
+            Deposit
+            (Just (ledgerReference "payment" (unPaymentHash paymentHashV)))
+            now
+          case ebalance of
+            -- the claim goes back with it, so the payment stays waiting
+            -- and is credited by a later tick. Left marked as credited
+            -- with the balance never moved, nothing would look at it
+            -- again and the sats would be lost to the account
+            Left err -> do
+              lift transactionUndo
+              throwE err
+            Right balance -> return $! Just balance
 
 -- | how many waiting deposits one tick credits, so the work a tick does is
 -- bounded whatever has accumulated

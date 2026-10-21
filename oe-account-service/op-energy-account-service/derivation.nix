@@ -1,4 +1,6 @@
 { mkDerivation, lib, base
+, containers
+, http-types
 , hspec, text
 , servant, servant-server, servant-client, servant-jsonrpc, servant-jsonrpc-client, servant-swagger, swagger2
 , websockets, servant-websockets
@@ -40,6 +42,8 @@ mkDerivation {
     op-energy-account-api
     servant servant-server servant-client servant-jsonrpc servant-jsonrpc-client servant-swagger swagger2
     websockets servant-websockets
+    containers
+    http-types
     aeson aeson-pretty
     text bytestring
     lens
@@ -72,9 +76,9 @@ mkDerivation {
   enableSharedLibraries = false;
   enableLibraryForGhci = false;
   enableSeparateBinOutput = false;
-  testHaskellDepends = [ base hspec text ];
+  testHaskellDepends = [ base hspec text persistent ];
   doBenchmark = false;
   doHaddock = false; # we are not using it without sources, so not useful for now, but consumes CI ram during build
-  doCheck = false;
+  doCheck = true; # the wallet's arithmetic and its rate limit are tested
   license = lib.licenses.bsd3;
 }

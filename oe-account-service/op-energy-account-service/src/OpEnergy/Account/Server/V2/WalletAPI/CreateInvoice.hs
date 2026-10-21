@@ -18,7 +18,8 @@ import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Except (ExceptT(..), throwE)
 import           Control.Monad.Trans.Reader (ask)
 import           Data.Time.Clock.POSIX (getPOSIXTime)
-import           Database.Persist (Entity(..))
+import           Database.Persist (Entity(..), count, (==.), (>.))
+import           Database.Persist.Postgresql (runSqlPersistMPool)
 
 import qualified Data.OpEnergy.Account.API.V1.Account as API
 import           Data.OpEnergy.Account.API.V2.CreateInvoiceRequest
@@ -38,10 +39,16 @@ import           OpEnergy.Account.Server.V1.Config
                  ( Config(..)
                  )
 import           OpEnergy.Account.Server.V1.Wallet.Class
+import           OpEnergy.Account.Server.V1.WalletPayment
+                 ( EntityField(..), WalletPaymentDirection(..)
+                 , WalletPaymentStatus(..)
+                 )
 import           OpEnergy.Error
                  ( eitherThrowJSON, runExceptPrefixT
-                 , CallstackError, accountNotFound
+                 , CallstackError, accountNotFound, dbQueryError
+                 , eitherException
                  , walletAmountAboveMaximum, walletAmountBelowMinimum
+                 , walletTooManyPendingInvoices
                  )
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 
@@ -66,13 +73,30 @@ createInvoice token (CreateInvoiceRequest requestAmountSats requestNote) =
     in profile name $ runExceptPrefixT name $ do
   (Entity key _) <- exceptTMaybeT accountNotFound
     $ mgetPersonByAccountToken token
-  State{ config = config, wallet = walletV } <- lift ask
+  State{ config = config, accountDBPool = pool, wallet = walletV } <- lift ask
   let amount = requestAmountSats -- named, as it is what the wallet is asked for
   when (amount < configWalletMinInvoiceSats config)
     $ throwE walletAmountBelowMinimum
   when (amount > configWalletMaxInvoiceSats config)
     $ throwE walletAmountAboveMaximum
   now <- liftIO getPOSIXTime
+  -- an invoice, which is waiting, is asked about by the scheduler until it
+  -- is paid or expires, so the number of them one account may have at once
+  -- is what keeps an account -- and an account is free to create -- from
+  -- deciding how often this service calls the wallet. An expired one is
+  -- not counted: it is no longer asked about and the account would
+  -- otherwise be left unable to ask to be paid
+  pendingCount <- ExceptT $ liftIO
+    $ fmap (either (const (Left dbQueryError)) Right)
+    $ eitherException $ flip runSqlPersistMPool pool
+    $ count
+      [ WalletPaymentPersonId ==. key
+      , WalletPaymentDirection ==. Incoming
+      , WalletPaymentStatus ==. Pending
+      , WalletPaymentExpiresAt >. Just now
+      ]
+  when (pendingCount >= fromIntegral (configWalletMaxPendingInvoices config))
+    $ throwE walletTooManyPendingInvoices
   created <- ExceptT $ liftIO $ walletCreateInvoice walletV $ CreateInvoiceParams
     { createInvoicePersonId = key
     , createInvoiceAmountSats = amount

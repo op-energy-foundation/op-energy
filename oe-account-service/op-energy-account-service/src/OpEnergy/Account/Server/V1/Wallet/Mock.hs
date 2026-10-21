@@ -27,10 +27,13 @@ import           Data.Word (Word64)
 import qualified System.IO as IO
 
 import           Database.Persist
-import           Database.Persist.Sql (SqlBackend, fromSqlKey, updateWhereCount)
+import           Database.Persist.Sql
+                 ( SqlBackend, fromSqlKey, transactionUndo, updateWhereCount
+                 )
 import           Database.Persist.Postgresql (runSqlPersistMPool)
 
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
+import           Data.OpEnergy.Account.API.V2.LedgerReason (LedgerReason(..))
 import           Data.OpEnergy.Account.API.V2.Bolt11Invoice
                  ( Bolt11Invoice(..), everifyBolt11Invoice
                  )
@@ -39,6 +42,9 @@ import           Data.OpEnergy.Account.API.V2.PaymentHash
                  )
 import           Data.OpEnergy.Account.API.V2.WalletMode (WalletMode(..))
 
+import           OpEnergy.Account.Server.V1.LedgerEntry
+                 ( LedgerDirection(..), adjustBalanceTx
+                 )
 import           OpEnergy.Account.Server.V1.Person (PersonId)
 import           OpEnergy.Account.Server.V1.Wallet.Class
 import           OpEnergy.Account.Server.V1.WalletPayment
@@ -60,6 +66,10 @@ mockWalletBackend pool = WalletBackend
   , walletCreateInvoice = createInvoice pool
   , walletResolveInvoice = resolveInvoice pool
   , walletPayInvoice = payInvoice pool
+  -- this backend settles its own payments, so what it would answer is
+  -- what the asking service wrote in the first place: there is nothing to
+  -- ask it
+  , walletReadPayment = Nothing
   , walletSettleInvoice = Just (settleInvoice pool)
   }
 
@@ -195,17 +205,55 @@ payInvoiceOrThrow pool params = do
       | walletPaymentStatus payment /= Pending ->
           return $! Left walletInvoiceNotFound
       | otherwise -> do
-          settled <- flip runSqlPersistMPool pool $ updateWhereCount
-            [ WalletPaymentId ==. key, WalletPaymentStatus ==. Pending ]
-            [ WalletPaymentStatus =. Settled, WalletPaymentUpdatedAt =. now ]
-          if settled /= (1 :: Int64)
-            then return $! Left walletInvoiceNotFound
-            else return $! Right $! PaidInvoice
-              { paidInvoicePaymentHash = walletPaymentPaymentHash payment
-              , paidInvoiceAmountSats = walletPaymentAmountSats payment
-              , paidInvoiceFeeSats = Sats 0
-              , paidInvoiceRecipientPersonId = Just (walletPaymentPersonId payment)
-              }
+          let amount = walletPaymentAmountSats payment
+          -- the balance moves in the transaction, which settles the
+          -- invoice, so the two are recorded together or not at all. No
+          -- reserve is taken: this backend charges no fee
+          flip runSqlPersistMPool pool $ do
+            edebited <- adjustBalanceTx payer Debit amount
+              Withdrawal Nothing now
+            case edebited of
+              Left err -> return $! Left err
+              Right balanceAfter -> do
+                settled <- updateWhereCount
+                  [ WalletPaymentId ==. key
+                  , WalletPaymentStatus ==. Pending
+                  ]
+                  [ WalletPaymentStatus =. Settled
+                  , WalletPaymentUpdatedAt =. now
+                  ]
+                if settled /= (1 :: Int64)
+                  then do
+                    transactionUndo
+                    return $! Left walletInvoiceNotFound
+                  else do
+                    -- the payer's side of it, so the sats, which left the
+                    -- account, are in its history
+                    _ <- insertUnique $ WalletPayment
+                      { walletPaymentPersonId = payer
+                      , walletPaymentDirection = Outgoing
+                      , walletPaymentStatus = Settled
+                      , walletPaymentAmountSats = amount
+                      , walletPaymentFeeSats = Sats 0
+                      , walletPaymentPaymentHash =
+                          walletPaymentPaymentHash payment
+                      , walletPaymentInvoice = invoiceV
+                      , walletPaymentNote = walletPaymentNote payment
+                      , walletPaymentExpiresAt = Nothing
+                      , walletPaymentCreditedAt = Nothing
+                      , walletPaymentCreatedAt = now
+                      , walletPaymentUpdatedAt = now
+                      }
+                    return $! Right $! PaidInvoice
+                      { paidInvoicePaymentHash =
+                          walletPaymentPaymentHash payment
+                      , paidInvoiceBalanceAfter = balanceAfter
+                      , paidInvoiceAmountSats = amount
+                      , paidInvoiceFeeSats = Sats 0
+                      , paidInvoiceProgress = PaymentSettled
+                      , paidInvoiceRecipientPersonId =
+                          Just (walletPaymentPersonId payment)
+                      }
     Nothing -> do
       -- scoped to the payer, as this wallet can only honestly answer for
       -- what this account has paid: a node refuses an invoice anyone has
@@ -234,32 +282,45 @@ payInvoiceOrThrow pool params = do
           -- together, both read no row and both reach here, and
           -- UniqueWalletPaymentPersonDirectionInvoice is what refuses the
           -- second rather than recording the same invoice as paid twice
-          minserted <- flip runSqlPersistMPool pool $ insertUnique
-            $ WalletPayment
-            { walletPaymentPersonId = payer
-            , walletPaymentDirection = Outgoing
-            , walletPaymentStatus = Settled
-            , walletPaymentAmountSats = amount
-            , walletPaymentFeeSats = Sats 0
-            , walletPaymentPaymentHash = paymentHashV
-            , walletPaymentInvoice = invoiceV
-            , walletPaymentNote = Nothing
-            , walletPaymentExpiresAt = Nothing
-            , walletPaymentCreditedAt = Nothing
-            , walletPaymentCreatedAt = now
-            , walletPaymentUpdatedAt = now
-            }
-          case minserted of
-            -- the payment, which uniqueness refused, is this account's own
-            -- payment of this invoice, recorded by whichever request got
-            -- there first, so the caller is told what a second attempt is
-            Nothing -> return $! Left walletInvoiceAlreadyPaid
-            Just _ -> return $! Right $! PaidInvoice
-              { paidInvoicePaymentHash = paymentHashV
-              , paidInvoiceAmountSats = amount
-              , paidInvoiceFeeSats = Sats 0
-              , paidInvoiceRecipientPersonId = Nothing
-              }
+          -- the balance moves in the transaction, which records the
+          -- payment, so neither is ever written without the other
+          flip runSqlPersistMPool pool $ do
+            edebited <- adjustBalanceTx payer Debit amount
+              Withdrawal Nothing now
+            case edebited of
+              Left err -> return $! Left err
+              Right balanceAfter -> do
+                minserted <- insertUnique $ WalletPayment
+                  { walletPaymentPersonId = payer
+                  , walletPaymentDirection = Outgoing
+                  , walletPaymentStatus = Settled
+                  , walletPaymentAmountSats = amount
+                  , walletPaymentFeeSats = Sats 0
+                  , walletPaymentPaymentHash = paymentHashV
+                  , walletPaymentInvoice = invoiceV
+                  , walletPaymentNote = Nothing
+                  , walletPaymentExpiresAt = Nothing
+                  , walletPaymentCreditedAt = Nothing
+                  , walletPaymentCreatedAt = now
+                  , walletPaymentUpdatedAt = now
+                  }
+                case minserted of
+                  -- the payment, which uniqueness refused, is this
+                  -- account's own payment of this invoice, recorded by
+                  -- whichever request got there first, so the caller is
+                  -- told what a second attempt is. The balance it took
+                  -- goes back by undoing the transaction
+                  Nothing -> do
+                    transactionUndo
+                    return $! Left walletInvoiceAlreadyPaid
+                  Just _ -> return $! Right $! PaidInvoice
+                    { paidInvoicePaymentHash = paymentHashV
+                    , paidInvoiceBalanceAfter = balanceAfter
+                    , paidInvoiceAmountSats = amount
+                    , paidInvoiceFeeSats = Sats 0
+                    , paidInvoiceProgress = PaymentSettled
+                    , paidInvoiceRecipientPersonId = Nothing
+                    }
 
 -- | marks an invoice of the given account paid, as a payer would. Reports
 -- whether this call was the one, which settled it, so its account is
@@ -279,6 +340,7 @@ settleInvoice pool personKey paymentHashV = do
     $ selectFirst
       [ WalletPaymentPaymentHash ==. paymentHashV
       , WalletPaymentPersonId ==. personKey
+      , WalletPaymentDirection ==. Incoming
       ]
       []
   case mpayment of

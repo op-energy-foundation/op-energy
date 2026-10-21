@@ -13,6 +13,9 @@ module OpEnergy.Error
   , dbQueryError
 
   , blockspanAPIError
+  , walletAPIError
+  , walletUnreachable
+  , walletPaymentNotMade
 
   , authenticationFailure
   , accountNotFound
@@ -34,6 +37,8 @@ module OpEnergy.Error
   , walletAmountRequired
   , walletAmountBelowMinimum
   , walletAmountAboveMaximum
+  , walletTooManyPendingInvoices
+  , walletTooManyPayAttempts
   , ledgerReasonMismatch
   ) where
 
@@ -45,7 +50,9 @@ import           Control.Monad.Trans.Except(ExceptT, runExceptT)
 import           Control.Exception.Safe (SomeException)
 import qualified Control.Exception.Safe as E
 
-import           Servant(ServerError, err400, err401, err500)
+import           Servant
+                 ( ServerError(..), err400, err401, err500
+                 )
 import           Data.Text.Show( tshow)
 import           Data.OpEnergy.API.V1.Error(throwJSON)
 
@@ -69,6 +76,8 @@ data BadRequestError
   | WalletAmountRequired
   | WalletAmountBelowMinimum
   | WalletAmountAboveMaximum
+  | WalletTooManyPendingInvoices
+  | WalletTooManyPayAttempts
   | LedgerReasonMismatch
 instance Show BadRequestError where
   show CalculatedGuessesCountNotFound = "calculated guesses count not found"
@@ -90,6 +99,10 @@ instance Show BadRequestError where
   show WalletAmountRequired = "amount is required for an invoice of another wallet"
   show WalletAmountBelowMinimum = "amount is below the smallest allowed"
   show WalletAmountAboveMaximum = "amount is above the largest allowed"
+  show WalletTooManyPendingInvoices =
+    "too many invoices of this account are waiting to be paid"
+  show WalletTooManyPayAttempts =
+    "too many payments have been attempted by this account, try again later"
   show LedgerReasonMismatch = "reason does not describe this direction"
 
 data InternalError
@@ -97,7 +110,11 @@ data InternalError
   | LatestUnconfirmedBlockHeightMissing
   | LatestConfirmedBlockMissing
   | DBQueryError
+  | WalletUnreachable
+  | WalletPaymentNotMade
 instance Show InternalError where
+  show WalletUnreachable = "the wallet could not be reached"
+  show WalletPaymentNotMade = "the wallet could not pay the invoice"
   show DBQueryError = "DB query failed"
   show LatestConfirmedBlockMissing = "latest confirmed block hasn't been received yet"
   show LatestUnconfirmedBlockHeightMissing = "latest unconfirmed block hasn't been received yet"
@@ -107,6 +124,10 @@ data Error
   = BadRequest BadRequestError
   | Internal InternalError
   | BlockspanAPI Text
+  | WalletAPI Text
+    -- ^ the wallet service answered with something, which is not an answer.
+    -- Its reason is built from the status alone and never from the request,
+    -- which carries this service's API key
 
 data CallstackError = CallstackError Text Error
 
@@ -121,6 +142,23 @@ dbQueryError = CallstackError "" $! Internal DBQueryError
 
 blockspanAPIError :: Text-> CallstackError
 blockspanAPIError = CallstackError "" . BlockspanAPI
+
+-- | the wallet service did not answer with what it promises, for a reason,
+-- which is not one of the cases below -- an answer, which can not be read,
+-- names what was wrong with it, and a failed call names its status. The
+-- reason is shown to the client, so it is a short description of what
+-- happened and never the request, which carries the API key
+walletAPIError :: Text-> CallstackError
+walletAPIError = CallstackError "" . WalletAPI
+
+-- | the wallet did not answer at all, so whether it acted on the request
+-- is not known
+walletUnreachable :: CallstackError
+walletUnreachable = CallstackError "" $! Internal WalletUnreachable
+
+-- | the wallet says it did not pay the invoice it was given
+walletPaymentNotMade :: CallstackError
+walletPaymentNotMade = CallstackError "" $! Internal WalletPaymentNotMade
 
 authenticationFailure :: CallstackError
 authenticationFailure = CallstackError "" $! BadRequest AuthenticationFailure
@@ -160,6 +198,12 @@ walletAmountBelowMinimum :: CallstackError
 walletAmountBelowMinimum = CallstackError "" $! BadRequest WalletAmountBelowMinimum
 walletAmountAboveMaximum :: CallstackError
 walletAmountAboveMaximum = CallstackError "" $! BadRequest WalletAmountAboveMaximum
+walletTooManyPendingInvoices :: CallstackError
+walletTooManyPendingInvoices =
+  CallstackError "" $! BadRequest WalletTooManyPendingInvoices
+walletTooManyPayAttempts :: CallstackError
+walletTooManyPayAttempts =
+  CallstackError "" $! BadRequest WalletTooManyPayAttempts
 ledgerReasonMismatch :: CallstackError
 ledgerReasonMismatch = CallstackError "" $! BadRequest LedgerReasonMismatch
 
@@ -168,12 +212,29 @@ describeError :: CallstackError -> Text
 describeError (CallstackError callstack err) =
   callstack <> ": " <> snd (errorToServerError err)
 
+-- | 429, which servant does not name
+tooManyRequests :: ServerError
+tooManyRequests = ServerError
+  { errHTTPCode = 429
+  , errReasonPhrase = "Too Many Requests"
+  , errBody = ""
+  , errHeaders = []
+  }
+
 -- | converts Error into printable version
 errorToServerError :: Error -> (ServerError, Text)
 errorToServerError (BadRequest InvalidServiceSecret) = (err401, tshow InvalidServiceSecret)
+-- a refusal for asking too often is answered as such, so a client can
+-- tell it apart from a request, which is wrong, and wait rather than
+-- change what it sends
+errorToServerError (BadRequest WalletTooManyPayAttempts) =
+  (tooManyRequests, tshow WalletTooManyPayAttempts)
 errorToServerError (BadRequest specificError) = (err400, tshow specificError)
 errorToServerError (Internal specificError) = (err500, tshow specificError)
 errorToServerError (BlockspanAPI specificError) = (err500, tshow specificError)
+-- the reason is already a sentence, so it is reported as it is: tshow
+-- would wrap it in quotes, which only adds noise to what a client reads
+errorToServerError (WalletAPI reason) = (err500, reason)
 
 
 -- | The goal of this function is to turn failure results from @payload@ into JSON  `ServerError`s.
