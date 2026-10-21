@@ -80,6 +80,20 @@ walletPaymentStatusFromText "expired" = Right Expired
 walletPaymentStatusFromText other     =
   Left $ "WalletPaymentStatus: unknown status: " <> other
 
+-- | UniqueWalletPaymentHashPersonDirection: one account records one
+-- payment once each way round.
+--
+-- The hash alone is not the key. An invoice of this service, which one of
+-- its accounts pays, is both sides of one hash: the account, which is
+-- paid, has the incoming row and the account, which pays, the outgoing
+-- one. Nor is the hash with the direction: two accounts may each try to
+-- pay the same invoice of another wallet, and the one, which tries
+-- second, must not be refused because the first has a row -- lightning
+-- itself refuses an invoice, which has been paid, so a second attempt
+-- fails there and is refunded.
+--
+-- That one account can not pay one invoice twice is kept by
+-- UniqueWalletPaymentPersonDirectionInvoice, not by this
 share [mkPersist sqlSettings, mkMigrate "migrateWalletPayment"] [persistLowerCase|
 WalletPayment
   personId PersonId
@@ -94,7 +108,7 @@ WalletPayment
   creditedAt POSIXTime Maybe -- incoming only: when the balance was credited for it, so that happens exactly once
   createdAt POSIXTime
   updatedAt POSIXTime
-  UniqueWalletPaymentHashDirection paymentHash direction -- the same payment can never be recorded twice in the same direction. An invoice of this service, which one of its accounts pays, is both sides of one hash: the account, which is paid, has the incoming row and the account, which pays, the outgoing one
+  UniqueWalletPaymentHashPersonDirection paymentHash personId direction
   UniqueWalletPaymentPersonDirectionInvoice personId direction invoice -- one account pays one invoice once, whatever two requests race
   deriving Eq Show Generic
 |]

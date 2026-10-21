@@ -3,14 +3,16 @@
  -
  - One value of 'WalletBackend' is built at startup from config and kept in
  - 'OpEnergy.Account.Server.V1.Class.State', so no handler knows which
- - backend it talks to. The mock implementation lives in
+ - backend it talks to, beyond 'GetWalletInfo', which reports which one it
+ - is. The mock implementation lives in
  - "OpEnergy.Account.Server.V1.Wallet.Mock" and the one, which talks to a
  - real wallet, in "OpEnergy.Account.Server.V1.Wallet.LNBits"; which of
  - them is built changes neither the handlers nor the API.
  -
- - The procedures answer about lightning only. Balances are moved by the
- - handlers through 'OpEnergy.Account.Server.V1.LedgerEntry.adjustBalanceTx',
- - which keeps the ledger the single record of every balance change.
+ - A backend moves the paying account's balance itself, in the transaction,
+ - which records the payment, so the two can not be written apart. It does
+ - so through 'OpEnergy.Account.Server.V1.LedgerEntry.adjustBalanceTx',
+ - which stays the single record of every balance change.
  -}
 {-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE OverloadedStrings          #-}

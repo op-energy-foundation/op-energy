@@ -5,10 +5,10 @@
  - happened: the sats move at the node, and nothing reaches this process.
  - So the scheduler asks, payment by payment, and records what it is told.
  -
- - For an incoming payment that is all this does: marking it settled is
- - enough, and
- - 'OpEnergy.Account.Server.V1.WalletDeposits.creditWaitingDeposits'
- - credits it exactly once from that.
+ - For an incoming payment this marks it settled, which is enough for
+ - 'OpEnergy.Account.Server.V1.WalletDeposits.creditWaitingDeposits' to
+ - credit it exactly once, or writes it off as expired once its expiry has
+ - passed and the wallet still reports nobody has paid it.
  -
  - An outgoing payment is finished here instead, as nothing else is waiting
  - for it: the balance was taken when it was made, together with a reserve
@@ -75,10 +75,15 @@ maxPaymentsPerTick = 50
 -- | asks the wallet about the payments, which are still pending, and
 -- records the answers. Run from the scheduler.
 --
--- Only a payment, which is still pending, is changed, and only into the
--- state the wallet reports: an answer this service does not understand
--- leaves the payment alone, to be asked about again next tick, rather than
--- finishing it on a guess
+-- Only a payment, which is still pending, is changed, and only on an
+-- answer: an answer this service does not understand, and a call, which
+-- failed, leave the payment alone to be asked about again rather than
+-- finishing it on a guess.
+--
+-- The one state, which is written without the wallet reporting it, is
+-- 'Expired', for an invoice, whose expiry has passed and which the wallet
+-- still says nobody has paid: the wallet goes on answering that way for
+-- good, so nothing else would ever end the asking
 reconcilePendingPayments :: (MonadIO m, MonadMonitor m) => AppT m ()
 reconcilePendingPayments =
     let name = "V1.reconcilePendingPayments"
@@ -118,19 +123,22 @@ reconcilePendingPayments =
       -- skipped and the rest of the tick still runs
       eobserved <- liftIO $ eitherException $ readPayment paymentHashV
       case eobserved of
+        -- a call, which failed, says nothing about the payment: it is
+        -- only noted as asked about, never written off. The wallet may
+        -- have been paid while it was unreachable
         Left err -> do
           runLogging $ $(logError)
             ( "reconcilePendingPayments: asking about the payment "
             <> unPaymentHash paymentHashV <> " failed: " <> err
             )
-          park pool payment
+          touchNow pool payment
         Right (Left err) -> do
           runLogging $ $(logError)
             ( "reconcilePendingPayments: the wallet could not answer about "
             <> "the payment " <> unPaymentHash paymentHashV <> ": "
             <> describeError err
             )
-          park pool payment
+          touchNow pool payment
         -- not finished yet, which is the usual answer: asked again later
         Right (Right ObservedPending) -> park pool payment
         Right (Right (ObservedSettled fee)) -> settle pool payment fee
@@ -151,7 +159,10 @@ reconcilePendingPayments =
       -- are already gone and the account was told what it would pay. It is
       -- asked about rather than subtracted, as Sats counts upwards only
       -- and the difference would otherwise wrap into an enormous credit
-      when (fee > reserve) $ runLogging $ $(logError)
+      -- outgoing only: nothing was sent for a payment, which arrived, so
+      -- there is no reserve it could have overrun
+      when (fee > reserve && walletPaymentDirection payment == Outgoing)
+        $ runLogging $ $(logError)
         ( "reconcilePendingPayments: the payment "
         <> unPaymentHash (walletPaymentPaymentHash payment) <> " cost "
         <> tshow (unSats fee) <> " sats while " <> tshow (unSats reserve)
@@ -235,6 +246,14 @@ reconcilePendingPayments =
             )
           finish pool payment Expired Nothing (Sats 0) "" now
         else touch pool payment now
+
+    -- 'touch' for a caller, which has not read the clock
+    touchNow
+      :: MonadIO m
+      => Pool SqlBackend
+      -> WalletPayment
+      -> AppT m ()
+    touchNow pool payment = liftIO getPOSIXTime >>= touch pool payment
 
     -- records that the payment was asked about, without changing what it
     -- is. Only the order the next tick reads the payments in depends on it

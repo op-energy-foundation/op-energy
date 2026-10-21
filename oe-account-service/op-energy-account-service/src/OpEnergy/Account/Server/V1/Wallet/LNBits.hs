@@ -8,8 +8,8 @@
  - A payment out of the wallet is not instant: LNBits may still be trying
  - when it answers. Such a payment is reported as 'PaymentInFlight' and is
  - never treated as failed, as refunding one, which is still travelling,
- - pays it twice. Only an answer, which says the payment failed, is a
- - failure.
+ - pays it twice. A failure is an answer, which says the payment failed,
+ - or one the wallet refused before it acted on the request at all.
  -
  - Every account of this service shares the one LNBits wallet, so an
  - invoice this service issued is paid inside this service: at the wallet
@@ -88,9 +88,8 @@ import           OpEnergy.Error
 -- at the given URL.
 --
 -- The invoice key reads and creates, and is the one every reading path
--- is given. The admin key spends and reaches one procedure only,
--- 'sendPayment', so a path, which does not pay, never holds the key,
--- which could empty the wallet
+-- is given. The admin key spends and is used in one call only, the one
+-- 'sendPayment' makes, so a path, which does not pay, is never given it
 lnbitsWalletBackend
   :: BaseUrl
   -> Text

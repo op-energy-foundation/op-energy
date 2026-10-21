@@ -71,10 +71,14 @@ takeWalletAttempt (WalletAttempts attemptsV) limit window now key =
   liftIO $ atomically $ do
     attempts <- TVar.readTVar attemptsV
     let current = case Map.lookup key attempts of
-          -- the window this account was counted in is over, so it is
-          -- counted in a new one
+          -- the window this account is counted in is still running, so
+          -- it goes on being counted in that one
           Just w | windowStartedAt w + window > now -> w
-          _ -> Window { windowStartedAt = now, windowAttempts = 0 }
+          -- no window, or the one it had is over: a new one starts
+          _ -> Window
+            { windowStartedAt = now
+            , windowAttempts = 0
+            }
         taken = current { windowAttempts = windowAttempts current + 1 }
     if windowAttempts current >= limit
       then return False

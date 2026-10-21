@@ -156,49 +156,61 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
   -- what the payment did not use in the transaction, which finishes it.
   -- So a Left leaves the balance as it was and there is nothing to give
   -- back here, and a payment, which is recorded, has always been paid for
-  epaid <- liftIO $ walletPayInvoice walletV $ PayInvoiceParams
+  paid <- ExceptT $ liftIO $ walletPayInvoice walletV $ PayInvoiceParams
     { payInvoicePersonId = key
     , payInvoiceBolt11 = requestInvoice
     , payInvoiceAmountSats = Just amount
     , payInvoiceFeeReserveSats = reserve
     , payInvoiceNow = now
     }
-  case epaid of
-    Left err -> throwE err
-    Right paid -> do
-      -- nothing made the amount debited and the amount the wallet reports
-      -- paying agree, and the interface lets a backend report its own: a
-      -- difference is sats, which appeared or went with no ledger entry
-      -- for them, so it is written down rather than passing unnoticed. It
-      -- is not refused, as the payment has already happened by now. The
-      -- mock always reports the amount it was asked for, so this is silent
-      -- until a backend with a node does otherwise
-      when (paidInvoiceAmountSats paid /= amount)
-        $ lift $ runLogging $ $(logError)
-          ( "payInvoice: debited " <> tshow (unSats amount)
-          <> " sats while the wallet reports having paid "
-          <> tshow (unSats (paidInvoiceAmountSats paid))
-          <> " sats, which differ and need manual reconciliation"
-          )
-      -- an invoice of this service stays inside it: the account it was
-      -- created for is credited, as nothing left over lightning. The credit
-      -- claims the payment as it moves the balance, which is what keeps it
-      -- to one: the scheduler credits every settled payment whose
-      -- creditedAt is unset, so a credit written beside the claim is made
-      -- again by the next tick
-      when (isJust (paidInvoiceRecipientPersonId paid)) $ do
-        ecredited <- liftIO $ flip runSqlPersistMPool pool
-          $ creditDepositOnce (paidInvoicePaymentHash paid) now
-        logUnreconciled
-          ( "paid " <> tshow (unSats (paidInvoiceAmountSats paid))
-          <> " sats, but crediting the receiving account failed"
-          ) ecredited
-      -- positional, as several wallet types share these field names
-      return $! PayInvoiceResult
-        (paidInvoicePaymentHash paid)
-        (paidInvoiceAmountSats paid)
-        (paidInvoiceFeeSats paid)
-        (paidInvoiceBalanceAfter paid)
+  -- nothing made the amount debited and the amount the wallet reports
+  -- paying agree, and the interface lets a backend report its own: a
+  -- difference is sats, which appeared or went with no ledger entry
+  -- for them, so it is written down rather than passing unnoticed. It
+  -- is not refused, as the payment has already happened by now. The
+  -- mock always reports the amount it was asked for, so this is silent
+  -- until a backend with a node does otherwise
+  when (paidInvoiceAmountSats paid /= amount)
+    $ lift $ runLogging $ $(logError)
+      ( "payInvoice: debited " <> tshow (unSats amount)
+      <> " sats while the wallet reports having paid "
+      <> tshow (unSats (paidInvoiceAmountSats paid))
+      <> " sats, which differ and need manual reconciliation"
+      )
+  -- an invoice of this service stays inside it: the account it was
+  -- created for is credited, as nothing left over lightning. The credit
+  -- claims the payment as it moves the balance, which is what keeps it
+  -- to one: the scheduler credits every settled payment whose
+  -- creditedAt is unset, so a credit written beside the claim is made
+  -- again by the next tick
+  when (isJust (paidInvoiceRecipientPersonId paid)) $ do
+    ecredited <- liftIO $ flip runSqlPersistMPool pool
+      $ creditDepositOnce (paidInvoicePaymentHash paid) now
+    logUnreconciled
+      ( "paid " <> tshow (unSats (paidInvoiceAmountSats paid))
+      <> " sats, but crediting the receiving account failed"
+      ) ecredited
+  -- a fee above what was reserved is not taken from the account: it
+  -- was told what it would pay, and the sats have left the wallet
+  -- either way. The service is short by the difference, so it is
+  -- written down here as the scheduler writes it down for a payment,
+  -- which finishes later
+  when (paidInvoiceFeeSats paid > reserve
+        && paidInvoiceProgress paid == PaymentSettled)
+    $ lift $ runLogging $ $(logError)
+      ( "payInvoice: the payment cost "
+      <> tshow (unSats (paidInvoiceFeeSats paid))
+      <> " sats while " <> tshow (unSats reserve)
+      <> " sats were reserved for it, so the wallet is short by the "
+      <> "difference and needs manual reconciliation"
+      )
+  -- positional, as several wallet types share these field names
+  return $! PayInvoiceResult
+    (paidInvoicePaymentHash paid)
+    (paidInvoiceAmountSats paid)
+    (paidInvoiceFeeSats paid)
+    (paidInvoiceBalanceAfter paid)
+    (paidInvoiceProgress paid == PaymentSettled)
 
 -- | what is taken on top of the amount to cover a fee, which is only
 -- known once the payment has been made. It is a share of the amount, and
