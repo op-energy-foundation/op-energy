@@ -212,7 +212,6 @@ describeError :: CallstackError -> Text
 describeError (CallstackError callstack err) =
   callstack <> ": " <> snd (errorToServerError err)
 
--- | converts Error into printable version
 -- | 429, which servant does not name
 tooManyRequests :: ServerError
 tooManyRequests = ServerError
@@ -222,6 +221,7 @@ tooManyRequests = ServerError
   , errHeaders = []
   }
 
+-- | converts Error into printable version
 errorToServerError :: Error -> (ServerError, Text)
 errorToServerError (BadRequest InvalidServiceSecret) = (err401, tshow InvalidServiceSecret)
 -- a refusal for asking too often is answered as such, so a client can

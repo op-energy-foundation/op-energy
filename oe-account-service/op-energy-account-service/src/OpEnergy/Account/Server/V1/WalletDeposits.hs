@@ -20,6 +20,7 @@ module OpEnergy.Account.Server.V1.WalletDeposits
   , maxDepositsPerTick
   ) where
 
+import           Control.Monad (when)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Logger (logError)
 import           Control.Monad.Trans (lift)
@@ -31,7 +32,9 @@ import           Prometheus (MonadMonitor)
 import           Data.Int (Int64)
 import           Data.Time.Clock.POSIX (POSIXTime)
 import           Database.Persist
-import           Database.Persist.Sql (SqlBackend, updateWhereCount)
+import           Database.Persist.Sql
+                 ( SqlBackend, transactionUndo, updateWhereCount
+                 )
 
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
 import           Data.OpEnergy.Account.API.V2.LedgerReason (LedgerReason(..))
@@ -80,7 +83,13 @@ creditDepositOnce paymentHashV now = runExceptT $ do
     , WalletPaymentUpdatedAt =. now
     ]
   if claimed /= (1 :: Int64)
-    then return Nothing
+    -- more than one row would mean two accounts hold an incoming payment
+    -- of one hash, which this service never creates -- but the claim has
+    -- already marked both as credited by then, and crediting neither
+    -- would leave them marked for good, so the claim goes back with it
+    then do
+      when (claimed > 1) $ lift transactionUndo
+      return Nothing
     else do
       -- the incoming row, named as such: an invoice of this service, which
       -- one of its accounts paid, has an outgoing row of the same hash,
@@ -89,6 +98,9 @@ creditDepositOnce paymentHashV now = runExceptT $ do
         $ selectFirst
           [ WalletPaymentPaymentHash ==. paymentHashV
           , WalletPaymentDirection ==. Incoming
+          -- the row, which this call claimed, rather than any other of
+          -- the hash: it is the one, whose account is owed the sats
+          , WalletPaymentCreditedAt ==. Just now
           ]
           []
       balance <- ExceptT $ adjustBalanceTx

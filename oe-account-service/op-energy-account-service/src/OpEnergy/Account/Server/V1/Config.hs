@@ -238,8 +238,11 @@ defaultConfig = Config
   -- a minute finishes one about as quickly as asking every tick while
   -- making a thirtieth of the calls
   , configWalletReconcileIntervalSecs = 30
-  -- longer than any htlc may live, so a payment, which is given up on
-  -- here, can no longer be in flight at the node
+  -- a day is not longer than every htlc may live. What makes it safe to
+  -- give the sats back is what triggers it: the wallet has no record of
+  -- the payment at all, which a payment it is still trying always has.
+  -- The day is there so a wallet, which is briefly confused about one, is
+  -- not taken at its word
   , configWalletUnknownPaymentGraceSecs = 86400
   }
 
@@ -310,6 +313,9 @@ everifyWalletConfig config
       , require (configWalletMaxPayAttemptAccounts config > 0)
           "WALLET_MAX_PAY_ATTEMPT_ACCOUNTS must be above 0: no account \
           \could pay an invoice at all"
+      , require (configWalletReconcileIntervalSecs config > 0)
+          "WALLET_RECONCILE_INTERVAL_SECS must be above 0: the scheduler \
+          \would ask the wallet about every waiting payment on every tick"
       , require (configWalletUnknownPaymentGraceSecs config > 0)
           "WALLET_UNKNOWN_PAYMENT_GRACE_SECS must be above 0: a payment \
           \would be given up on as soon as the wallet was asked about it, \

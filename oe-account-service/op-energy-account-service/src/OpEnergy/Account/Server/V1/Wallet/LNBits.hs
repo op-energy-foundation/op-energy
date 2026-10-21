@@ -460,6 +460,10 @@ recordPendingPaymentTx params paymentHashV amount reserve now = do
         [ WalletPaymentStatus =. Pending
         , WalletPaymentAmountSats =. amount
         , WalletPaymentFeeSats =. reserve
+        -- the row is this attempt's now, so the grace, which decides when
+        -- a payment the wallet never had is given back, runs from here
+        -- rather than from the attempt, which failed before it
+        , WalletPaymentCreatedAt =. now
         , WalletPaymentUpdatedAt =. now
         ]
   if recorded
@@ -506,7 +510,8 @@ sendPayment url adminKey pool params paymentHashV balanceAfterDebit = do
     -- the wallet says it did not make the payment, so everything, which
     -- was taken for it, goes back with the recording of that
     CallRefused err -> do
-      mbalance <- recordFailed pool paymentHashV (amount + reserve)
+      mbalance <- recordFailed pool (payInvoicePersonId params) paymentHashV
+        (amount + reserve)
         balanceAfterDebit now
       return $! notMade err mbalance
     -- no answer: the wallet may have taken the payment before the call
@@ -517,7 +522,8 @@ sendPayment url adminKey pool params paymentHashV balanceAfterDebit = do
     CallAnswered answer -> case LNBits.paymentResponseStatus answer of
       "success" -> do
         let fee = msatsToSats (LNBits.paymentResponseFeeMsats answer)
-        mbalance <- recordSettled pool paymentHashV fee reserve
+        mbalance <- recordSettled pool (payInvoicePersonId params) paymentHashV
+          fee reserve
           balanceAfterDebit now
         return $! case mbalance of
           Nothing -> inFlight
@@ -530,7 +536,8 @@ sendPayment url adminKey pool params paymentHashV balanceAfterDebit = do
             , paidInvoiceRecipientPersonId = Nothing
             }
       "failed" -> do
-        mbalance <- recordFailed pool paymentHashV (amount + reserve)
+        mbalance <- recordFailed pool (payInvoicePersonId params) paymentHashV
+          (amount + reserve)
           balanceAfterDebit now
         return $! notMade walletPaymentNotMade mbalance
       _ -> return inFlight
@@ -539,17 +546,18 @@ sendPayment url adminKey pool params paymentHashV balanceAfterDebit = do
 -- call is the one, which took the payment out of Pending
 recordSettled
   :: Pool SqlBackend
+  -> PersonId
   -> PaymentHash
   -> Sats
   -> Sats
   -> Sats
   -> POSIXTime
   -> IO (Maybe Sats)
-recordSettled pool paymentHashV fee reserve balanceAfterDebit now =
+recordSettled pool key paymentHashV fee reserve balanceAfterDebit now =
   -- a fee above the reserve is recorded rather than taken further: the
   -- sats are already gone and the account was told what it would pay. It
   -- is asked rather than subtracted, as Sats counts upwards only
-  finishPayment pool paymentHashV Settled (Just fee)
+  finishPayment pool key paymentHashV Settled (Just fee)
     (if fee > reserve then Sats 0 else reserve - fee)
     "the fee reserve, which the payment did not use" balanceAfterDebit now
 
@@ -559,13 +567,14 @@ recordSettled pool paymentHashV fee reserve balanceAfterDebit now =
 -- the one, which took the payment out of Pending
 recordFailed
   :: Pool SqlBackend
+  -> PersonId
   -> PaymentHash
   -> Sats
   -> Sats
   -> POSIXTime
   -> IO (Maybe Sats)
-recordFailed pool paymentHashV taken balanceAfterDebit now =
-  finishPayment pool paymentHashV Failed Nothing taken
+recordFailed pool key paymentHashV taken balanceAfterDebit now =
+  finishPayment pool key paymentHashV Failed Nothing taken
     "a payment, which the wallet did not make" balanceAfterDebit now
 
 -- | takes a payment out of Pending and gives back the sats, which are no
@@ -579,6 +588,7 @@ recordFailed pool paymentHashV taken balanceAfterDebit now =
 -- given back for it twice
 finishPayment
   :: Pool SqlBackend
+  -> PersonId
   -> PaymentHash
   -> WalletPaymentStatus
   -> Maybe Sats
@@ -587,10 +597,16 @@ finishPayment
   -> Sats
   -> POSIXTime
   -> IO (Maybe Sats)
-finishPayment pool paymentHashV status mfee back reason balanceUnchanged now = do
+finishPayment pool key paymentHashV status mfee back reason balanceUnchanged
+    now = do
   edone <- eitherException $ flip runSqlPersistMPool pool $ do
+    -- scoped to the account, which paid: two accounts may each be paying
+    -- the same invoice of another wallet, so the hash alone names a row
+    -- of whichever got there first and would give its sats to the wrong
+    -- one
     mpayment <- selectFirst
       [ WalletPaymentPaymentHash ==. paymentHashV
+      , WalletPaymentPersonId ==. key
       , WalletPaymentDirection ==. Outgoing
       , WalletPaymentStatus ==. Pending
       ]
