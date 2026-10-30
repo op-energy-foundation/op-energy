@@ -36,6 +36,7 @@ import           OpEnergy.Offer.Server.V1.Class
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           OpEnergy.Offer.Server.V1.Offer
+import           Data.OpEnergy.Account.API.V2.LedgerReason (LedgerReason(..))
 import           OpEnergy.Offer.Server.V1.OfferService(isOfferAcceptableAt)
 import           OpEnergy.Offer.Server.V1.LiveEvent(LiveEvent(..))
 import           OpEnergy.Offer.Server.V1.WebSocketService
@@ -87,7 +88,7 @@ accept idText token =
   -- change's events are published in the order of the changes
   withLiveEventOrderE $ do
     takerBalance <- ExceptT $ AccountClient.deductBalance takerUUIDV
-      (Sats (offerTakerStakeSats offerVal))
+      (Sats (offerTakerStakeSats offerVal)) Stake (Just (offerReference key))
 
     now <- getCurrentTimeDB
     let contractRow = Contract
@@ -141,7 +142,8 @@ accept idText token =
     let refundTaker :: Text -> ExceptT CallstackError (AppT IO) ()
         refundTaker reason = do
           ecredited <- lift $ AccountClient.creditBalance takerUUIDV
-            (Sats (offerTakerStakeSats offerVal))
+            (Sats (offerTakerStakeSats offerVal)) Refund
+            (Just (offerReference key))
           case ecredited of
             Right _ -> return ()
             Left err -> lift $ runLogging $ $(logError)
