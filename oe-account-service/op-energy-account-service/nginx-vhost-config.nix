@@ -26,6 +26,15 @@ in
         ''
         else "";
     };
+    # service-to-service endpoints, which only other services may call over the
+    # loopback interface: refused here, so no vhost built from this config can
+    # expose them. "^~" takes precedence over the prefix match below and also
+    # covers the path without a trailing slash
+    "^~ ${URL_BASE}api/v2/account/internal" = {
+      extraConfig = ''
+        return 403;
+      '';
+    };
     "${URL_BASE}api/v2/account" = {
       proxyPass = "${API_HOST}/api/v2/account";
       extraConfig = if zones_enabled
