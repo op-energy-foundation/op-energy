@@ -1,17 +1,23 @@
 {-# LANGUAGE OverloadedStrings #-}
 module OpEnergy.Account.Server.V1.Config where
 
+import           Data.Int (Int64)
+import qualified Data.List as List
 import           Data.Text (Text)
-import           Data.Word (Word64)
+import           Data.Word (Word32, Word64)
 import qualified Data.Text.Encoding as Text
 import           Data.Maybe
 import qualified Data.ByteString.Char8 as BS
 import qualified System.Environment as E
+import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
+import           Data.OpEnergy.Account.API.V2.WalletMode
+                 ( WalletMode(..)
+                 )
 import           Data.OpEnergy.API.V1.Positive
 import           Control.Monad.Catch
 import           Control.Monad.Logger(LogLevel(..))
 
-import           Data.Aeson(FromJSON, withText, withObject, (.:?), (.!=))
+import           Data.Aeson(FromJSON, withText, withObject, (.:), (.:?), (.!=))
 import           Data.Aeson.Types (Parser)
 import qualified Data.Aeson as A
 import           Web.ClientSession (Key)
@@ -76,6 +82,62 @@ data Config = Config
     -- any caller (e.g. oe-offer-service).
   , configStartingBalanceSats :: Word64
     -- ^ sandbox wallet balance assigned to newly registered accounts
+  , configWalletBackend :: WalletMode
+    -- ^ which wallet the service talks to: "mock" keeps invoices and
+    -- payments in this service's own database, "lnbits" talks to an LNBits
+    -- instance in front of a lightning node
+  , configWalletMinInvoiceSats :: Sats
+    -- ^ smallest amount an invoice may be created for
+  , configWalletMaxInvoiceSats :: Sats
+    -- ^ largest amount an invoice may be created for
+  , configWalletMaxWithdrawalSats :: Sats
+    -- ^ largest amount one payment may send out of an account
+  , configWalletInvoiceExpirySecs :: Word64
+    -- ^ how long an invoice is advertised as payable. It is recorded and
+    -- reported to the client; refusing an expired invoice is the lightning
+    -- node's job, so the mock wallet, which has none, does not
+  , configWalletRecordsPerPage :: Word32
+    -- ^ how many movements one page of the wallet history holds
+  , configLNBitsURL :: BaseUrl
+    -- ^ the LNBits instance the "lnbits" wallet backend talks to. Only
+    -- read when WALLET_BACKEND is "lnbits"
+  , configLNBitsInvoiceKey :: Text
+    -- ^ LNBits invoice/read key: creates invoices and reads what has been
+    -- paid. A secret, which is as good as the wallet's incoming history
+  , configLNBitsAdminKey :: Text
+    -- ^ LNBits admin key: spends the wallet. A secret, which is as good as
+    -- its balance
+  , configWalletMaxPendingInvoices :: Word32
+    -- ^ how many invoices of one account may be waiting to be paid at
+    -- once. Each one is asked about by the scheduler until it is paid or
+    -- expires, so without a bound one account decides how often this
+    -- service calls the wallet
+  , configWalletFeeReservePercent :: Word64
+    -- ^ how much of a payment's amount is taken from the balance on top of
+    -- it, to cover a fee, which is only known once the payment has been
+    -- made. What the fee does not use is given back. A wallet, which
+    -- charges no fee, still reserves and gives all of it back
+  , configWalletMaxPayAttemptsPerWindow :: Word32
+    -- ^ how many payments one account may attempt in
+    -- WALLET_PAY_ATTEMPT_WINDOW_SECS. Every attempt asks the wallet to read
+    -- an invoice before any balance is touched, so without a bound one
+    -- account decides how often this service calls the wallet
+  , configWalletPayAttemptWindowSecs :: Word64
+    -- ^ how long the window, which counts an account's payment attempts,
+    -- lasts
+  , configWalletMaxPayAttemptAccounts :: Int
+    -- ^ how many accounts the count of payment attempts holds at once. It
+    -- is held in memory, so it is bounded: an account, which does not fit,
+    -- is refused rather than letting the count grow without end
+  , configWalletReconcileIntervalSecs :: Word64
+    -- ^ how long to leave a payment alone between asking the wallet about
+    -- it. Every ask is a call, so without this the scheduler asks about
+    -- every waiting payment on every tick
+  , configWalletUnknownPaymentGraceSecs :: Word64
+    -- ^ how long an outgoing payment, which the wallet does not have, is
+    -- left before its sats are given back. A wallet, which was unreachable
+    -- when the payment was sent, never had it, so it would otherwise be
+    -- held for good
   }
   deriving Show
 instance FromJSON Config where
@@ -103,6 +165,26 @@ instance FromJSON Config where
     <*> ( v .:? "BLOCKSPAN_DEFAULT_SIZE" .!= (configBlockSpanDefaultSize defaultConfig))
     <*> ( v .:? "INTERNAL_SERVICE_SHARED_SECRET" .!= (configInternalServiceSharedSecret defaultConfig))
     <*> ( v .:? "STARTING_BALANCE_SATS" .!= (configStartingBalanceSats defaultConfig))
+    -- required rather than defaulted: the mock backend lets any account
+    -- settle its own invoice, so a service, which is given no backend and
+    -- quietly takes the mock, hands out balance for nothing. A deployment
+    -- says which wallet it runs, or does not start
+    <*> ( v .: "WALLET_BACKEND")
+    <*> ( v .:? "WALLET_MIN_INVOICE_SATS" .!= (configWalletMinInvoiceSats defaultConfig))
+    <*> ( v .:? "WALLET_MAX_INVOICE_SATS" .!= (configWalletMaxInvoiceSats defaultConfig))
+    <*> ( v .:? "WALLET_MAX_WITHDRAWAL_SATS" .!= (configWalletMaxWithdrawalSats defaultConfig))
+    <*> ( v .:? "WALLET_INVOICE_EXPIRY_SECS" .!= (configWalletInvoiceExpirySecs defaultConfig))
+    <*> ( v .:? "WALLET_RECORDS_PER_PAGE" .!= (configWalletRecordsPerPage defaultConfig))
+    <*> ((v .:? "LNBITS_API_URL" .!= (showBaseUrl $ configLNBitsURL defaultConfig)) >>= parseBaseUrl)
+    <*> ( v .:? "LNBITS_INVOICE_KEY" .!= (configLNBitsInvoiceKey defaultConfig))
+    <*> ( v .:? "LNBITS_ADMIN_KEY" .!= (configLNBitsAdminKey defaultConfig))
+    <*> ( v .:? "WALLET_MAX_PENDING_INVOICES" .!= (configWalletMaxPendingInvoices defaultConfig))
+    <*> ( v .:? "WALLET_FEE_RESERVE_PERCENT" .!= (configWalletFeeReservePercent defaultConfig))
+    <*> ( v .:? "WALLET_MAX_PAY_ATTEMPTS_PER_WINDOW" .!= (configWalletMaxPayAttemptsPerWindow defaultConfig))
+    <*> ( v .:? "WALLET_PAY_ATTEMPT_WINDOW_SECS" .!= (configWalletPayAttemptWindowSecs defaultConfig))
+    <*> ( v .:? "WALLET_MAX_PAY_ATTEMPT_ACCOUNTS" .!= (configWalletMaxPayAttemptAccounts defaultConfig))
+    <*> ( v .:? "WALLET_RECONCILE_INTERVAL_SECS" .!= (configWalletReconcileIntervalSecs defaultConfig))
+    <*> ( v .:? "WALLET_UNKNOWN_PAYMENT_GRACE_SECS" .!= (configWalletUnknownPaymentGraceSecs defaultConfig))
 
 -- need to get Key from json, which represented as base64-encoded string
 instance FromJSON Key where
@@ -137,7 +219,164 @@ defaultConfig = Config
   , configBlockSpanDefaultSize = verifyPositive 24
   , configInternalServiceSharedSecret = error "defaultConfig: you are missing INTERNAL_SERVICE_SHARED_SECRET from config. Generate with \"dd if=/dev/urandom bs=1 count=32 2>/dev/null | base64 -w 0\" command"
   , configStartingBalanceSats = 300000
+  , configWalletBackend = WalletModeMock
+  , configWalletMinInvoiceSats = Sats 1
+  , configWalletMaxInvoiceSats = Sats 10000000
+  , configWalletMaxWithdrawalSats = Sats 10000000
+  , configWalletInvoiceExpirySecs = 3600
+  , configWalletRecordsPerPage = 10
+  , configLNBitsURL = BaseUrl Http "127.0.0.1" 5000 ""
+  , configLNBitsInvoiceKey = ""
+  , configLNBitsAdminKey = ""
+  , configWalletMaxPendingInvoices = 10
+  -- the demo LNBits instance charges 5% per payment, which is far above
+  -- what routing over a node costs, so this covers both
+  , configWalletFeeReservePercent = 5
+  -- a person pays one invoice at a time, so ten attempts a minute is far
+  -- above what using the wallet looks like and far below what makes a
+  -- wallet refuse this service
+  , configWalletMaxPayAttemptsPerWindow = 10
+  , configWalletPayAttemptWindowSecs = 60
+  , configWalletMaxPayAttemptAccounts = 10000
+  -- a payment of a node takes seconds, not milliseconds, so asking twice
+  -- a minute finishes one about as quickly as asking every tick while
+  -- making a thirtieth of the calls
+  , configWalletReconcileIntervalSecs = 30
+  -- a day is not longer than every htlc may live. What makes it safe to
+  -- give the sats back is what triggers it: the wallet has no record of
+  -- the payment at all, which a payment it is still trying always has.
+  -- The day is there so a wallet, which is briefly confused about one, is
+  -- not taken at its word
+  , configWalletUnknownPaymentGraceSecs = 86400
   }
+
+-- | the largest amount, which survives a round trip through the DB:
+-- PersistField Sats stores a Word64 as an Int64, so a configured bound
+-- above this is stored as a negative amount and compares the wrong way
+maxStorableSats :: Sats
+maxStorableSats = Sats (fromIntegral (maxBound :: Int64))
+
+-- | the most rows one page of the wallet history may hold. A page is read
+-- with an OFFSET of the requested page times this, and the page a client
+-- asks for is a Word32, so this also keeps that product inside an Int
+maxWalletRecordsPerPage :: Word32
+maxWalletRecordsPerPage = 1000
+
+-- | checks the wallet options against each other, so a config, which can
+-- not work, stops the service at startup instead of at the first request it
+-- breaks. Every problem is reported at once, rather than one per restart.
+--
+-- Example:
+--
+-- > everifyWalletConfig defaultConfig == Right ()
+everifyWalletConfig :: Config -> Either String ()
+everifyWalletConfig config
+  | List.null problems = Right ()
+  | otherwise = Left (List.intercalate "; " problems)
+  where
+    problems = catMaybes
+      [ require (configWalletRecordsPerPage config > 0)
+          "WALLET_RECORDS_PER_PAGE must be above 0: a page of no rows is \
+          \queried without a limit, which answers with the whole history"
+      , require (configWalletRecordsPerPage config <= maxWalletRecordsPerPage)
+          ( "WALLET_RECORDS_PER_PAGE must not be above "
+         <> show maxWalletRecordsPerPage
+         <> ": a page of more rows than that answers with as much of the \
+            \history as a single reply can carry, which is what bounding \
+            \it at all is for"
+          )
+      , require (configWalletMinInvoiceSats config > Sats 0)
+          "WALLET_MIN_INVOICE_SATS must be above 0: an amount of nothing \
+          \moves no balance, while it still records a payment and a ledger \
+          \entry"
+      , require
+          (configWalletMinInvoiceSats config
+            <= configWalletMaxInvoiceSats config)
+          "WALLET_MIN_INVOICE_SATS must not be above WALLET_MAX_INVOICE_SATS: \
+          \no amount would be accepted, while the wallet still reports the \
+          \range as the one it takes"
+      , require (configWalletMaxInvoiceSats config <= maxStorableSats)
+          "WALLET_MAX_INVOICE_SATS must not be above the largest amount the \
+          \DB stores"
+      , require (configWalletMaxWithdrawalSats config > Sats 0)
+          "WALLET_MAX_WITHDRAWAL_SATS must be above 0: no payment would be \
+          \accepted"
+      , require (configWalletMaxWithdrawalSats config <= maxStorableSats)
+          "WALLET_MAX_WITHDRAWAL_SATS must not be above the largest amount \
+          \the DB stores"
+      , require (configWalletMaxPendingInvoices config > 0)
+          "WALLET_MAX_PENDING_INVOICES must be above 0: no account could \
+          \ask to be paid at all"
+      , require (configWalletFeeReservePercent config <= 100)
+          "WALLET_FEE_RESERVE_PERCENT must not be above 100: a payment \
+          \would reserve more than it sends, so an account could not \
+          \spend even half of its balance"
+      , require (configWalletMaxPayAttemptsPerWindow config > 0)
+          "WALLET_MAX_PAY_ATTEMPTS_PER_WINDOW must be above 0: no account \
+          \could pay an invoice at all"
+      , require (configWalletMaxPayAttemptAccounts config > 0)
+          "WALLET_MAX_PAY_ATTEMPT_ACCOUNTS must be above 0: no account \
+          \could pay an invoice at all"
+      , require (configWalletReconcileIntervalSecs config > 0)
+          "WALLET_RECONCILE_INTERVAL_SECS must be above 0: the scheduler \
+          \would ask the wallet about every waiting payment on every tick"
+      , require (configWalletUnknownPaymentGraceSecs config > 0)
+          "WALLET_UNKNOWN_PAYMENT_GRACE_SECS must be above 0: a payment \
+          \would be given up on as soon as the wallet was asked about it, \
+          \while it may still be in flight"
+      , require (configWalletPayAttemptWindowSecs config > 0)
+          "WALLET_PAY_ATTEMPT_WINDOW_SECS must be above 0: a window, which \
+          \is over as soon as it starts, counts nothing and bounds nothing"
+      , require withdrawalWithReserveIsStorable
+          "WALLET_MAX_WITHDRAWAL_SATS and WALLET_FEE_RESERVE_PERCENT must \
+          \not come to more than the largest amount the DB stores: the \
+          \reserve is taken on top of the amount, so the two together are \
+          \what the largest payment debits"
+      , require (configWalletInvoiceExpirySecs config > 0)
+          "WALLET_INVOICE_EXPIRY_SECS must be above 0: an invoice would be \
+          \advertised as expired as soon as it is created"
+      ]
+      ++ if configWalletBackend config == WalletModeLNBits
+           then lnbitsProblems
+           else []
+    -- only the configured backend's options are checked: the keys of a
+    -- backend, which is not in use, are not needed and are commonly unset
+    lnbitsProblems = catMaybes
+      [ require (configLNBitsInvoiceKey config /= "")
+          "LNBITS_INVOICE_KEY must be set when WALLET_BACKEND is lnbits: \
+          \without it no invoice can be created and nothing can be read \
+          \back, so every wallet request fails"
+      , require (configLNBitsAdminKey config /= "")
+          "LNBITS_ADMIN_KEY must be set when WALLET_BACKEND is lnbits: \
+          \without it no payment can be made"
+      , require
+          (configLNBitsInvoiceKey config /= configLNBitsAdminKey config)
+          "LNBITS_INVOICE_KEY must not be the same as LNBITS_ADMIN_KEY: the \
+          \reading paths would then hold a key, which spends the wallet, \
+          \and the separation LNBits offers would be given up"
+      , require (urlCarriesKeysSafely (configLNBitsURL config))
+          "LNBITS_API_URL must be https, unless it names a loopback host: \
+          \the API keys travel in every request, so a plain-text hop \
+          \hands the wallet to anyone on the path"
+      ]
+    -- a payment debits the amount together with the reserve, so it is
+    -- their sum, rather than the amount alone, which has to survive the
+    -- DB. Worked out as Integer: Sats counts upwards only and stores as
+    -- an Int64, so the sum being checked is exactly what would wrap if it
+    -- were worked out in the type it is checking
+    withdrawalWithReserveIsStorable =
+      let amount = toInteger (unSats (configWalletMaxWithdrawalSats config))
+          percent = toInteger (configWalletFeeReservePercent config)
+      in amount + ((amount * percent + 99) `div` 100)
+           <= toInteger (unSats maxStorableSats)
+    -- an API key is sent as a header on every call, so the hop has to be
+    -- encrypted. A loopback address never leaves the machine, which is how
+    -- an instance on the same host is reached
+    urlCarriesKeysSafely url = case baseUrlScheme url of
+      Https -> True
+      Http -> List.elem (baseUrlHost url)
+        [ "127.0.0.1", "::1", "localhost" ]
+    require holds message = if holds then Nothing else Just message
 
 getConfigFromEnvironment :: IO Config
 getConfigFromEnvironment = do
@@ -145,4 +384,7 @@ getConfigFromEnvironment = do
   configStr <- BS.readFile configFilePath
   case A.eitherDecodeStrict configStr of
     Left some -> error $ configFilePath ++ " is not a valid config: " ++ some
-    Right config -> return config
+    Right config -> case everifyWalletConfig config of
+      Left problem ->
+        error $ configFilePath ++ " is not a usable config: " ++ problem
+      Right () -> return config
