@@ -157,6 +157,14 @@ offerInfoFrom idText Offer{..} = API.OfferInfo
 offerInfoFromEntity :: Entity Offer -> API.OfferInfo
 offerInfoFromEntity (Entity key offerVal) = offerInfoFrom (tshow (fromSqlKey key)) offerVal
 
+-- | how an offer is referred to in an account's ledger, eg @"offer:42"@
+offerReference :: OfferId -> Text
+offerReference key = "offer:" <> tshow (fromSqlKey key)
+
+-- | how a contract is referred to in an account's ledger, eg @"contract:17"@
+contractReference :: ContractId -> Text
+contractReference key = "contract:" <> tshow (fromSqlKey key)
+
 -- | Model -> API glue for Contract.
 -- @mYourRole@ is @Just "maker"@ or @Just "taker"@ when the
 -- requesting user is a party; @Nothing@ for unauthenticated views.

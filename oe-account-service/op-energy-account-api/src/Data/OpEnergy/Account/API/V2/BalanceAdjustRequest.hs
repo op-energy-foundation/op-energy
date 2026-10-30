@@ -8,6 +8,7 @@ module Data.OpEnergy.Account.API.V2.BalanceAdjustRequest
   ) where
 
 import           Data.Swagger
+import           Data.Text                  (Text)
 import           Control.Lens
 import           GHC.Generics
 import           Data.Typeable              (Typeable)
@@ -22,6 +23,9 @@ import           Data.OpEnergy.Account.API.V1.UUID
 import           Data.OpEnergy.Account.API.V1.Sats
                  ( Sats(..)
                  )
+import           Data.OpEnergy.Account.API.V2.LedgerReason
+                 ( LedgerReason
+                 )
 
 -- | body of the internal/balance/deduct and internal/balance/credit API
 -- calls -- see those routes for what each does with it
@@ -30,11 +34,18 @@ data BalanceAdjustRequest = BalanceAdjustRequest
   , amountSats  :: Sats
     -- ^ always given as a positive magnitude -- deduct subtracts it
     -- (failing rather than going negative), credit adds it
+  , reason      :: Maybe LedgerReason
+    -- ^ why the balance changes, recorded in the account's ledger and shown
+    -- in its wallet history. Optional, so a caller, which predates the
+    -- ledger, keeps working: deduct then records a stake, credit a refund
+  , reference   :: Maybe Text
+    -- ^ what the change relates to, eg "offer:42" or "contract:17"
   }
   deriving (Show, Generic, Typeable)
 
 defaultBalanceAdjustRequest :: BalanceAdjustRequest
-defaultBalanceAdjustRequest = BalanceAdjustRequest defaultUUID (Sats 50000)
+defaultBalanceAdjustRequest = BalanceAdjustRequest
+  defaultUUID (Sats 50000) Nothing Nothing
 
 instance ToJSON BalanceAdjustRequest
 instance FromJSON BalanceAdjustRequest
