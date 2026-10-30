@@ -191,3 +191,17 @@ library
                             , ScopedTypeVariables
                             , BangPatterns
 
+
+test-suite op-energy-account-service-test
+    type:           exitcode-stdio-1.0
+    hs-source-dirs: test
+    main-is:        Spec.hs
+    build-depends:    base
+                    , hspec
+                    , op-energy-account-service
+                    , op-energy-account-api
+                    , persistent
+    ghc-options:    -Wall -Werror
+    default-extensions:       OverloadedStrings
+                            , NumericUnderscores
+    default-language: Haskell2010
