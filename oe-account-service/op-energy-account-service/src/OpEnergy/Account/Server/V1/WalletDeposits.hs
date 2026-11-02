@@ -17,7 +17,6 @@
 module OpEnergy.Account.Server.V1.WalletDeposits
   ( creditDepositOnce
   , creditWaitingDeposits
-  , maxDepositsPerTick
   ) where
 
 import           Control.Monad.IO.Class (MonadIO, liftIO)
@@ -25,12 +24,12 @@ import           Control.Monad.Logger (logError)
 import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Except (runExceptT, throwE)
 import           Control.Monad.Trans.Reader (ReaderT, ask)
-import           Data.Time.Clock.POSIX (getPOSIXTime)
-import           Database.Persist.Postgresql (runSqlPersistMPool)
-import           Prometheus (MonadMonitor)
 import           Data.Int (Int64)
-import           Data.Time.Clock.POSIX (POSIXTime)
+import           Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
+import           Prometheus (MonadMonitor)
+
 import           Database.Persist
+import           Database.Persist.Postgresql (runSqlPersistMPool)
 import           Database.Persist.Sql
                  ( SqlBackend, transactionUndo, updateWhereCount
                  )
