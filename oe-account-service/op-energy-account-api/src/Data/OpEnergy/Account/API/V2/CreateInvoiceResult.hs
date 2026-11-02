@@ -12,8 +12,8 @@ module Data.OpEnergy.Account.API.V2.CreateInvoiceResult
 import           Data.Swagger
 import           Control.Lens
 import           GHC.Generics
+import           Data.Time.Clock.POSIX      (POSIXTime)
 import           Data.Typeable              (Typeable)
-import           Data.Word                  (Word64)
 import           Data.Aeson
 
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
@@ -30,8 +30,8 @@ data CreateInvoiceResult = CreateInvoiceResult
   , paymentHash :: PaymentHash
     -- ^ identifies this payment, eg when asking whether it has been paid
   , amountSats :: Sats
-  , expiresAt :: Word64
-    -- ^ unix time in seconds, after which the invoice can not be paid
+  , expiresAt :: POSIXTime
+    -- ^ after which the invoice can not be paid
   }
   deriving (Show, Generic, Typeable)
 

@@ -23,8 +23,8 @@ import qualified Data.List as List
 import           Data.Text (Text)
 import qualified Data.Text as Text
 import           Data.Int (Int64)
+import           Data.Time.Clock.POSIX (POSIXTime)
 import           Data.Typeable (Typeable)
-import           Data.Word (Word64)
 
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
 import           Data.OpEnergy.Account.API.V2.LedgerReason
@@ -42,8 +42,7 @@ data WalletTransaction = WalletTransaction
   , walletTransactionBalanceAfter :: Sats
   , walletTransactionReference :: Maybe Text
     -- ^ what the change relates to, eg "offer:42"
-  , walletTransactionCreatedAt :: Word64
-    -- ^ unix time in seconds
+  , walletTransactionCreatedAt :: POSIXTime
   }
   deriving (Show, Generic, Typeable)
 
