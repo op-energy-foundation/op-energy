@@ -31,7 +31,6 @@ import           Control.Monad.Trans.Except (runExceptT, throwE)
 import           Control.Monad.Trans.Reader (ReaderT)
 import           Data.Int (Int64)
 import           Data.Text (Text)
-import qualified Data.Text as Text
 import           Data.Time.Clock.POSIX (POSIXTime)
 import           GHC.Generics
 
@@ -179,8 +178,3 @@ reasonDescribes Debit  Winnings       = False
 -- eg @ledgerReference "offer" "42"@ is @"offer:42"@
 ledgerReference :: Text -> Text -> Text
 ledgerReference kind recordId = kind <> ":" <> recordId
-
--- | 'ledgerReference' of a record, which is identified by a number
-ledgerReferenceOfKey :: Text -> Int64 -> Text
-ledgerReferenceOfKey kind key =
-  ledgerReference kind (Text.pack (show key))

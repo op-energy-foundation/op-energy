@@ -1,12 +1,18 @@
 {-- | This migration removes wallet_payment rows whose invoice holds more
- - bytes than an invoice is allowed to, so the column can be indexed.
+ - bytes than an invoice is allowed to.
  -
  - Such a row can only have been written by a build whose check on an
  - invoice counted characters and accepted every alphanumeric Unicode has: a
  - conformant one stores at most 'maxInvoiceLength' ASCII characters, which
- - is that many bytes. A longer value does not fit a btree index entry, so
- - CREATE INDEX on wallet_payment (invoice) fails while one is present, and
- - a service, which creates that index at startup, does not start.
+ - is that many bytes. A row, which holds more, is a value no build of this
+ - service would accept today, so it is dropped rather than left to be read
+ - back as an invoice.
+ -
+ - It does not unblock the unique index over the column: that index is
+ - created by @runMigration migrateWalletPayment@, which runs before the
+ - custom migrations, so a row too large for a btree entry would stop the
+ - service before this statement is reached. This is hygiene over rows,
+ - which are small enough to store and still larger than an invoice may be.
  -
  - The balance, which such a payment moved, is recorded in ledger_entry and
  - is left alone: what goes is the mock wallet's own record of a payment to
