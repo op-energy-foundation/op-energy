@@ -9,6 +9,7 @@ module Data.OpEnergy.Account.API.V2.BalanceAdjustRequest
 
 import           Data.Swagger
 import           Data.Text                  (Text)
+import qualified Data.Text as Text
 import           Control.Lens
 import           GHC.Generics
 import           Data.Typeable              (Typeable)
@@ -47,8 +48,34 @@ defaultBalanceAdjustRequest :: BalanceAdjustRequest
 defaultBalanceAdjustRequest = BalanceAdjustRequest
   defaultUUID (Sats 50000) Nothing Nothing
 
+-- | the longest reference a caller may send. A reference names a record of
+-- the calling service, eg "offer:42", so this is far above anything, which
+-- describes one: the column is unbounded and the whole body is read into
+-- memory before a handler sees it, so without a bound one call stores as
+-- much as it is sent
+maxReferenceLength :: Int
+maxReferenceLength = 128
+
+-- | checks the length of a reference, as deserialisation is where a value
+-- is checked
+everifyReference :: Maybe Text -> Either Text (Maybe Text)
+everifyReference Nothing = Right Nothing
+everifyReference (Just raw)
+  | Text.length raw > maxReferenceLength =
+      Left "BalanceAdjustRequest: reference is longer than allowed"
+  | otherwise = Right (Just raw)
+
 instance ToJSON BalanceAdjustRequest
-instance FromJSON BalanceAdjustRequest
+instance FromJSON BalanceAdjustRequest where
+  parseJSON = withObject "BalanceAdjustRequest" $ \v-> do
+    personUUIDV <- v .: "personUUID"
+    amountSatsV <- v .: "amountSats"
+    reasonV <- v .:? "reason"
+    referenceV <- v .:? "reference"
+    -- positional, as several request types share these field names
+    either (fail . Text.unpack)
+      (return . BalanceAdjustRequest personUUIDV amountSatsV reasonV)
+      $ everifyReference referenceV
 instance ToSchema BalanceAdjustRequest where
   declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
     & mapped.schema.description ?~ "BalanceAdjustRequest schema"
