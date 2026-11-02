@@ -21,7 +21,6 @@ import           GHC.Generics
 import           Control.Lens               ((&), (?~))
 import           Data.Char                  (isAlphaNum, isAscii, toLower)
 import           Data.Swagger
-import           Servant.API                (FromHttpApiData(..), ToHttpApiData(..))
 
 -- | a lightning payment request
 newtype Bolt11Invoice = Bolt11Invoice
@@ -85,10 +84,3 @@ instance ToSchema Bolt11Invoice where
     & type_ ?~ SwaggerString
     & description ?~ "lightning payment request (bolt11)"
     & example ?~ toJSON defaultBolt11Invoice
-instance ToParamSchema Bolt11Invoice where
-  toParamSchema _ = mempty
-    & type_ ?~ SwaggerString
-instance FromHttpApiData Bolt11Invoice where
-  parseQueryParam = everifyBolt11Invoice
-instance ToHttpApiData Bolt11Invoice where
-  toQueryParam = unBolt11Invoice

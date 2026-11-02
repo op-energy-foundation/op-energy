@@ -8,7 +8,6 @@ module Data.OpEnergy.Account.API.V2.WalletMode
   ( WalletMode(..)
   , defaultWalletMode
   , walletModeToText
-  , walletModeFromText
   ) where
 
 import           Data.Aeson

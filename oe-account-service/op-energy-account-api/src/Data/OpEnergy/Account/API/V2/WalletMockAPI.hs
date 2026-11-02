@@ -14,7 +14,7 @@ module Data.OpEnergy.Account.API.V2.WalletMockAPI
 
 import           Servant.API
 
-import           Data.OpEnergy.Account.API.V1.Account (AccountToken)
+import           Data.OpEnergy.Account.API.V2.WalletAPI (WalletAuth)
 import           Data.OpEnergy.Account.API.V2.SettleInvoiceRequest
                  ( SettleInvoiceRequest
                  )
@@ -24,13 +24,7 @@ import           Data.OpEnergy.Account.API.V2.SettleInvoiceResult
 
 -- | marks an invoice of the authenticated account paid
 type SettleInvoiceAPI
-  = Header'
-     '[ Required
-      , Strict
-      , Description "Account token gotten from /login or /register"
-      ]
-     "Authorization"
-     AccountToken
+  = WalletAuth
     :> ReqBody '[JSON] SettleInvoiceRequest
     :> Description "Marks an invoice of the authenticated account paid, as a \
                    \payer would. Served only while the mock wallet is in use."

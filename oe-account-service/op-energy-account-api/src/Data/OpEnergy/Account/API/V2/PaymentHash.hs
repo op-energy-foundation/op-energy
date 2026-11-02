@@ -20,7 +20,6 @@ import           GHC.Generics
 import           Control.Lens               ((&), (?~))
 import           Data.Char                  (isHexDigit, toLower)
 import           Data.Swagger
-import           Servant.API                (FromHttpApiData(..), ToHttpApiData(..))
 
 -- | hash of a lightning payment's preimage
 newtype PaymentHash = PaymentHash
@@ -59,10 +58,3 @@ instance ToSchema PaymentHash where
     & type_ ?~ SwaggerString
     & description ?~ "hash of a lightning payment's preimage, 64 hex characters"
     & example ?~ toJSON defaultPaymentHash
-instance ToParamSchema PaymentHash where
-  toParamSchema _ = mempty
-    & type_ ?~ SwaggerString
-instance FromHttpApiData PaymentHash where
-  parseQueryParam = everifyPaymentHash
-instance ToHttpApiData PaymentHash where
-  toQueryParam = unPaymentHash

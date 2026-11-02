@@ -8,7 +8,6 @@
 module Data.OpEnergy.Account.API.V2.CreateInvoiceRequest
   ( CreateInvoiceRequest(..)
   , defaultCreateInvoiceRequest
-  , maxNoteLength
   , everifyNote
   ) where
 

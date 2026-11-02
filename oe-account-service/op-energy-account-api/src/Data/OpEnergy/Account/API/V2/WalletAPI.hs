@@ -9,6 +9,7 @@
 {-# LANGUAGE DuplicateRecordFields      #-}
 module Data.OpEnergy.Account.API.V2.WalletAPI
   ( WalletAPI
+  , WalletAuth
   , WalletInfoAPI
   , CreateInvoiceAPI
   , PayInvoiceAPI

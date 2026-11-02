@@ -16,11 +16,11 @@ module Data.OpEnergy.Account.API.V2.LedgerReason
 
 import           Data.Aeson
 import           Data.Text                  (Text)
+import qualified Data.Text as Text
 import           Data.Typeable              (Typeable)
 import           GHC.Generics
 import           Control.Lens               ((&), (?~))
 import           Data.Swagger
-import           Servant.API                (FromHttpApiData(..), ToHttpApiData(..))
 
 -- | the closed set of reasons a balance changes
 data LedgerReason
@@ -58,17 +58,9 @@ instance ToJSON LedgerReason where
   toJSON = toJSON . ledgerReasonToText
 instance FromJSON LedgerReason where
   parseJSON = withText "LedgerReason"
-    $ either (fail . show) pure . ledgerReasonFromText
+    $ either (fail . Text.unpack) pure . ledgerReasonFromText
 instance ToSchema LedgerReason where
   declareNamedSchema _ = pure $ NamedSchema (Just "LedgerReason") $ mempty
     & type_ ?~ SwaggerString
     & enum_ ?~ map (toJSON . ledgerReasonToText) [minBound .. maxBound]
     & example ?~ toJSON defaultLedgerReason
-instance ToParamSchema LedgerReason where
-  toParamSchema _ = mempty
-    & type_ ?~ SwaggerString
-    & enum_ ?~ map (toJSON . ledgerReasonToText) [minBound .. maxBound]
-instance FromHttpApiData LedgerReason where
-  parseQueryParam = ledgerReasonFromText
-instance ToHttpApiData LedgerReason where
-  toQueryParam = ledgerReasonToText
