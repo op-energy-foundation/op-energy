@@ -109,4 +109,4 @@ createInvoice token (CreateInvoiceRequest requestAmountSats requestNote) =
     (createdInvoiceBolt11 created)
     (createdInvoicePaymentHash created)
     (createdInvoiceAmountSats created)
-    (floor (createdInvoiceExpiresAt created))
+    (createdInvoiceExpiresAt created)

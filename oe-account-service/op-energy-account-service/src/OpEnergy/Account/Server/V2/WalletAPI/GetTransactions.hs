@@ -24,11 +24,11 @@ import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as B16
 import qualified Crypto.Hash.SHA256 as SHA256
-import           Data.Word (Word32)
 import           Database.Persist
 import           Database.Persist.Postgresql (runSqlPersistMPool)
 import           Database.Persist.Sql (fromSqlKey)
 
+import           Data.OpEnergy.API.V1.Natural (Natural)
 import qualified Data.OpEnergy.Account.API.V1.Account as API
 import           Data.OpEnergy.Account.API.V2.WalletTransactionsResult
                  ( WalletTransactionsResult(..)
@@ -58,7 +58,7 @@ import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 -- | V2 wallet/transactions endpoint
 getWalletTransactionsHandler
   :: API.AccountToken
-  -> Maybe Word32
+  -> Maybe (Natural Int)
   -> AppM WalletTransactionsResult
 getWalletTransactionsHandler token mpage =
     let name = "V2.getWalletTransactionsHandler"
@@ -71,7 +71,7 @@ getWalletTransactionsHandler token mpage =
 -- disagree and a client can number the pages
 getWalletTransactions
   :: API.AccountToken
-  -> Maybe Word32
+  -> Maybe (Natural Int)
   -> AppM (Either CallstackError WalletTransactionsResult)
 getWalletTransactions token mpage =
     let name = "V2.getWalletTransactions"
@@ -119,7 +119,7 @@ renderWalletTransaction salt (Entity key entry) = WalletTransaction
   , walletTransactionReason = ledgerEntryReason entry
   , walletTransactionBalanceAfter = ledgerEntryBalanceAfter entry
   , walletTransactionReference = ledgerEntryReference entry
-  , walletTransactionCreatedAt = floor (ledgerEntryCreatedAt entry)
+  , walletTransactionCreatedAt = ledgerEntryCreatedAt entry
   }
   where
     signed :: Sats -> Int64
