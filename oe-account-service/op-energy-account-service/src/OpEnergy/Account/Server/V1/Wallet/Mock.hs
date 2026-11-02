@@ -19,8 +19,8 @@ import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
 import           Data.Int (Int64)
+import           Data.Maybe (isJust)
 import           Data.Pool (Pool)
-import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TE
 import           Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
 import           Data.Word (Word64)
@@ -35,10 +35,10 @@ import           Database.Persist.Postgresql (runSqlPersistMPool)
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
 import           Data.OpEnergy.Account.API.V2.LedgerReason (LedgerReason(..))
 import           Data.OpEnergy.Account.API.V2.Bolt11Invoice
-                 ( Bolt11Invoice(..), everifyBolt11Invoice
+                 ( Bolt11Invoice(..), verifyBolt11Invoice
                  )
 import           Data.OpEnergy.Account.API.V2.PaymentHash
-                 ( PaymentHash(..), everifyPaymentHash
+                 ( PaymentHash(..), verifyPaymentHash
                  )
 import           Data.OpEnergy.Account.API.V2.WalletMode (WalletMode(..))
 
@@ -139,7 +139,7 @@ resolveInvoice pool asker invoiceV = do
       ]
       []
     return (ours, paidByAsker)
-  let paidByAsker = maybe False (const True) mpaidByAsker
+  let paidByAsker = isJust mpaidByAsker
   return $! Right $! case mours of
     Nothing
       -- not an invoice of this service, but this account has paid it, which
@@ -345,23 +345,20 @@ settleInvoice pool personKey paymentHashV = do
       []
   case mpayment of
     Nothing -> return $! Left walletInvoiceNotFound
-    Just (Entity key payment)
-      | walletPaymentDirection payment /= Incoming ->
-          return $! Left walletInvoiceNotFound
-      | otherwise -> do
-          now <- getPOSIXTime
-          settled <- flip runSqlPersistMPool pool $ updateWhereCount
-            [ WalletPaymentId ==. key
-            , WalletPaymentPersonId ==. personKey
-            , WalletPaymentStatus ==. Pending
-            ]
-            [ WalletPaymentStatus =. Settled, WalletPaymentUpdatedAt =. now ]
-          return $! Right $! SettledInvoice
-            { settledInvoicePersonId = walletPaymentPersonId payment
-            , settledInvoicePaymentHash = paymentHashV
-            , settledInvoiceAmountSats = walletPaymentAmountSats payment
-            , settledInvoiceWasPending = settled == (1 :: Int64)
-            }
+    Just (Entity key payment) -> do
+      now <- getPOSIXTime
+      settled <- flip runSqlPersistMPool pool $ updateWhereCount
+        [ WalletPaymentId ==. key
+        , WalletPaymentPersonId ==. personKey
+        , WalletPaymentStatus ==. Pending
+        ]
+        [ WalletPaymentStatus =. Settled, WalletPaymentUpdatedAt =. now ]
+      return $! Right $! SettledInvoice
+        { settledInvoicePersonId = walletPaymentPersonId payment
+        , settledInvoicePaymentHash = paymentHashV
+        , settledInvoiceAmountSats = walletPaymentAmountSats payment
+        , settledInvoiceWasPending = settled == (1 :: Int64)
+        }
 
 -- | eight bytes from the system's own random source.
 --
@@ -381,7 +378,7 @@ secureEntropy = IO.withBinaryFile "/dev/urandom" IO.ReadMode $ \handle -> do
 -- payments never share one
 mockPaymentHash :: PersonId -> Sats -> POSIXTime -> Word64 -> PaymentHash
 mockPaymentHash personKey (Sats amount) now entropy =
-  either (error . Text.unpack) id $ everifyPaymentHash $ TE.decodeUtf8
+  verifyPaymentHash $ TE.decodeUtf8
     $ B16.encode $ SHA256.hash $ BS8.pack
     $ show (fromSqlKey personKey) <> ":" <> show amount
       <> ":" <> show (realToFrac now :: Double) <> ":" <> show entropy
@@ -390,5 +387,4 @@ mockPaymentHash personKey (Sats amount) now entropy =
 -- nobody mistakes it for an invoice a node would pay
 mockInvoice :: PaymentHash -> Bolt11Invoice
 mockInvoice (PaymentHash hashText) =
-  either (error . Text.unpack) id $ everifyBolt11Invoice
-    $ "lntbsmock" <> hashText
+  verifyBolt11Invoice $ "lntbsmock" <> hashText
