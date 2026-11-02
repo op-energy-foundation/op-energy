@@ -27,7 +27,6 @@
 {-# LANGUAGE TemplateHaskell            #-}
 module OpEnergy.Account.Server.V1.WalletReconcile
   ( reconcilePendingPayments
-  , maxPaymentsPerTick
   ) where
 
 import           Control.Exception (throwIO)
