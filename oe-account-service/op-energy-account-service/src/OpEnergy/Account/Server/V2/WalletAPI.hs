@@ -7,9 +7,9 @@ module OpEnergy.Account.Server.V2.WalletAPI
   ( handlers
   )where
 
-import           Data.Word (Word32)
 import           Servant
 
+import           Data.OpEnergy.API.V1.Natural (Natural)
 import qualified Data.OpEnergy.Account.API.V1.Account as API
 import           Data.OpEnergy.Account.API.V2.CreateInvoiceRequest
                  ( CreateInvoiceRequest
@@ -63,6 +63,6 @@ handlers
 
   :<|> ( GetTransactions.getWalletTransactionsHandler
          :: API.AccountToken
-         -> Maybe Word32
+         -> Maybe (Natural Int)
          -> AppM WalletTransactionsResult
        )
