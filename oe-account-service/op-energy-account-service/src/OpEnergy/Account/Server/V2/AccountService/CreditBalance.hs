@@ -13,7 +13,7 @@ import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Logger(logError)
 import           Control.Monad.Trans (lift)
-import           Control.Monad.Trans.Except (ExceptT(..))
+import           Control.Monad.Trans.Except (ExceptT(..), runExceptT)
 import           Data.Maybe(fromMaybe)
 import           Data.Text(Text)
 import           Data.Time.Clock(getCurrentTime)
@@ -75,12 +75,13 @@ creditBalance secret request =
   checkInternalServiceSecret secret
   State{ accountDBPool = pool } <- lift ask
   let modelUUID = modelApiUUIDPerson (personUUID request)
-  (Entity key _) <- exceptTMaybeT accountNotFound
-    $ liftIO $ flip runSqlPersistMPool pool
-    $ selectFirst [ PersonUuid ==. modelUUID ] []
   nowUTC <- liftIO getCurrentTime
-  balance <- ExceptT $ liftIO $ flip runSqlPersistMPool pool
-    $ adjustBalanceTx
+  -- the account is looked up in the same transaction as the change, so it
+  -- cannot be gone between finding it and crediting it
+  balance <- ExceptT $ liftIO $ flip runSqlPersistMPool pool $ runExceptT $ do
+    (Entity key _) <- exceptTMaybeT accountNotFound
+      $ selectFirst [ PersonUuid ==. modelUUID ] []
+    ExceptT $ adjustBalanceTx
         key
         Credit
         (amountSats request)
