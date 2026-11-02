@@ -257,8 +257,8 @@ maxStorableSats :: Sats
 maxStorableSats = Sats (fromIntegral (maxBound :: Int64))
 
 -- | the most rows one page of the wallet history may hold. A page is read
--- with an OFFSET of the requested page times this, and the page a client
--- asks for is a Word32, so this also keeps that product inside an Int
+-- with an OFFSET of the requested page times this, so bounding it is also
+-- what keeps that product inside an Int
 maxWalletRecordsPerPage :: Word32
 maxWalletRecordsPerPage = 1000
 
