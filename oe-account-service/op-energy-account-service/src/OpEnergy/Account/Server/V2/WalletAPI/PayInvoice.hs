@@ -170,9 +170,11 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
   -- paying agree, and the interface lets a backend report its own: a
   -- difference is sats, which appeared or went with no ledger entry
   -- for them, so it is written down rather than passing unnoticed. It
-  -- is not refused, as the payment has already happened by now. The
-  -- mock always reports the amount it was asked for, so this is silent
-  -- until a backend with a node does otherwise
+  -- is not refused, as the payment has already happened by now.
+  --
+  -- Both backends shipped today report the amount they were given, so
+  -- this can not fire for either of them: it is kept for the backend,
+  -- which reports its own, as that is the one, which can disagree
   when (paidInvoiceAmountSats paid /= amount)
     $ lift $ runLogging $ $(logError)
       ( "payInvoice: debited " <> tshow (unSats amount)

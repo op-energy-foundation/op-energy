@@ -1,9 +1,11 @@
 {-- | V2 mock wallet handler: marks an invoice of the authenticated account
  - paid, as a payer would.
  -
- - It exists so the wallet can be used before a lightning node does. It can
- - only be served while the mock wallet is in use: a real wallet offers no
- - way to mark an invoice paid, so there is nothing to call.
+ - It exists so the wallet can be used before a lightning node does. The
+ - route is wired at startup while the backend is chosen from config, so it
+ - is served whichever wallet is in use and refuses every call once the
+ - wallet is not the mock: a real wallet offers no way to mark an invoice
+ - paid, so there is nothing to call.
  -}
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE OverloadedStrings          #-}
