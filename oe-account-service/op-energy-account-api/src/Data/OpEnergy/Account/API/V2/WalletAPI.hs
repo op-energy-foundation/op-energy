@@ -16,9 +16,9 @@ module Data.OpEnergy.Account.API.V2.WalletAPI
   , WalletTransactionsAPI
   ) where
 
-import           Data.Word (Word32)
 import           Servant.API
 
+import           Data.OpEnergy.API.V1.Natural (Natural)
 import           Data.OpEnergy.Account.API.V1.Account (AccountToken)
 import           Data.OpEnergy.Account.API.V2.CreateInvoiceRequest
                  ( CreateInvoiceRequest
@@ -73,7 +73,13 @@ type PayInvoiceAPI
 -- | every change of this account's balance, newest first
 type WalletTransactionsAPI
   = WalletAuth
-    :> QueryParam' '[Optional, Strict, Description "page to return, 0 is the newest"] "page" Word32
+    :> QueryParam'
+       '[ Optional
+        , Strict
+        , Description "page to return, 0 is the newest"
+        ]
+       "page"
+       (Natural Int)
     :> Description "Returns the history of the authenticated account's \
                    \balance, newest first."
     :> Get '[JSON] WalletTransactionsResult
