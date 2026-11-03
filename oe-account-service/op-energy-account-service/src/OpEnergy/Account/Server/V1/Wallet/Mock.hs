@@ -105,6 +105,7 @@ createInvoice pool params = do
     , walletPaymentNote = createInvoiceNote params
     , walletPaymentExpiresAt = Just expiresAt
     , walletPaymentCreditedAt = Nothing
+    , walletPaymentUnknownSince = Nothing
     , walletPaymentCheckingId = Nothing
     , walletPaymentCreatedAt = now
     , walletPaymentUpdatedAt = now
@@ -261,8 +262,9 @@ payInvoiceOrThrow pool params = do
                       , walletPaymentNote = walletPaymentNote payment
                       , walletPaymentExpiresAt = Nothing
                       , walletPaymentCreditedAt = Nothing
+                      , walletPaymentUnknownSince = Nothing
+                      , walletPaymentCreatedAt = now
                       , walletPaymentCheckingId = Nothing
-      , walletPaymentCreatedAt = now
                       , walletPaymentUpdatedAt = now
                       }
                     return $! Right $! PaidInvoice
@@ -322,8 +324,9 @@ payInvoiceOrThrow pool params = do
                   , walletPaymentNote = Nothing
                   , walletPaymentExpiresAt = Nothing
                   , walletPaymentCreditedAt = Nothing
+                  , walletPaymentUnknownSince = Nothing
+                  , walletPaymentCreatedAt = now
                   , walletPaymentCheckingId = Nothing
-      , walletPaymentCreatedAt = now
                   , walletPaymentUpdatedAt = now
                   }
                 case minserted of
