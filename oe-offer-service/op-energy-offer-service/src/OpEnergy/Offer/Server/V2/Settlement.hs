@@ -41,6 +41,7 @@ import           OpEnergy.Offer.Server.V1.Class
                  )
 import           OpEnergy.Offer.Server.V1.Config (Config(..))
 import           OpEnergy.Offer.Server.V1.Offer
+import           Data.OpEnergy.Account.API.V2.LedgerReason (LedgerReason(..))
 import           OpEnergy.Offer.Server.V1.PlatformStats
                  ( addCollectedFeeTx
                  , removeCollectedFeeTx
@@ -247,7 +248,8 @@ settleContract actualMtpEpoch (Entity contractId contract@Contract{..}) =
       then return False
       else do
         ecredited <- lift
-          $ AccountClient.creditBalance winnerUUID (Sats payoutSats)
+          $ AccountClient.creditBalance winnerUUID (Sats payoutSats) Winnings
+              (Just (contractReference contractId))
         case ecredited of
           -- the account service has credited nothing and can credit it
           -- later, so the settlement is taken back and a later tick

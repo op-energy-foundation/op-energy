@@ -44,6 +44,7 @@ import           OpEnergy.Offer.Server.V1.Class
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           OpEnergy.Offer.Server.V1.Offer
+import           Data.OpEnergy.Account.API.V2.LedgerReason (LedgerReason(..))
 import           OpEnergy.Offer.Server.V1.LiveEvent
                    ( LiveEvent(..)
                    , changedBalance
@@ -85,7 +86,8 @@ cancel idText token =
 
     -- refund unfilled stake
     ecredited <- lift
-      $ AccountClient.creditBalance personUUIDV (Sats refundAmount)
+      $ AccountClient.creditBalance personUUIDV (Sats refundAmount) Refund
+          (Just (offerReference key))
 
     -- the offer is closed whether or not its refund went through, so its new
     -- state is published before the error of a failed refund: a connection
