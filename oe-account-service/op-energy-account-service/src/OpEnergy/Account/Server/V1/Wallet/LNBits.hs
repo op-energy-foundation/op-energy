@@ -12,8 +12,11 @@
  - or one the wallet refused before it acted on the request at all.
  -
  - Every account of this service shares the one LNBits wallet, so an
- - invoice this service issued is paid inside this service: at the wallet
- - both sides are the same wallet and nothing would move there.
+ - invoice this service issued is paid from the same wallet it was issued
+ - by. LNBits settles such a payment inside itself, charges nothing for it
+ - and refuses a second payment of it, so it is paid through the wallet
+ - like any other rather than settled here: settling it here would leave
+ - it unpaid at the wallet, and so still payable by anyone else holding it.
  -
  - LNBits is asked for amounts in satoshi and answers in millisatoshi;
  - every amount, which crosses this module, is converted here so nothing
@@ -32,9 +35,11 @@ module OpEnergy.Account.Server.V1.Wallet.LNBits
   , msatsToSats
   ) where
 
-import           Control.Monad.IO.Class (MonadIO)
+import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Trans (lift)
-import           Control.Monad.Trans.Except (ExceptT(..), runExceptT)
+import           Control.Monad.Trans.Except
+                 ( ExceptT(..), runExceptT, throwE
+                 )
 import           Control.Monad.Trans.Reader (ReaderT)
 import           Data.Int (Int64)
 import           Data.Maybe (fromMaybe, isJust)
@@ -83,7 +88,7 @@ import           OpEnergy.Account.Server.V1.WalletPayment
 import           OpEnergy.Error
                  ( CallstackError, dbQueryError, eitherException
                  , walletAPIError, walletInvoiceAlreadyPaid
-                 , walletInvoiceNotFound, walletPaymentNotMade
+                 , walletPaymentNotMade
                  , walletSelfPaymentNotAllowed, walletUnreachable
                  )
 
@@ -288,10 +293,21 @@ resolveInvoice url invoiceKey pool asker invoiceV = do
 
 -- | pays an invoice.
 --
--- An invoice of this service is settled inside it, as both sides are the
--- one LNBits wallet. Anything else is recorded as pending before the
--- wallet is asked to pay it, so a payment, which is in flight when the
--- call ends, is already written down with the hash it can be asked about
+-- Every invoice is paid through the wallet, this service's own included.
+-- An invoice of this service was settled here instead, which left it
+-- unpaid at the wallet and so still payable: anyone else holding it could
+-- pay it afterwards, and those sats arrived against a payment, which was
+-- already credited, so they reached nobody. An invoice, which was paid
+-- from outside a moment before, left the payer charged for one, which had
+-- already been paid.
+--
+-- The wallet settles an invoice of its own itself, charges nothing for it
+-- and refuses a second payment of it, so paying through the wallet costs
+-- the same as settling it here and closes that window.
+--
+-- The payment is recorded as pending before the wallet is asked, so one,
+-- which is in flight when the call ends, is already written down with the
+-- hash it can be asked about
 payInvoice
   :: BaseUrl
   -> Text
@@ -299,95 +315,7 @@ payInvoice
   -> Pool SqlBackend
   -> PayInvoiceParams
   -> IO (Either CallstackError PaidInvoice)
-payInvoice url invoiceKey adminKey pool params = do
-  mours <- flip runSqlPersistMPool pool $ selectFirst
-    [ WalletPaymentInvoice ==. payInvoiceBolt11 params
-    , WalletPaymentDirection ==. Incoming
-    ]
-    [ Desc WalletPaymentId ]
-  case mours of
-    Just ours -> payOwnInvoice pool params ours
-    Nothing -> payOverLightning url invoiceKey adminKey pool params
-
--- | settles an invoice this service issued, without the wallet: the sats
--- are in the one wallet either way, so only the ledger moves. The caller
--- credits the account, which is paid, from the settled payment
-payOwnInvoice
-  :: Pool SqlBackend
-  -> PayInvoiceParams
-  -> Entity WalletPayment
-  -> IO (Either CallstackError PaidInvoice)
-payOwnInvoice pool params (Entity key payment)
-  | walletPaymentPersonId payment == payInvoicePersonId params =
-      return $! Left walletSelfPaymentNotAllowed
-  | walletPaymentStatus payment /= Pending =
-      return $! Left walletInvoiceNotFound
-  | otherwise = do
-      let now = payInvoiceNow params
-          amount = walletPaymentAmountSats payment
-      esettled <- eitherException $ flip runSqlPersistMPool pool $ do
-        -- no reserve is taken: nothing leaves the wallet for a payment,
-        -- which is settled inside it, so there is no fee to cover
-        edebited <- adjustBalanceTx (payInvoicePersonId params) Debit amount
-          Withdrawal Nothing now
-        case edebited of
-          Left err -> return $! Left err
-          Right balanceAfter -> payOwnInvoiceTx
-            params payment key amount balanceAfter now
-      return $! either (const (Left dbQueryError)) id esettled
-
--- | settles the invoice and records the payer's side of it, in the
--- transaction, which has already taken the payer's balance. A step, which
--- does not happen, takes the balance back with it
-payOwnInvoiceTx
-  :: MonadIO m
-  => PayInvoiceParams
-  -> WalletPayment
-  -> Key WalletPayment
-  -> Sats
-  -> Sats
-  -> POSIXTime
-  -> ReaderT SqlBackend m (Either CallstackError PaidInvoice)
-payOwnInvoiceTx params payment key amount balanceAfter now = do
-  settled <- updateWhereCount
-    [ WalletPaymentId ==. key, WalletPaymentStatus ==. Pending ]
-    [ WalletPaymentStatus =. Settled, WalletPaymentUpdatedAt =. now ]
-  if settled /= (1 :: Int64)
-    -- somebody settled it between the read and the write, so the balance,
-    -- which was taken for it, is given back by undoing the transaction
-    then do
-      transactionUndo
-      return $! Left walletInvoiceNotFound
-    else do
-      -- the payer's side of the payment, written with the settling of the
-      -- invoice so the two are recorded together or not at all. The sats
-      -- never leave the wallet, so only the ledger moves, but the history
-      -- is built from these rows and the payer's would otherwise show
-      -- nothing for sats, which left the account
-      _ <- insertUnique $ WalletPayment
-        { walletPaymentPersonId = payInvoicePersonId params
-        , walletPaymentDirection = Outgoing
-        , walletPaymentStatus = Settled
-        , walletPaymentAmountSats = amount
-        -- nothing left the wallet, so nothing was charged for it
-        , walletPaymentFeeSats = Sats 0
-        , walletPaymentPaymentHash = walletPaymentPaymentHash payment
-        , walletPaymentInvoice = walletPaymentInvoice payment
-        , walletPaymentNote = walletPaymentNote payment
-        , walletPaymentExpiresAt = Nothing
-        , walletPaymentCreditedAt = Nothing
-        , walletPaymentCreatedAt = now
-        , walletPaymentUpdatedAt = now
-        }
-      return $! Right $! PaidInvoice
-        { paidInvoicePaymentHash = walletPaymentPaymentHash payment
-        , paidInvoiceBalanceAfter = balanceAfter
-        , paidInvoiceAmountSats = amount
-        -- nothing left the wallet, so nothing was charged for it
-        , paidInvoiceFeeSats = Sats 0
-        , paidInvoiceProgress = PaymentSettled
-        , paidInvoiceRecipientPersonId = Just (walletPaymentPersonId payment)
-        }
+payInvoice = payOverLightning
 
 -- | pays an invoice, which is not this service's own, over lightning
 payOverLightning
@@ -403,21 +331,53 @@ payOverLightning url invoiceKey adminKey pool params = runExceptT $ do
   paymentHashV <- ExceptT $ return $! readDecodedHash decoded
   -- the hash names the payment, the string it arrived as does not: an
   -- invoice of this service, which was handed in under another encoding
-  -- of its hash, is settled inside the service rather than paid out to
-  -- the wallet, which would settle this service's own invoice from the
-  -- shared wallet and credit the account it was created for
+  -- of its hash, is still recognised as its own
   mours <- lift $ flip runSqlPersistMPool pool $ selectFirst
     [ WalletPaymentPaymentHash ==. paymentHashV
     , WalletPaymentDirection ==. Incoming
     ]
     [ Desc WalletPaymentId ]
+  -- an account paying its own invoice would be debited and credited for
+  -- one payment, and the wallet, which holds both sides, would allow it
   case mours of
-    Just ours -> ExceptT $ payOwnInvoice pool params ours
-    Nothing -> do
-      balanceAfterDebit <- ExceptT
-        $ recordPendingPayment pool params paymentHashV
-      ExceptT
-        $ sendPayment url adminKey pool params paymentHashV balanceAfterDebit
+    Just (Entity _ ourInvoice)
+      | walletPaymentPersonId ourInvoice == payInvoicePersonId params ->
+          throwE walletSelfPaymentNotAllowed
+    _ -> return ()
+  balanceAfterDebit <- ExceptT
+    $ recordPendingPayment pool params paymentHashV
+  paid <- ExceptT
+    $ sendPayment url adminKey pool params paymentHashV balanceAfterDebit
+  -- the wallet settled an invoice of this service inside itself, so the
+  -- row, which stands for that invoice here, is settled with it and the
+  -- caller credits the account it was created for. Left to the scheduler
+  -- the credit would wait for a reconcile pass, while the payer has
+  -- already been told the payment went
+  case mours of
+    Just (Entity ourKey ourInvoice)
+      | paidInvoiceProgress paid == PaymentSettled -> do
+          lift $ settleOwnInvoice pool ourKey (payInvoiceNow params)
+          return $! paid
+            { paidInvoiceRecipientPersonId =
+                Just (walletPaymentPersonId ourInvoice)
+            }
+    _ -> return paid
+
+-- | marks an invoice of this service settled, once the wallet has settled
+-- it inside itself. Only a pending one is claimed, so a reconcile pass,
+-- which got there first, is not written over
+settleOwnInvoice
+  :: MonadIO m
+  => Pool SqlBackend
+  -> Key WalletPayment
+  -> POSIXTime
+  -> m ()
+settleOwnInvoice pool key now = do
+  _ <- liftIO $ eitherException $ flip runSqlPersistMPool pool
+    $ updateWhereCount
+      [ WalletPaymentId ==. key, WalletPaymentStatus ==. Pending ]
+      [ WalletPaymentStatus =. Settled, WalletPaymentUpdatedAt =. now ]
+  return ()
 
 -- | the hash of a decoded invoice, as this service's own type
 readDecodedHash
