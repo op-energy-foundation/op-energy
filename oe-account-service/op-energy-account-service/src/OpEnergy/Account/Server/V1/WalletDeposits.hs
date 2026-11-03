@@ -25,6 +25,7 @@ import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Except (runExceptT, throwE)
 import           Control.Monad.Trans.Reader (ReaderT, ask)
 import           Data.Int (Int64)
+import           Data.Pool (Pool)
 import           Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
 import           Prometheus (MonadMonitor)
 
@@ -148,7 +149,7 @@ creditWaitingDeposits =
       , WalletPaymentStatus ==. Settled
       , WalletPaymentCreditedAt ==. Nothing
       ]
-      [ Asc WalletPaymentId, LimitTo maxDepositsPerTick ]
+      [ Asc WalletPaymentUpdatedAt, LimitTo maxDepositsPerTick ]
   case ewaiting of
     Left err -> runLogging $ $(logError)
       ( "creditWaitingDeposits: could not read the payments waiting to be "
@@ -156,7 +157,7 @@ creditWaitingDeposits =
       )
     Right waiting -> mapM_ creditOne waiting
   where
-    creditOne (Entity _ payment) = do
+    creditOne (Entity key payment) = do
       State{ accountDBPool = pool } <- ask
       now <- liftIO getPOSIXTime
       -- guarded per payment, so one, which cannot be credited, is skipped
@@ -166,11 +167,36 @@ creditWaitingDeposits =
       case ecredited of
         -- Nothing means somebody else claimed it first, which is not news
         Right (Right _) -> return ()
-        Right (Left err) -> runLogging $ $(logError)
-          ( "creditWaitingDeposits: a settled payment could not be "
-          <> "credited, needs manual reconciliation: " <> describeError err
-          )
+        Right (Left err) -> do
+          runLogging $ $(logError)
+            ( "creditWaitingDeposits: a settled payment could not be "
+            <> "credited, needs manual reconciliation: " <> describeError err
+            )
+          sendToBack pool key now
+        Left err -> do
+          runLogging $ $(logError)
+            ( "creditWaitingDeposits: crediting a settled payment failed, "
+            <> "needs manual reconciliation: " <> err
+            )
+          sendToBack pool key now
+    -- a payment, which could not be credited, keeps its place in the
+    -- queue: its transaction was undone, so it is still settled and still
+    -- uncredited, and every tick reads the same oldest rows. Enough of
+    -- them, which need a hand, and no deposit behind them is ever tried.
+    -- Noting when it was last tried moves it behind the ones, which have
+    -- not been. A note, which itself fails, only leaves it where it was
+    sendToBack
+      :: (MonadIO m, MonadMonitor m)
+      => Pool SqlBackend
+      -> Key WalletPayment
+      -> POSIXTime
+      -> AppT m ()
+    sendToBack pool key now = do
+      enoted <- liftIO $ eitherException $ flip runSqlPersistMPool pool
+        $ update key [ WalletPaymentUpdatedAt =. now ]
+      case enoted of
+        Right () -> return ()
         Left err -> runLogging $ $(logError)
-          ( "creditWaitingDeposits: crediting a settled payment failed, "
-          <> "needs manual reconciliation: " <> err
+          ( "creditWaitingDeposits: could not note when the payment was "
+          <> "last tried: " <> err
           )
