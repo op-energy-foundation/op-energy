@@ -11,15 +11,38 @@
 module Main (main) where
 
 import           Data.Int (Int64)
+import qualified Data.List as List
 import           Data.Word (Word64)
 import           Database.Persist.Sql (toSqlKey)
 import           Test.Hspec
 
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
+import           Data.OpEnergy.Account.API.V2.Bolt11Invoice
+                 ( defaultBolt11Invoice
+                 )
+import           Data.OpEnergy.Account.API.V2.PaymentHash
+                 ( defaultPaymentHash
+                 )
+import           Data.OpEnergy.Account.API.V2.WalletMode (WalletMode(..))
+import           OpEnergy.Account.Server.V1.Config
+                 ( Config(..), defaultConfig, everifyWalletConfig
+                 )
 import           OpEnergy.Account.Server.V1.Person (PersonId)
 import           OpEnergy.Account.Server.V1.Wallet.LNBits (msatsToSats)
+import           OpEnergy.Account.Server.V1.Wallet.Mock (invoiceIsPayable)
+import           OpEnergy.Account.Server.V1.WalletInvoiceReservation
+                 ( hasInvoiceSlot
+                 )
+import           OpEnergy.Account.Server.V1.WalletPayment
 import           OpEnergy.Account.Server.V1.WalletRateLimit
                  ( newWalletAttempts, takeWalletAttempt
+                 )
+import           OpEnergy.Account.Server.V1.WalletReconcile
+                 ( UnknownOutgoing(..), decideUnknownOutgoing
+                 , invoiceIsWrittenOff
+                 )
+import           OpEnergy.Account.Server.V2.WalletAPI.GetTransactions
+                 ( pageOffset
                  )
 import           OpEnergy.Account.Server.V2.WalletAPI.PayInvoice (feeReserve)
 
@@ -28,6 +51,12 @@ main = hspec $ do
   describe "feeReserve" feeReserveSpec
   describe "msatsToSats" msatsToSatsSpec
   describe "takeWalletAttempt" takeWalletAttemptSpec
+  describe "pageOffset" pageOffsetSpec
+  describe "invoiceIsPayable" invoiceIsPayableSpec
+  describe "decideUnknownOutgoing" decideUnknownOutgoingSpec
+  describe "invoiceIsWrittenOff" invoiceIsWrittenOffSpec
+  describe "everifyWalletConfig" everifyWalletConfigSpec
+  describe "hasInvoiceSlot" hasInvoiceSlotSpec
 
 -- | the reserve is a share of the amount, rounded up, so a payment, which
 -- has an amount at all, always reserves something for a fee
@@ -147,3 +176,220 @@ takeWalletAttemptSpec = do
     take' bob `shouldReturn` False
     -- and the one, which is counted, still has its allowance
     take' alice `shouldReturn` True
+
+-- | the offset of a page is the page number times the size of a page, and
+-- the page number is the caller's, so the product is checked rather than
+-- trusted
+pageOffsetSpec :: Spec
+pageOffsetSpec = do
+  it "starts the first page at nothing" $
+    pageOffset 0 10 `shouldBe` Just 0
+
+  it "offsets a later page by the pages before it" $
+    pageOffset 2 10 `shouldBe` Just 20
+
+  it "offsets the largest page, which still fits" $
+    let page = (maxBound :: Int) `div` 10
+    in pageOffset page 10 `shouldBe` Just (page * 10)
+
+  it "refuses a page, whose offset does not fit" $
+    -- this page number times the default page size passes 2^64 and wraps
+    -- to 4, which answers a page, which should hold nothing, with the four
+    -- newest movements of the account
+    pageOffset 1844674407370955162 10 `shouldBe` Nothing
+
+  it "refuses the largest page number there is" $
+    pageOffset (maxBound :: Int) 10 `shouldBe` Nothing
+
+-- | an invoice is payable while it is waiting and its expiry has not gone
+-- by. The expiry was recorded and never read, so an invoice stayed payable
+-- for good
+invoiceIsPayableSpec :: Spec
+invoiceIsPayableSpec = do
+  let invoice = WalletPayment
+        { walletPaymentPersonId = toSqlKey 1
+        , walletPaymentDirection = Incoming
+        , walletPaymentStatus = Pending
+        , walletPaymentAmountSats = Sats 1000
+        , walletPaymentFeeSats = Sats 0
+        , walletPaymentPaymentHash = defaultPaymentHash
+        , walletPaymentInvoice = defaultBolt11Invoice
+        , walletPaymentNote = Nothing
+        , walletPaymentExpiresAt = Just 200
+        , walletPaymentCreditedAt = Nothing
+        , walletPaymentMadeAtWallet = Just "mock"
+        , walletPaymentUnknownSince = Nothing
+        , walletPaymentCreatedAt = 100
+        , walletPaymentUpdatedAt = 100
+        }
+
+  it "is payable while it waits and its expiry is ahead" $
+    invoiceIsPayable 150 invoice `shouldBe` True
+
+  it "is payable at the moment it expires" $
+    invoiceIsPayable 200 invoice `shouldBe` True
+
+  it "is not payable once its expiry has gone by" $
+    invoiceIsPayable 201 invoice `shouldBe` False
+
+  it "is payable while it waits and was given no expiry" $
+    invoiceIsPayable 100000 invoice { walletPaymentExpiresAt = Nothing }
+      `shouldBe` True
+
+  it "is not payable once it has been paid" $
+    invoiceIsPayable 150 invoice { walletPaymentStatus = Settled }
+      `shouldBe` False
+
+  it "is not payable once it has been written off" $
+    invoiceIsPayable 150 invoice { walletPaymentStatus = Expired }
+      `shouldBe` False
+
+-- | the sats of an outgoing payment, which the wallet does not have, are
+-- given back once it can no longer be in flight -- counted from the first
+-- answer, which did not have it, not from when the payment was made
+decideUnknownOutgoingSpec :: Spec
+decideUnknownOutgoingSpec = do
+  let grace = 60
+      thisWallet = "lnbits:aaaa"
+      -- the payment was made at the wallet, which is being asked
+      decide now munknownSince = decideUnknownOutgoing grace now
+        (Just thisWallet) thisWallet munknownSince
+
+  it "records when the wallet first did not have it" $
+    decide 1000 Nothing `shouldBe` NoteUnknown
+
+  it "waits while it has not been unknown for long" $
+    decide 1030 (Just 1000) `shouldBe` WaitLonger
+
+  it "waits at the moment the grace period is up" $
+    decide 1060 (Just 1000) `shouldBe` WaitLonger
+
+  it "gives the sats back once it has been unknown for longer" $
+    decide 1061 (Just 1000) `shouldBe` GiveBack
+
+  it "records the first unknown answer about an old payment rather than \
+     \giving its sats back at once" $
+    -- the payment was made long before the grace period and the wallet
+    -- reported it as pending all that while. Counted from when it was
+    -- made, this first answer, which does not have it, would give its
+    -- sats back, while it may still settle
+    decide 100000 Nothing `shouldBe` NoteUnknown
+
+  it "leaves a payment of another wallet for a person, however long it \
+     \has been unknown" $
+    -- the sats left the wallet it was made at. The wallet being asked
+    -- never knew the payment and never will, so no wait makes its answer
+    -- evidence the payment did not happen
+    decideUnknownOutgoing grace 100000 (Just "lnbits:bbbb") thisWallet
+      (Just 1000) `shouldBe` LeaveForAPerson
+
+  it "leaves a payment of another wallet for a person on the first \
+     \unknown answer too" $
+    decideUnknownOutgoing grace 1000 (Just "lnbits:bbbb") thisWallet
+      Nothing `shouldBe` LeaveForAPerson
+
+  it "leaves a payment, whose wallet was never recorded, for a person" $
+    -- it may be a payment this wallet lost, or one of a wallet used
+    -- before it; nothing recorded says which
+    decideUnknownOutgoing grace 100000 Nothing thisWallet (Just 1000)
+      `shouldBe` LeaveForAPerson
+
+  it "treats the mock wallet as the other wallet it is" $
+    -- a deployment, which ran the mock and was then pointed at a node,
+    -- asks lnbits about payments, which were only ever in the mock
+    decideUnknownOutgoing grace 100000 (Just "mock") thisWallet
+      (Just 1000) `shouldBe` LeaveForAPerson
+
+-- | an invoice nobody paid is written off a grace period after its expiry,
+-- so a payment, which arrived just before it, is still seen
+invoiceIsWrittenOffSpec :: Spec
+invoiceIsWrittenOffSpec = do
+  let grace = 60
+      writtenOff = invoiceIsWrittenOff grace
+
+  it "does not write off an invoice, which was given no expiry" $
+    writtenOff 100000 Nothing `shouldBe` False
+
+  it "does not write off an invoice, which has not expired" $
+    writtenOff 150 (Just 200) `shouldBe` False
+
+  it "does not write off an invoice, which has only just expired" $
+    -- it is asked about for a while longer: a payment, which arrived just
+    -- before the expiry, is reported after it, and an invoice, which is
+    -- written off, is never asked about again and never credited
+    writtenOff 201 (Just 200) `shouldBe` False
+
+  it "does not write off an invoice at the moment its grace is up" $
+    writtenOff 260 (Just 200) `shouldBe` False
+
+  it "writes off an invoice, which stayed unpaid past its grace" $
+    writtenOff 261 (Just 200) `shouldBe` True
+
+-- | the wallet options are checked against each other at startup, so a
+-- config, which can not work -- or which would hand out real sats for
+-- nothing -- stops the service rather than the first request it breaks
+everifyWalletConfigSpec :: Spec
+everifyWalletConfigSpec = do
+  let salted = defaultConfig { configSalt = "a secret" }
+      lnbits = salted
+        { configWalletBackend = WalletModeLNBits
+        , configLNBitsInvoiceKey = "invoice key"
+        , configLNBitsAdminKey = "admin key"
+        , configStartingBalanceSats = 0
+        }
+      complainsAbout about config = case everifyWalletConfig config of
+        Left problems -> about `List.isInfixOf` problems
+        Right () -> False
+
+  it "accepts the defaults once a salt is chosen" $
+    everifyWalletConfig salted `shouldBe` Right ()
+
+  it "refuses a config without a salt" $
+    -- the identifier of a ledger entry is its row id hashed with the salt,
+    -- and ids of a shared sequence hashed with nothing can be worked back
+    defaultConfig `shouldSatisfy` complainsAbout "SECRET_SALT"
+
+  it "accepts a real wallet, which grants nothing at signup" $
+    everifyWalletConfig lnbits `shouldBe` Right ()
+
+  it "refuses a real wallet together with a signup grant" $
+    -- every account is credited with the grant without any sats being paid
+    -- in for it, so it could be withdrawn from the wallet as real sats
+    lnbits { configStartingBalanceSats = 300000 }
+      `shouldSatisfy` complainsAbout "STARTING_BALANCE_SATS"
+
+  it "allows a signup grant on the wallet, which moves no real sats" $
+    everifyWalletConfig salted { configStartingBalanceSats = 300000 }
+      `shouldBe` Right ()
+
+-- | the slots held for the invoices, which are being made right now, count
+-- against the limit alongside the ones already waiting, so a burst of
+-- requests can not each take the last slot
+hasInvoiceSlotSpec :: Spec
+hasInvoiceSlotSpec = do
+  let limit = 10
+      room = hasInvoiceSlot limit
+
+  it "has room while fewer than the limit are waiting" $
+    room 9 0 `shouldBe` True
+
+  it "has no room at the limit" $
+    room 10 0 `shouldBe` False
+
+  it "has no room past the limit" $
+    room 11 0 `shouldBe` False
+
+  it "counts a slot, which is held for a call in flight" $
+    -- nine waiting and one being made is already the limit: without
+    -- counting the one in flight this answers True and the burst, which
+    -- is mid-call, takes an eleventh slot
+    room 9 1 `shouldBe` False
+
+  it "counts the slots held by a whole burst" $
+    room 0 10 `shouldBe` False
+
+  it "has room while the slots held leave one" $
+    room 4 5 `shouldBe` True
+
+  it "has no room at all when the limit is nothing" $
+    hasInvoiceSlot 0 0 0 `shouldBe` False
