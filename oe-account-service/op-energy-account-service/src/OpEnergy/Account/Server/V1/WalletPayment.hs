@@ -106,6 +106,7 @@ WalletPayment
   note Text Maybe
   expiresAt POSIXTime Maybe -- incoming only: when the invoice stops being payable
   creditedAt POSIXTime Maybe -- incoming only: when the balance was credited for it, so that happens exactly once
+  unknownSince POSIXTime Maybe -- outgoing only: when the wallet first answered that it does not have this payment, so the wait before giving its sats back is counted from then rather than from when it was made
   createdAt POSIXTime
   updatedAt POSIXTime
   UniqueWalletPaymentHashPersonDirection paymentHash personId direction

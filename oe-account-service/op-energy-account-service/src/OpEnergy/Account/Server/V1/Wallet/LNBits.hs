@@ -191,6 +191,7 @@ recordInvoice pool params paymentHashV invoiceV expiresAt = do
       , walletPaymentNote = createInvoiceNote params
       , walletPaymentExpiresAt = Just expiresAt
       , walletPaymentCreditedAt = Nothing
+      , walletPaymentUnknownSince = Nothing
       , walletPaymentCreatedAt = now
       , walletPaymentUpdatedAt = now
       }
@@ -440,6 +441,7 @@ recordPendingPaymentTx params paymentHashV amount reserve now = do
       , walletPaymentNote = Nothing
       , walletPaymentExpiresAt = Nothing
       , walletPaymentCreditedAt = Nothing
+      , walletPaymentUnknownSince = Nothing
       , walletPaymentCreatedAt = now
       , walletPaymentUpdatedAt = now
       }

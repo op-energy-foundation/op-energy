@@ -105,6 +105,7 @@ createInvoice pool params = do
     , walletPaymentNote = createInvoiceNote params
     , walletPaymentExpiresAt = Just expiresAt
     , walletPaymentCreditedAt = Nothing
+    , walletPaymentUnknownSince = Nothing
     , walletPaymentCreatedAt = now
     , walletPaymentUpdatedAt = now
     }
@@ -257,6 +258,7 @@ payInvoiceOrThrow pool params = do
                       , walletPaymentNote = walletPaymentNote payment
                       , walletPaymentExpiresAt = Nothing
                       , walletPaymentCreditedAt = Nothing
+                      , walletPaymentUnknownSince = Nothing
                       , walletPaymentCreatedAt = now
                       , walletPaymentUpdatedAt = now
                       }
@@ -317,6 +319,7 @@ payInvoiceOrThrow pool params = do
                   , walletPaymentNote = Nothing
                   , walletPaymentExpiresAt = Nothing
                   , walletPaymentCreditedAt = Nothing
+                  , walletPaymentUnknownSince = Nothing
                   , walletPaymentCreatedAt = now
                   , walletPaymentUpdatedAt = now
                   }
