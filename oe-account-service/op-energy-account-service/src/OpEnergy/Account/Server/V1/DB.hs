@@ -101,12 +101,22 @@ getConnection config = do
       []
 
     -- the scheduler asks each tick which incoming payments are settled and
-    -- not yet credited. Partial, so it holds only the rows still waiting --
-    -- normally none -- rather than every payment ever made, and matches
-    -- that query exactly. For both new and existing DBs
+    -- not yet credited, oldest first by when each was last tried. Partial,
+    -- so it holds only the rows still waiting -- normally none -- rather
+    -- than every payment ever made, and matches that query exactly.
+    --
+    -- Dropped first: the index was created over (direction, status, id)
+    -- and sorted by the row id, which is no longer the order the rows are
+    -- read in, and CREATE INDEX IF NOT EXISTS leaves an index, which
+    -- already exists, with the definition it was created with. Direction
+    -- and status stay columns of the index rather than moving into its
+    -- predicate: the query names them as parameters, and a parameter can
+    -- not be shown to imply a predicate of literals, so an index narrowed
+    -- that way would be passed over. For both new and existing DBs
+    rawExecute "DROP INDEX IF EXISTS wallet_payment_waiting_credit_idx" []
     rawExecute
       ( "CREATE INDEX IF NOT EXISTS wallet_payment_waiting_credit_idx"
-     <> " ON wallet_payment (direction, status, id)"
+     <> " ON wallet_payment (direction, status, updated_at)"
      <> " WHERE credited_at IS NULL"
       )
       []
