@@ -12,6 +12,7 @@
 {-# LANGUAGE ScopedTypeVariables        #-}
 module OpEnergy.Account.Server.V1.Wallet.Mock
   ( mockWalletBackend
+  , invoiceIsPayable
   ) where
 
 import qualified Crypto.Hash.SHA256 as SHA256
@@ -116,6 +117,20 @@ createInvoice pool params = do
       , createdInvoiceExpiresAt = expiresAt
       }
 
+-- | whether an invoice can still be paid: it is waiting for a payment, and
+-- its expiry, if it was given one, has not passed.
+--
+-- An expiry was recorded for every invoice this backend issued and then
+-- never read, so an invoice stayed payable for good -- which the wallet it
+-- stands in for would not do, and which is what the paths here are written
+-- against. Expiry is counted the way the reconciler counts it: an invoice
+-- is gone once its expiry is behind the clock, so one expiring exactly now
+-- is still payable. An invoice without an expiry is payable while it waits
+invoiceIsPayable :: POSIXTime -> WalletPayment -> Bool
+invoiceIsPayable now payment =
+  walletPaymentStatus payment == Pending
+    && maybe True (>= now) (walletPaymentExpiresAt payment)
+
 -- | an invoice this service issued is known by its own row; anything else
 -- can not be read without a node
 resolveInvoice
@@ -124,6 +139,7 @@ resolveInvoice
   -> Bolt11Invoice
   -> IO (Either CallstackError (Maybe ResolvedInvoice))
 resolveInvoice pool asker invoiceV = do
+  now <- getPOSIXTime
   (mours, mpaidByAsker) <- flip runSqlPersistMPool pool $ do
     ours <- selectFirst
       [ WalletPaymentInvoice ==. invoiceV
@@ -154,7 +170,7 @@ resolveInvoice pool asker invoiceV = do
     Just (Entity _ payment) -> Just $! ResolvedInvoice
       { resolvedInvoiceAmountSats = walletPaymentAmountSats payment
       , resolvedInvoicePersonId = Just (walletPaymentPersonId payment)
-      , resolvedInvoicePayable = walletPaymentStatus payment == Pending
+      , resolvedInvoicePayable = invoiceIsPayable now payment
       , resolvedInvoicePaidByAsker = paidByAsker
       }
 
@@ -202,7 +218,7 @@ payInvoiceOrThrow pool params = do
     Just (Entity key payment)
       | walletPaymentPersonId payment == payer ->
           return $! Left walletSelfPaymentNotAllowed
-      | walletPaymentStatus payment /= Pending ->
+      | not (invoiceIsPayable now payment) ->
           return $! Left walletInvoiceNotFound
       | otherwise -> do
           let amount = walletPaymentAmountSats payment
@@ -347,17 +363,21 @@ settleInvoice pool personKey paymentHashV = do
     Nothing -> return $! Left walletInvoiceNotFound
     Just (Entity key payment) -> do
       now <- getPOSIXTime
-      settled <- flip runSqlPersistMPool pool $ updateWhereCount
-        [ WalletPaymentId ==. key
-        , WalletPaymentPersonId ==. personKey
-        , WalletPaymentStatus ==. Pending
-        ]
-        [ WalletPaymentStatus =. Settled, WalletPaymentUpdatedAt =. now ]
+      -- the wallet this stands in for would no longer take a payment for
+      -- an invoice, whose expiry has passed, so neither does this
+      settled <- if not (invoiceIsPayable now payment)
+        then return (0 :: Int64)
+        else flip runSqlPersistMPool pool $ updateWhereCount
+          [ WalletPaymentId ==. key
+          , WalletPaymentPersonId ==. personKey
+          , WalletPaymentStatus ==. Pending
+          ]
+          [ WalletPaymentStatus =. Settled, WalletPaymentUpdatedAt =. now ]
       return $! Right $! SettledInvoice
         { settledInvoicePersonId = walletPaymentPersonId payment
         , settledInvoicePaymentHash = paymentHashV
         , settledInvoiceAmountSats = walletPaymentAmountSats payment
-        , settledInvoiceWasPending = settled == (1 :: Int64)
+        , settledInvoiceWasPending = settled == 1
         }
 
 -- | eight bytes from the system's own random source.
