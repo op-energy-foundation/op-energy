@@ -365,7 +365,10 @@ settleInvoice pool personKey paymentHashV = do
       now <- getPOSIXTime
       -- the wallet this stands in for would no longer take a payment for
       -- an invoice, whose expiry has passed, so neither does this
-      settled <- if not (invoiceIsPayable now payment)
+      -- whether this call was the one, which settled the invoice, is not
+      -- reported: the caller credits from creditedAt, so a settle, whose
+      -- credit was lost after it, still credits when it is retried
+      _ <- if not (invoiceIsPayable now payment)
         then return (0 :: Int64)
         else flip runSqlPersistMPool pool $ updateWhereCount
           [ WalletPaymentId ==. key
@@ -377,7 +380,6 @@ settleInvoice pool personKey paymentHashV = do
         { settledInvoicePersonId = walletPaymentPersonId payment
         , settledInvoicePaymentHash = paymentHashV
         , settledInvoiceAmountSats = walletPaymentAmountSats payment
-        , settledInvoiceWasPending = settled == 1
         }
 
 -- | eight bytes from the system's own random source.
