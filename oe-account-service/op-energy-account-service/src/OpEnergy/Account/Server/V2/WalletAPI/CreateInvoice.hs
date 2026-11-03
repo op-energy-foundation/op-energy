@@ -18,7 +18,7 @@ import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Except (ExceptT(..), throwE)
 import           Control.Monad.Trans.Reader (ask)
 import           Data.Time.Clock.POSIX (getPOSIXTime)
-import           Database.Persist (Entity(..), count, (==.), (>.))
+import           Database.Persist (Entity(..))
 import           Database.Persist.Postgresql (runSqlPersistMPool)
 
 import qualified Data.OpEnergy.Account.API.V1.Account as API
@@ -39,9 +39,9 @@ import           OpEnergy.Account.Server.V1.Config
                  ( Config(..)
                  )
 import           OpEnergy.Account.Server.V1.Wallet.Class
-import           OpEnergy.Account.Server.V1.WalletPayment
-                 ( EntityField(..), WalletPaymentDirection(..)
-                 , WalletPaymentStatus(..)
+import           OpEnergy.Account.Server.V1.WalletInvoiceReservation
+                 ( claimInvoiceSlotTx, invoiceReservationTtl
+                 , releaseInvoiceSlotTx
                  )
 import           OpEnergy.Error
                  ( eitherThrowJSON, runExceptPrefixT
@@ -86,24 +86,35 @@ createInvoice token (CreateInvoiceRequest requestAmountSats requestNote) =
   -- deciding how often this service calls the wallet. An expired one is
   -- not counted: it is no longer asked about and the account would
   -- otherwise be left unable to ask to be paid
-  pendingCount <- ExceptT $ liftIO
+  -- the slot is taken before the wallet is asked, and stands for the
+  -- asking: counting the invoices, which are already written down, counts
+  -- nothing about the calls, which are in flight, so a burst of requests
+  -- would all read the same count and all go on to make an invoice. The
+  -- limit can only be held here -- refusing one, which the wallet has
+  -- already made, would leave it payable with no row to credit against.
+  -- See OpEnergy.Account.Server.V1.WalletInvoiceReservation
+  mslot <- ExceptT $ liftIO
     $ fmap (either (const (Left dbQueryError)) Right)
     $ eitherException $ flip runSqlPersistMPool pool
-    $ count
-      [ WalletPaymentPersonId ==. key
-      , WalletPaymentDirection ==. Incoming
-      , WalletPaymentStatus ==. Pending
-      , WalletPaymentExpiresAt >. Just now
-      ]
-  when (pendingCount >= fromIntegral (configWalletMaxPendingInvoices config))
-    $ throwE walletTooManyPendingInvoices
-  created <- ExceptT $ liftIO $ walletCreateInvoice walletV $ CreateInvoiceParams
+    $ claimInvoiceSlotTx
+      (fromIntegral (configWalletMaxPendingInvoices config))
+      invoiceReservationTtl
+      key
+      now
+  slot <- exceptTMaybeT walletTooManyPendingInvoices $ return mslot
+  ecreated <- lift $ liftIO $ walletCreateInvoice walletV $ CreateInvoiceParams
     { createInvoicePersonId = key
     , createInvoiceAmountSats = amount
     , createInvoiceNote = requestNote
     , createInvoiceExpirySecs = configWalletInvoiceExpirySecs config
     , createInvoiceNow = now
     }
+  -- the slot goes back whether the wallet answered or not, so a call,
+  -- which failed, does not hold it for the whole of its lifetime. One,
+  -- which can not be given back, stops counting by itself
+  _ <- lift $ liftIO $ eitherException $ flip runSqlPersistMPool pool
+    $ releaseInvoiceSlotTx slot
+  created <- ExceptT $ return ecreated
   -- positional, as several wallet types share these field names
   return $! CreateInvoiceResult
     (createdInvoiceBolt11 created)

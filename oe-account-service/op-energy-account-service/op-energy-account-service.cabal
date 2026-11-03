@@ -58,6 +58,7 @@ library
                    , OpEnergy.Account.Server.V1.AccountService
                    , OpEnergy.Account.Server.V1.Person
                    , OpEnergy.Account.Server.V1.LedgerEntry
+                   , OpEnergy.Account.Server.V1.WalletInvoiceReservation
                    , OpEnergy.Account.Server.V1.WalletPayment
                    , OpEnergy.Account.Server.V1.WalletDeposits
                    , OpEnergy.Account.Server.V1.Wallet.Class
