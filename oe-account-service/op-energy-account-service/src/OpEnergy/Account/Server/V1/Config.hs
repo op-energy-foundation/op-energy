@@ -350,7 +350,12 @@ everifyWalletConfig config
     -- only the configured backend's options are checked: the keys of a
     -- backend, which is not in use, are not needed and are commonly unset
     lnbitsProblems = catMaybes
-      [ require (configLNBitsInvoiceKey config /= "")
+      [ require (configStartingBalanceSats config == 0)
+          "STARTING_BALANCE_SATS must be 0 when WALLET_BACKEND is lnbits: \
+          \every account is credited with it at registration, while no sats \
+          \were ever paid in for it, so an account could withdraw it from \
+          \the wallet as real sats and register again for more"
+      , require (configLNBitsInvoiceKey config /= "")
           "LNBITS_INVOICE_KEY must be set when WALLET_BACKEND is lnbits: \
           \without it no invoice can be created and nothing can be read \
           \back, so every wallet request fails"
