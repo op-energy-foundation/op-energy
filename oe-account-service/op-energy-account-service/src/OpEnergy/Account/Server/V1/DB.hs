@@ -42,6 +42,7 @@ import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
 import           OpEnergy.Account.Server.V1.LedgerEntry
                  ( migrateLedgerEntry
                  )
+import           OpEnergy.Account.Server.V1.WalletInvoiceReservation
 import           OpEnergy.Account.Server.V1.WalletPayment
                  ( migrateWalletPayment
                  )
@@ -79,6 +80,7 @@ getConnection config = do
     printMigration migrateAccount
     printMigration migrateLedgerEntry
     printMigration migrateWalletPayment
+    printMigration migrateWalletInvoiceReservation
     printMigration migrateBlockTimeStrike
     printMigration migrateBlockTimeStrikeGuess
     printMigration migrateBlockTimeStrikeDB
@@ -87,6 +89,7 @@ getConnection config = do
     -- backfill of opening balances reads them
     runMigration migrateLedgerEntry
     runMigration migrateWalletPayment
+    runMigration migrateWalletInvoiceReservation
 
     -- an account's wallet history reads its entries by person_id, newest
     -- first, and persistent creates no index for a foreign key. Without
