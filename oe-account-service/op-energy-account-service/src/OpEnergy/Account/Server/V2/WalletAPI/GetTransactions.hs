@@ -27,7 +27,7 @@ import qualified Data.ByteString.Base16 as B16
 import qualified Crypto.Hash.SHA256 as SHA256
 import           Database.Persist
 import           Database.Persist.Postgresql (runSqlPersistMPool)
-import           Database.Persist.Sql (fromSqlKey)
+import           Database.Persist.Sql (fromSqlKey, rawExecute)
 
 import           Data.OpEnergy.API.V1.Natural (Natural)
 import qualified Data.OpEnergy.Account.API.V1.Account as API
@@ -68,8 +68,11 @@ getWalletTransactionsHandler token mpage =
       $ getWalletTransactions token mpage
 
 -- | business logic for the V2 wallet/transactions endpoint. The total is
--- counted in the same transaction as the page is read, so the two can not
--- disagree and a client can number the pages
+-- counted and the page is read in one transaction at repeatable read, so
+-- the two see the same history and a client can number the pages. Read
+-- committed, which is what a transaction is otherwise given, takes a fresh
+-- snapshot per statement, so a movement committed between the two would be
+-- counted but not shown, or shown but not counted
 getWalletTransactions
   :: API.AccountToken
   -> Maybe (Natural Int)
@@ -85,6 +88,7 @@ getWalletTransactions token mpage =
   -- the total is what lets a client show numbered pages rather than only a
   -- "next" step
   (total, entries) <- liftIO $ flip runSqlPersistMPool pool $ do
+    rawExecute "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ" []
     totalV <- count [ LedgerEntryPersonId ==. key ]
     entriesV <- case pageOffset requestedPage recordsPerReply of
       -- a page, whose offset does not fit, is past every row there is
