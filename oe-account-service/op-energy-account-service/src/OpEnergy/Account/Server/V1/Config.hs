@@ -266,9 +266,12 @@ maxWalletRecordsPerPage = 1000
 -- not work, stops the service at startup instead of at the first request it
 -- breaks. Every problem is reported at once, rather than one per restart.
 --
+-- The defaults alone are not a usable config: a salt has to be chosen for
+-- the deployment rather than defaulted to, so an example gives one.
+--
 -- Example:
 --
--- > everifyWalletConfig defaultConfig == Right ()
+-- > everifyWalletConfig defaultConfig { configSalt = "a secret" } == Right ()
 everifyWalletConfig :: Config -> Either String ()
 everifyWalletConfig config
   | List.null problems = Right ()
@@ -335,6 +338,11 @@ everifyWalletConfig config
       , require (configWalletInvoiceExpirySecs config > 0)
           "WALLET_INVOICE_EXPIRY_SECS must be above 0: an invoice would be \
           \advertised as expired as soon as it is created"
+      , require (configSalt config /= "")
+          "SECRET_SALT must be set: the identifier of a ledger entry is its \
+          \row id hashed with this salt, and the ids of a shared sequence \
+          \hashed with nothing can be worked back from it, which says how \
+          \many movements every other account made in between"
       ]
       ++ if configWalletBackend config == WalletModeLNBits
            then lnbitsProblems
