@@ -194,6 +194,12 @@ in
       PROMETHEUS_PORT = 7899;
       LOG_LEVEL_MIN = "Debug";
       SCHEDULER_POLL_RATE_SECS = 10;
+      # which wallet the service runs. "mock" settles its own invoices and
+      # moves no real sats. "lnbits" moves real ones and additionally needs
+      # LNBITS_API_URL, the LNBITS_*_KEY credentials above, and
+      # STARTING_BALANCE_SATS = 0, as a signup credit would otherwise be
+      # withdrawable from the wallet
+      WALLET_BACKEND = "mock";
     };
   };
 

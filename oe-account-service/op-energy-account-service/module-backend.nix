@@ -76,6 +76,11 @@ in
         PROMETHEUS_PORT = 7899;
         LOG_LEVEL_MIN = "Info";
         SCHEDULER_POLL_RATE_SECS = 10;
+        # the service refuses a config, which does not name a wallet, so one
+        # is named here. "mock" settles its own invoices and moves no real
+        # sats; a deployment, which wants real ones, sets "lnbits" together
+        # with the LNBITS_* credentials and STARTING_BALANCE_SATS = 0
+        WALLET_BACKEND = "mock";
       };
       example = {
         DB_PORT = 5432;
@@ -84,6 +89,11 @@ in
         PROMETHEUS_PORT = 7899;
         LOG_LEVEL_MIN = "Info";
         SCHEDULER_POLL_RATE_SECS = 10;
+        # the service refuses a config, which does not name a wallet, so one
+        # is named here. "mock" settles its own invoices and moves no real
+        # sats; a deployment, which wants real ones, sets "lnbits" together
+        # with the LNBITS_* credentials and STARTING_BALANCE_SATS = 0
+        WALLET_BACKEND = "mock";
       };
     };
   };
