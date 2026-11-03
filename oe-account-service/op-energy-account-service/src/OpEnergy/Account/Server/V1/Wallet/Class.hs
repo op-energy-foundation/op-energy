@@ -112,9 +112,6 @@ data SettledInvoice = SettledInvoice
   { settledInvoicePersonId :: PersonId
   , settledInvoicePaymentHash :: PaymentHash
   , settledInvoiceAmountSats :: Sats
-  , settledInvoiceWasPending :: Bool
-    -- ^ False when the invoice had already been settled, so the caller
-    -- credits the balance once and only once
   }
   deriving (Show, Generic)
 
