@@ -9,6 +9,7 @@
 module OpEnergy.Account.Server.V2.WalletAPI.GetTransactions
   ( getWalletTransactionsHandler
   , getWalletTransactions
+  , pageOffset
   ) where
 
 import           Control.Monad.IO.Class (liftIO)
@@ -85,12 +86,15 @@ getWalletTransactions token mpage =
   -- "next" step
   (total, entries) <- liftIO $ flip runSqlPersistMPool pool $ do
     totalV <- count [ LedgerEntryPersonId ==. key ]
-    entriesV <- selectList
-      [ LedgerEntryPersonId ==. key ]
-      [ Desc LedgerEntryId
-      , LimitTo recordsPerReply
-      , OffsetBy (requestedPage * recordsPerReply)
-      ]
+    entriesV <- case pageOffset requestedPage recordsPerReply of
+      -- a page, whose offset does not fit, is past every row there is
+      Nothing -> return []
+      Just offset -> selectList
+        [ LedgerEntryPersonId ==. key ]
+        [ Desc LedgerEntryId
+        , LimitTo recordsPerReply
+        , OffsetBy offset
+        ]
     return (totalV, entriesV)
   return $! WalletTransactionsResult
     { results = List.map (renderWalletTransaction (configSalt config)) entries
@@ -98,6 +102,26 @@ getWalletTransactions token mpage =
     , pageSize = fromIntegral recordsPerReply
     , totalCount = fromIntegral total
     }
+
+-- | the OFFSET a page of the history is read with, or 'Nothing' when the
+-- page is so far in that its offset can not be represented.
+--
+-- The offset is the page number times the size of a page, and the page
+-- number is the caller's. Worked out in Int that product wraps, and a
+-- wrapped offset answers a page, which should hold nothing, with real
+-- movements, or reads at a negative offset. Worked out as Integer and
+-- checked afterwards, so the product being checked is not the one, which
+-- would have wrapped.
+--
+-- Example:
+--
+-- > pageOffset 2 10 == Just 20
+pageOffset :: Int -> Int -> Maybe Int
+pageOffset page recordsPerPage
+  | offset <= toInteger (maxBound :: Int) = Just (fromInteger offset)
+  | otherwise = Nothing
+  where
+    offset = toInteger page * toInteger recordsPerPage
 
 -- | an identifier for a ledger entry, which says nothing about the ledger.
 --
