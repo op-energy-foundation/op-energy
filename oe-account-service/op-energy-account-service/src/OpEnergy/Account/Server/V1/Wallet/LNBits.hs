@@ -35,6 +35,11 @@ module OpEnergy.Account.Server.V1.Wallet.LNBits
   , msatsToSats
   ) where
 
+import qualified Crypto.Hash.SHA256 as SHA256
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Base16 as B16
+import qualified Data.Text.Encoding as TE
+
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Except
@@ -56,7 +61,7 @@ import           Database.Persist.Postgresql (runSqlPersistMPool)
 import           Data.Aeson (decode)
 import           Servant.Client
                  ( BaseUrl, ClientError(..), ClientM, responseBody
-                 , responseStatusCode
+                 , responseStatusCode, showBaseUrl
                  )
 import           Network.HTTP.Types.Status (statusCode)
 
@@ -106,11 +111,15 @@ lnbitsWalletBackend
   -> WalletBackend
 lnbitsWalletBackend url invoiceKey adminKey pool = WalletBackend
   { walletKind = WalletModeLNBits
+  , walletIdentity = lnbitsWalletIdentity url invoiceKey
   , walletCanSend = True
   , walletCanReceive = True
-  , walletCreateInvoice = createInvoice url invoiceKey pool
+  , walletCreateInvoice =
+      createInvoice url invoiceKey (lnbitsWalletIdentity url invoiceKey) pool
   , walletResolveInvoice = resolveInvoice url invoiceKey pool
-  , walletPayInvoice = payInvoice url invoiceKey adminKey pool
+  , walletPayInvoice =
+      payInvoice url invoiceKey adminKey
+        (lnbitsWalletIdentity url invoiceKey) pool
   , walletReadPayment = Just (readPayment url invoiceKey)
   -- an invoice of a real wallet is paid over lightning or not at all:
   -- there is no payer here, which could be asked to pretend
@@ -129,10 +138,11 @@ lnbitsWalletBackend url invoiceKey adminKey pool = WalletBackend
 createInvoice
   :: BaseUrl
   -> Text
+  -> Text
   -> Pool SqlBackend
   -> CreateInvoiceParams
   -> IO (Either CallstackError CreatedInvoice)
-createInvoice url invoiceKey pool params = runExceptT $ do
+createInvoice url invoiceKey identity pool params = runExceptT $ do
   let Sats amount = createInvoiceAmountSats params
       now = createInvoiceNow params
       expiresAt = now + fromIntegral (createInvoiceExpirySecs params)
@@ -143,7 +153,8 @@ createInvoice url invoiceKey pool params = runExceptT $ do
       , LNBits.createInvoiceRequestExpirySecs = createInvoiceExpirySecs params
       }
   (paymentHashV, invoiceV) <- ExceptT $ return $! readInvoiceAnswer answer
-  ExceptT $ recordInvoice pool params paymentHashV invoiceV expiresAt
+  ExceptT
+    $ recordInvoice identity pool params paymentHashV invoiceV expiresAt
 
 -- | the hash and the invoice of an answer, verified as this service's own
 -- types rather than trusted as the text they arrived as
@@ -167,13 +178,14 @@ readInvoiceAnswer answer = do
 
 -- | records a created invoice as an incoming payment waiting to be paid
 recordInvoice
-  :: Pool SqlBackend
+  :: Text
+  -> Pool SqlBackend
   -> CreateInvoiceParams
   -> PaymentHash
   -> Bolt11Invoice
   -> POSIXTime
   -> IO (Either CallstackError CreatedInvoice)
-recordInvoice pool params paymentHashV invoiceV expiresAt = do
+recordInvoice identity pool params paymentHashV invoiceV expiresAt = do
   let now = createInvoiceNow params
       amount = createInvoiceAmountSats params
   -- insertUnique rather than insert: a hash, which is already recorded,
@@ -191,6 +203,7 @@ recordInvoice pool params paymentHashV invoiceV expiresAt = do
       , walletPaymentNote = createInvoiceNote params
       , walletPaymentExpiresAt = Just expiresAt
       , walletPaymentCreditedAt = Nothing
+      , walletPaymentMadeAtWallet = Just identity
       , walletPaymentUnknownSince = Nothing
       , walletPaymentCreatedAt = now
       , walletPaymentUpdatedAt = now
@@ -313,6 +326,7 @@ payInvoice
   :: BaseUrl
   -> Text
   -> Text
+  -> Text
   -> Pool SqlBackend
   -> PayInvoiceParams
   -> IO (Either CallstackError PaidInvoice)
@@ -323,10 +337,12 @@ payOverLightning
   :: BaseUrl
   -> Text
   -> Text
+  -> Text
   -> Pool SqlBackend
   -> PayInvoiceParams
   -> IO (Either CallstackError PaidInvoice)
-payOverLightning url invoiceKey adminKey pool params = runExceptT $ do
+payOverLightning url invoiceKey adminKey identity pool params =
+    runExceptT $ do
   decoded <- ExceptT $ callLNBits url $ LNBits.decodeInvoice invoiceKey
     $ LNBits.DecodeRequest (unBolt11Invoice (payInvoiceBolt11 params))
   paymentHashV <- ExceptT $ return $! readDecodedHash decoded
@@ -346,7 +362,7 @@ payOverLightning url invoiceKey adminKey pool params = runExceptT $ do
           throwE walletSelfPaymentNotAllowed
     _ -> return ()
   balanceAfterDebit <- ExceptT
-    $ recordPendingPayment pool params paymentHashV
+    $ recordPendingPayment identity pool params paymentHashV
   paid <- ExceptT
     $ sendPayment url adminKey pool params paymentHashV balanceAfterDebit
   -- the wallet settled an invoice of this service inside itself, so the
@@ -380,6 +396,22 @@ settleOwnInvoice pool key now = do
       [ WalletPaymentStatus =. Settled, WalletPaymentUpdatedAt =. now ]
   return ()
 
+-- | names the wallet, which an instance and a key together address, so a
+-- payment records the wallet it was made at.
+--
+-- Both parts matter: the same key at another instance, and another key at
+-- the same instance, are different wallets, and a payment of one of them
+-- is not one the other has lost. Hashed rather than stored as it is: the
+-- key is a secret, and the name is written to every payment row.
+--
+-- Example:
+--
+-- > lnbitsWalletIdentity url key == lnbitsWalletIdentity url key
+lnbitsWalletIdentity :: BaseUrl -> Text -> Text
+lnbitsWalletIdentity url invoiceKey =
+  "lnbits:" <> (TE.decodeUtf8 $ B16.encode $ BS.take 8 $ SHA256.hash
+    $ TE.encodeUtf8 (Text.pack (showBaseUrl url) <> ":" <> invoiceKey))
+
 -- | the hash of a decoded invoice, as this service's own type
 readDecodedHash
   :: LNBits.DecodedInvoice
@@ -394,11 +426,12 @@ readDecodedHash decoded = either
 -- when the call ends, is already recorded with the hash it is asked about.
 -- The reserve is kept in the fee column until the real fee is known
 recordPendingPayment
-  :: Pool SqlBackend
+  :: Text
+  -> Pool SqlBackend
   -> PayInvoiceParams
   -> PaymentHash
   -> IO (Either CallstackError Sats)
-recordPendingPayment pool params paymentHashV = do
+recordPendingPayment identity pool params paymentHashV = do
   let now = payInvoiceNow params
       amount = fromMaybe (Sats 0) (payInvoiceAmountSats params)
       reserve = payInvoiceFeeReserveSats params
@@ -412,20 +445,21 @@ recordPendingPayment pool params paymentHashV = do
       -- nothing has been written, so there is nothing to undo
       Left err -> return $! Left err
       Right balanceAfter -> fmap (fmap (const balanceAfter))
-        $ recordPendingPaymentTx params paymentHashV amount reserve now
+        $ recordPendingPaymentTx identity params paymentHashV amount reserve now
   return $! either (const (Left dbQueryError)) id erecorded
 
 -- | writes the payment down, in the transaction, which has already taken
 -- the balance for it
 recordPendingPaymentTx
   :: MonadIO m
-  => PayInvoiceParams
+  => Text
+  -> PayInvoiceParams
   -> PaymentHash
   -> Sats
   -> Sats
   -> POSIXTime
   -> ReaderT SqlBackend m (Either CallstackError ())
-recordPendingPaymentTx params paymentHashV amount reserve now = do
+recordPendingPaymentTx identity params paymentHashV amount reserve now = do
   -- insertUnique, as the uniqueness of the hash and of the account's own
   -- payment of this invoice is what refuses a second attempt, which
   -- arrives while the first is still in flight
@@ -441,6 +475,7 @@ recordPendingPaymentTx params paymentHashV amount reserve now = do
       , walletPaymentNote = Nothing
       , walletPaymentExpiresAt = Nothing
       , walletPaymentCreditedAt = Nothing
+      , walletPaymentMadeAtWallet = Just identity
       , walletPaymentUnknownSince = Nothing
       , walletPaymentCreatedAt = now
       , walletPaymentUpdatedAt = now

@@ -78,36 +78,58 @@ data UnknownOutgoing
     -- ^ the wallet has not had it for long enough to give up on it
   | GiveBack
     -- ^ unknown for longer than a payment can still be in flight
+  | LeaveForAPerson
+    -- ^ the payment was not made at the wallet, which is being asked, or
+    -- it is not known which wallet it was made at: what the wallet
+    -- answers says nothing about it either way
   deriving (Eq, Show)
 
 -- | decides what to do with an outgoing payment, which the wallet does not
--- have, from how long it has been answering that way.
+-- have, from the wallet it was made at and how long the answers have been
+-- saying so.
 --
--- The sats were taken when the payment was made, so they are not given
--- back at once: a wallet, which has just been asked to pay and does not
--- say so yet, may be paying, and refunding it then pays it twice. The wait
--- is counted from the first answer, which did not have the payment, rather
--- than from when the payment was made: a payment, which the wallet
--- reported as pending for longer than the grace period and only then lost
--- sight of, would otherwise be given back on the first such answer, while
--- it may still settle.
+-- A wallet only knows its own payments. One made at a wallet, which was in
+-- use before this one -- another instance, or another wallet of the same
+-- instance -- is answered for the same way as one this wallet has lost,
+-- and giving it back would return sats, which really did leave the wallet
+-- it was made at. Waiting longer does not help: the wallet being asked
+-- will never know the payment. So it is left for a person, and so is a
+-- payment, whose wallet was never recorded, as there is no telling which
+-- of the two it is.
+--
+-- For a payment of this wallet the sats are still not given back at once:
+-- a wallet, which has just been asked to pay and does not say so yet, may
+-- be paying, and refunding it then pays it twice. The wait runs from the
+-- first answer, which did not have the payment, rather than from when the
+-- payment was made: one, which the wallet reported as pending for longer
+-- than the grace period and only then lost sight of, would otherwise be
+-- given back on the first such answer, while it may still settle.
 --
 -- Example:
 --
--- > decideUnknownOutgoing 3600 now Nothing == NoteUnknown
+-- > decideUnknownOutgoing 3600 now (Just w) w Nothing == NoteUnknown
 decideUnknownOutgoing
   :: POSIXTime
      -- ^ how long an unknown payment is left alone
   -> POSIXTime
      -- ^ now
+  -> Maybe Text
+     -- ^ the wallet the payment was made at, where it was recorded
+  -> Text
+     -- ^ the wallet, which is being asked
   -> Maybe POSIXTime
      -- ^ when the wallet first did not have it
   -> UnknownOutgoing
-decideUnknownOutgoing grace now munknownSince = case munknownSince of
-  Nothing -> NoteUnknown
-  Just since
-    | since + grace < now -> GiveBack
-    | otherwise -> WaitLonger
+decideUnknownOutgoing grace now mmadeAt askedAt munknownSince =
+  case mmadeAt of
+    Nothing -> LeaveForAPerson
+    Just madeAt
+      | madeAt /= askedAt -> LeaveForAPerson
+      | otherwise -> case munknownSince of
+          Nothing -> NoteUnknown
+          Just since
+            | since + grace < now -> GiveBack
+            | otherwise -> WaitLonger
 
 -- | whether an invoice, which the wallet still says nobody has paid, can
 -- be written off: its expiry has passed, and the same grace period a lost
@@ -341,11 +363,13 @@ reconcilePendingPayments =
       -- payment was sent, never received it and will never have it, so
       -- the sats would otherwise be held for good
       Outgoing -> do
-        State{ config = config } <- ask
+        State{ config = config, wallet = walletV } <- ask
         now <- liftIO getPOSIXTime
         let grace =
               fromIntegral (configWalletUnknownPaymentGraceSecs config)
         case decideUnknownOutgoing grace now
+               (walletPaymentMadeAtWallet payment)
+               (walletIdentity walletV)
                (walletPaymentUnknownSince payment) of
           GiveBack -> do
             runLogging $ $(logError)
@@ -372,6 +396,24 @@ reconcilePendingPayments =
               <> "outgoing payment "
               <> unPaymentHash (walletPaymentPaymentHash payment)
               <> " yet, whose balance is taken"
+              )
+            park pool key payment
+          -- not this wallet's payment to answer for, so nothing it says
+          -- is evidence either way and no later answer will be: giving
+          -- the sats back would return ones, which really did leave the
+          -- wallet it was made at
+          LeaveForAPerson -> do
+            runLogging $ $(logError)
+              ( "reconcilePendingPayments: the outgoing payment "
+              <> unPaymentHash (walletPaymentPaymentHash payment)
+              <> " was made at "
+              <> maybe "a wallet, which was not recorded"
+                   (\madeAt-> "the wallet " <> madeAt)
+                   (walletPaymentMadeAtWallet payment)
+              <> " while this service now runs "
+              <> walletIdentity walletV
+              <> ", so what that wallet does not have says nothing about "
+              <> "it and the payment needs manual reconciliation"
               )
             park pool key payment
 

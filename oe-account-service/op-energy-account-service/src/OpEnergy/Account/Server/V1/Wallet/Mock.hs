@@ -22,6 +22,7 @@ import qualified Data.ByteString.Char8 as BS8
 import           Data.Int (Int64)
 import           Data.Maybe (isJust)
 import           Data.Pool (Pool)
+import           Data.Text (Text)
 import qualified Data.Text.Encoding as TE
 import           Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
 import           Data.Word (Word64)
@@ -60,6 +61,10 @@ import           OpEnergy.Error
 mockWalletBackend :: Pool SqlBackend -> WalletBackend
 mockWalletBackend pool = WalletBackend
   { walletKind = WalletModeMock
+  -- one name for every mock wallet: they are all the same database, and a
+  -- payment made here is recognisable as not having been made at a real
+  -- one if the deployment is later pointed at a lightning node
+  , walletIdentity = mockWalletIdentity
   -- this backend issues and pays invoices in its own database, so it can
   -- do both; no sats move over lightning either way
   , walletCanSend = True
@@ -105,6 +110,7 @@ createInvoice pool params = do
     , walletPaymentNote = createInvoiceNote params
     , walletPaymentExpiresAt = Just expiresAt
     , walletPaymentCreditedAt = Nothing
+    , walletPaymentMadeAtWallet = Just mockWalletIdentity
     , walletPaymentUnknownSince = Nothing
     , walletPaymentCreatedAt = now
     , walletPaymentUpdatedAt = now
@@ -117,6 +123,10 @@ createInvoice pool params = do
       , createdInvoiceAmountSats = amount
       , createdInvoiceExpiresAt = expiresAt
       }
+
+-- | the name this backend records against the payments it makes
+mockWalletIdentity :: Text
+mockWalletIdentity = "mock"
 
 -- | whether an invoice can still be paid: it is waiting for a payment, and
 -- its expiry, if it was given one, has not passed.
@@ -258,6 +268,7 @@ payInvoiceOrThrow pool params = do
                       , walletPaymentNote = walletPaymentNote payment
                       , walletPaymentExpiresAt = Nothing
                       , walletPaymentCreditedAt = Nothing
+                      , walletPaymentMadeAtWallet = Just mockWalletIdentity
                       , walletPaymentUnknownSince = Nothing
                       , walletPaymentCreatedAt = now
                       , walletPaymentUpdatedAt = now
@@ -319,6 +330,7 @@ payInvoiceOrThrow pool params = do
                   , walletPaymentNote = Nothing
                   , walletPaymentExpiresAt = Nothing
                   , walletPaymentCreditedAt = Nothing
+                  , walletPaymentMadeAtWallet = Just mockWalletIdentity
                   , walletPaymentUnknownSince = Nothing
                   , walletPaymentCreatedAt = now
                   , walletPaymentUpdatedAt = now

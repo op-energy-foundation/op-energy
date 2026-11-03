@@ -153,6 +153,12 @@ data ObservedPayment
 -- | everything this service needs from a lightning wallet
 data WalletBackend = WalletBackend
   { walletKind :: WalletMode
+  , walletIdentity :: Text
+    -- ^ names the wallet the payments of this backend are made at, so a
+    -- payment can be told apart from one made at a wallet, which was in
+    -- use before this one. A wallet, which does not have a payment, and a
+    -- wallet, which never had it because it was somebody else's, answer
+    -- the same way, and only one of them means the payment never happened
   , walletCanSend :: Bool
     -- ^ whether this wallet can pay an invoice at all, so a client is told
     -- what it may offer rather than being left to find out from a refusal
