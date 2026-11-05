@@ -27,6 +27,7 @@ import           OpEnergy.Offer.Server.V1.Class(AppT, runLogging, withDBTransact
 import           OpEnergy.Offer.Server.V1.Offer
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
+import           Data.OpEnergy.Account.API.V2.FundsKind(FundsKind(..))
 import           Data.OpEnergy.Account.API.V2.LedgerReason(LedgerReason(..))
 import           OpEnergy.Error(CallstackError, describeError)
 import           Data.Text.Show(tshow)
@@ -94,8 +95,12 @@ refundAndCloseOffer offerId newStatus now = do
     Just offerVal -> do
       let unfilled = fromNatural (offerTotalContracts offerVal) - fromNatural (offerMatchedCount offerVal)
           refundAmount = offerMakerStakeSats offerVal * fromIntegral unfilled
+          -- back into the pocket which paid for it
+          freeRefund = case offerFundsKind offerVal of
+            FreeSats -> Sats refundAmount
+            RealSats -> Sats 0
       ecredited <- AccountClient.creditBalance (offerPersonUUID offerVal)
-        (Sats refundAmount) Refund (Just (offerReference offerId))
+        (Sats refundAmount) freeRefund Refund (Just (offerReference offerId))
       case ecredited of
         Right _ -> return ()
         Left err -> runLogging $ $(logError)

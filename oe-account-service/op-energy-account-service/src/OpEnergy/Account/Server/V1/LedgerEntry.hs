@@ -43,7 +43,13 @@ import           Database.Persist.Sql
                  )
 import           Database.Persist.TH
 
+import qualified Data.OpEnergy.Account.API.V1.UUID as API
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
+import           Data.OpEnergy.Account.API.V2.FundsKind
+                 ( FundsKind(..)
+                 , fundsKindToText
+                 , fundsKindFromText
+                 )
 import           Data.OpEnergy.Account.API.V2.LedgerReason
                  ( LedgerReason(..)
                  , ledgerReasonToText
@@ -76,31 +82,6 @@ ledgerDirectionFromText "debit"  = Right Debit
 ledgerDirectionFromText other    =
   Left $ "LedgerDirection: unknown direction: " <> other
 
--- | which of an account's two pockets a movement belongs to.
---
--- 'FreeSats' are sats the account was given: they can be staked, and they
--- can be won and lost, but they can never be withdrawn. 'RealSats' are sats
--- somebody paid in, or won on top of a stake, and those can.
---
--- One movement belongs to one pocket: a stake is paid for with free sats or
--- with real sats, never with a mix of both, so a payout or a refund can be
--- returned to the pocket it came out of.
-data FundsKind
-  = FreeSats
-  | RealSats
-  deriving (Show, Eq, Ord, Generic, Enum, Bounded)
-
--- | lowercase serialisation, so the stored value stays readable in psql
-fundsKindToText :: FundsKind -> Text
-fundsKindToText FreeSats = "free"
-fundsKindToText RealSats = "real"
-
-fundsKindFromText :: Text -> Either Text FundsKind
-fundsKindFromText "free" = Right FreeSats
-fundsKindFromText "real" = Right RealSats
-fundsKindFromText other  =
-  Left $ "FundsKind: unknown kind: " <> other
-
 share [mkPersist sqlSettings, mkMigrate "migrateLedgerEntry"] [persistLowerCase|
 LedgerEntry
   personId PersonId -- local relation, as the row is always written where the key is known
@@ -110,6 +91,7 @@ LedgerEntry
   reason LedgerReason
   balanceAfter Sats -- the balance this entry produced, read in the same transaction
   reference Text Maybe -- what the change relates to, eg "offer:42" or "contract:17"
+  counterparty (API.UUID Person) Maybe -- the account on the other side of it, where there was one. Counted to see how many different accounts a winner has won against, as a farm of accounts keeps meeting itself
   createdAt POSIXTime
   deriving Eq Show Generic
 |]
@@ -153,7 +135,8 @@ instance PersistFieldSql FundsKind where
 --
 -- Example:
 --
--- > adjustBalanceTx key Debit (Sats 5000) FreeSats Stake (Just "offer:42") now
+-- > adjustBalanceTx key Debit (Sats 5000) FreeSats Stake (Just "offer:42")
+-- >   Nothing now
 adjustBalanceTx
   :: MonadIO m
   => PersonId
@@ -162,9 +145,11 @@ adjustBalanceTx
   -> FundsKind
   -> LedgerReason
   -> Maybe Text
+  -> Maybe (API.UUID Person)
   -> POSIXTime
   -> ReaderT SqlBackend m (Either CallstackError Sats)
-adjustBalanceTx key direction amountSats funds reason reference now =
+adjustBalanceTx key direction amountSats funds reason reference
+    mcounterparty now =
     runExceptT $ do
   unless (reasonDescribes direction reason) $ throwE ledgerReasonMismatch
   changed <- lift $ case (direction, funds) of
@@ -208,6 +193,7 @@ adjustBalanceTx key direction amountSats funds reason reference now =
     , ledgerEntryReason = reason
     , ledgerEntryBalanceAfter = balanceAfter
     , ledgerEntryReference = reference
+    , ledgerEntryCounterparty = mcounterparty
     , ledgerEntryCreatedAt = now
     }
   return balanceAfter

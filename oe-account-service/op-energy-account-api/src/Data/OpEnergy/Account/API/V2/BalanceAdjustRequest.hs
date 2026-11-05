@@ -40,12 +40,23 @@ data BalanceAdjustRequest = BalanceAdjustRequest
     -- ledger, keeps working: deduct then records a stake, credit a refund
   , reference   :: Maybe Text
     -- ^ what the change relates to, eg "offer:42" or "contract:17"
+  , counterparty :: Maybe (UUID Person)
+    -- ^ the account on the other side of what is being credited, where
+    -- there was one. Recorded with the entry, so a payout can be counted
+    -- towards how many different accounts a winner has won against
+  , freeSats    :: Maybe Sats
+    -- ^ how much of 'amountSats' is free sats, which can be staked but
+    -- never withdrawn. Credit returns a stake to the pocket it was paid
+    -- from and pays a profit into the real one, so a payout of a stake,
+    -- which was paid for with free sats, says so here. Deduct ignores it
+    -- and spends free sats first, answering with what it took. Nothing
+    -- means none, which is what every sat was before the two pockets
   }
   deriving (Show, Generic, Typeable)
 
 defaultBalanceAdjustRequest :: BalanceAdjustRequest
 defaultBalanceAdjustRequest = BalanceAdjustRequest
-  defaultUUID (Sats 50000) Nothing Nothing
+  defaultUUID (Sats 50000) Nothing Nothing Nothing Nothing
 
 instance ToJSON BalanceAdjustRequest
 instance FromJSON BalanceAdjustRequest

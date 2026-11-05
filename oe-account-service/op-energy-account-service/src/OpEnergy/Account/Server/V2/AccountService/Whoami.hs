@@ -55,3 +55,4 @@ whoami token =
     (apiModelUUIDPerson $ personUuid person)
     (personDisplayName person)
     (personBalance person)
+    (personFreeSats person)

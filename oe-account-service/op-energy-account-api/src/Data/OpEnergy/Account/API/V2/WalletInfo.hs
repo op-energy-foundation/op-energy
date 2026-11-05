@@ -24,6 +24,11 @@ import           Data.OpEnergy.Account.API.V2.WalletMode
 -- | state of an account's wallet
 data WalletInfo = WalletInfo
   { balanceSats :: Sats
+  , freeSats :: Sats
+    -- ^ how much of the balance was given rather than paid in. Free sats
+    -- can be staked, and can be won and lost, but can never be sent
+  , withdrawableSats :: Sats
+    -- ^ what can actually be sent: the balance less its free sats
   , mode :: WalletMode
     -- ^ "mock" means no real sats move
   , canSend :: Bool
@@ -37,6 +42,8 @@ data WalletInfo = WalletInfo
 defaultWalletInfo :: WalletInfo
 defaultWalletInfo = WalletInfo
   { balanceSats = Sats 300000
+  , freeSats = Sats 300000
+  , withdrawableSats = Sats 0
   , mode = defaultWalletMode
   , canSend = True
   , canReceive = True

@@ -42,6 +42,7 @@ import           OpEnergy.Offer.Server.V1.Class
                    )
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
+import           Data.OpEnergy.Account.API.V2.FundsKind(FundsKind(..))
 import           Data.OpEnergy.Account.API.V2.LedgerReason(LedgerReason(..))
 import           OpEnergy.Offer.Server.V1.Offer
 import           OpEnergy.Offer.Server.V1.LiveEvent
@@ -73,7 +74,7 @@ cancel idText token =
   key <- exceptTMaybeT (invalidRequest "invalid offer id")
     $ return (offerKeyFromIDText idText)
 
-  (AccountV2.WhoAmIResult personUUIDV _displayName _balance) <-
+  (AccountV2.WhoAmIResult personUUIDV _displayName _balance _freeSats) <-
     ExceptT $ AccountClient.verifyAccountToken token
 
   -- balances and offers change from here on: in withLiveEventOrder, so the
@@ -83,10 +84,14 @@ cancel idText token =
     (updatedVal, refundAmount) <-
       closeForCancel key personUUIDV now cancelAttempts
 
-    -- refund unfilled stake
+    -- refund unfilled stake, into the pocket which paid for it: a stake,
+    -- which was paid for with free sats, is free sats again
+    let freeRefund = case offerFundsKind updatedVal of
+          FreeSats -> Sats refundAmount
+          RealSats -> Sats 0
     ecredited <- lift
-      $ AccountClient.creditBalance personUUIDV (Sats refundAmount) Refund
-        (Just (offerReference key))
+      $ AccountClient.creditBalance personUUIDV (Sats refundAmount) freeRefund
+        Refund (Just (offerReference key))
     case ecredited of
       Right _ -> return ()
       Left err -> lift $ runLogging $ $(logError)

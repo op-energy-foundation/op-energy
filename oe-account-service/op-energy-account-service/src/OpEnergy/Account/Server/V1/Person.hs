@@ -187,6 +187,22 @@ encryptSecret key secret = do
     $! LBS.toStrict $! Aeson.encode secret
   return $! AccountAPI.EncryptedAccountSecret $! Text.decodeUtf8 ct
 
+-- | what an account may send over lightning: its balance less the sats it
+-- was given, which can be staked, and can be won and lost, but can never be
+-- withdrawn.
+--
+-- Guarded rather than subtracted outright: Sats is unsigned, so free sats
+-- above the balance -- which the ledger does not allow -- would wrap around
+-- into a very large number instead of nothing.
+--
+-- Example:
+--
+-- > withdrawableOf person -- balance 300500, free 300000 -> Sats 500
+withdrawableOf :: Person -> Sats
+withdrawableOf person
+  | personFreeSats person >= personBalance person = Sats 0
+  | otherwise = personBalance person - personFreeSats person
+
 -- | decrypts an EncryptedAccountSecret back to the original AccountSecret.
 -- Returns Nothing if the ciphertext does not decrypt with this key.
 decryptSecret

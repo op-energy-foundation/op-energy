@@ -30,11 +30,16 @@ import           Data.OpEnergy.Account.API.V2.BalanceAdjustRequest
 import           Data.OpEnergy.Account.API.V2.BalanceAdjustResult
                  ( BalanceAdjustResult(..)
                  )
-
+import           Data.OpEnergy.Account.API.V1.Sats
+                 ( Sats(..)
+                 )
+import           Data.OpEnergy.Account.API.V2.FundsKind
+                 ( FundsKind(..)
+                 )
 import           OpEnergy.Account.Server.V1.Class
                  ( AppM, State(..), runLogging, profile)
 import           OpEnergy.Account.Server.V1.LedgerEntry
-                 ( FundsKind(..), LedgerDirection(..), adjustBalanceTx
+                 ( LedgerDirection(..), adjustBalanceTx
                  )
 import           OpEnergy.Account.Server.V1.Person
 
@@ -65,6 +70,11 @@ creditBalanceHandler secret request =
 -- balance after the credit, read in the same transaction as the update. A
 -- request without a reason records a refund, which is what a caller
 -- predating the ledger credits for.
+--
+-- A request may say that part of the amount is free sats: a payout of a
+-- contract gives the winner their stake back in the pocket it was paid
+-- from and the profit on top of it in real sats. The two are credited as
+-- two entries of one transaction, as one entry can only name one pocket.
 creditBalance
   :: Text
   -> BalanceAdjustRequest
@@ -75,18 +85,25 @@ creditBalance secret request =
   checkInternalServiceSecret secret
   State{ accountDBPool = pool } <- lift ask
   let modelUUID = modelApiUUIDPerson (personUUID request)
+      amount = amountSats request
+      reasonV = fromMaybe Refund (reason request)
+      freeSatsCredited = min amount $ fromMaybe (Sats 0) (freeSats request)
   nowUTC <- liftIO getCurrentTime
   -- the account is looked up in the same transaction as the change, so it
   -- cannot be gone between finding it and crediting it
   balance <- ExceptT $ liftIO $ flip runSqlPersistMPool pool $ runExceptT $ do
     (Entity key _) <- exceptTMaybeT accountNotFound
       $ selectFirst [ PersonUuid ==. modelUUID ] []
-    ExceptT $ adjustBalanceTx
-        key
-        Credit
-        (amountSats request)
-        RealSats
-        (fromMaybe Refund (reason request))
-        (reference request)
-        (utcTimeToPOSIXSeconds nowUTC)
-  return $! BalanceAdjustResult balance
+    let realPart = amount - freeSatsCredited
+        credit part kind = ExceptT
+          $ adjustBalanceTx key Credit part kind reasonV (reference request)
+            (fmap modelApiUUIDPerson (counterparty request))
+            (utcTimeToPOSIXSeconds nowUTC)
+    if freeSatsCredited > Sats 0 && realPart > Sats 0
+      then credit freeSatsCredited FreeSats >> credit realPart RealSats
+      -- an amount of nothing still records an entry, as it did before the
+      -- two pockets: it is the caller, which decides whether a movement of
+      -- nothing is worth recording
+      else credit amount
+             (if freeSatsCredited > Sats 0 then FreeSats else RealSats)
+  return $! BalanceAdjustResult balance freeSatsCredited
