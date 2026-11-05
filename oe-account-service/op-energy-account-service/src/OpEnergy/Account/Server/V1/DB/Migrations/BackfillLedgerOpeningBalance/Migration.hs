@@ -37,6 +37,7 @@ migration _config = do
       { ledgerEntryPersonId = key
       , ledgerEntryDirection = Credit
       , ledgerEntryAmountSats = personBalance person
+      , ledgerEntryFundsKind = RealSats
       , ledgerEntryReason = OpeningBalance
       , ledgerEntryBalanceAfter = personBalance person
       , ledgerEntryReference = Nothing

@@ -34,7 +34,7 @@ import           Data.OpEnergy.Account.API.V2.BalanceAdjustResult
 import           OpEnergy.Account.Server.V1.Class
                  ( AppM, State(..), runLogging, profile)
 import           OpEnergy.Account.Server.V1.LedgerEntry
-                 ( LedgerDirection(..), adjustBalanceTx
+                 ( FundsKind(..), LedgerDirection(..), adjustBalanceTx
                  )
 import           OpEnergy.Account.Server.V1.Person
 
@@ -85,6 +85,7 @@ deductBalance secret request =
         key
         Debit
         (amountSats request)
+        RealSats
         (fromMaybe Stake (reason request))
         (reference request)
         (utcTimeToPOSIXSeconds nowUTC)

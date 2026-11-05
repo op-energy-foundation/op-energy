@@ -67,7 +67,7 @@ import           Data.OpEnergy.Account.API.V2.WalletMode (WalletMode(..))
 import           Data.OpEnergy.Account.Client (withClientEither)
 
 import           OpEnergy.Account.Server.V1.LedgerEntry
-                 ( LedgerDirection(..), adjustBalanceTx
+                 ( FundsKind(..), LedgerDirection(..), adjustBalanceTx
                  )
 import           OpEnergy.Account.Server.V1.Person (PersonId)
 import           OpEnergy.Account.Server.V1.Wallet.Class
@@ -329,7 +329,7 @@ payOwnInvoice pool params (Entity key payment)
         -- no reserve is taken: nothing leaves the wallet for a payment,
         -- which is settled inside it, so there is no fee to cover
         edebited <- adjustBalanceTx (payInvoicePersonId params) Debit amount
-          Withdrawal Nothing now
+          RealSats Withdrawal Nothing now
         case edebited of
           Left err -> return $! Left err
           Right balanceAfter -> payOwnInvoiceTx
@@ -446,7 +446,7 @@ recordPendingPayment pool params paymentHashV = do
     -- which is recorded, has always been paid for, and a balance, which
     -- is taken, always has the payment it was taken for to answer for it
     edebited <- adjustBalanceTx (payInvoicePersonId params) Debit
-      (amount + reserve) Withdrawal Nothing now
+      (amount + reserve) RealSats Withdrawal Nothing now
     case edebited of
       -- nothing has been written, so there is nothing to undo
       Left err -> return $! Left err
@@ -674,7 +674,7 @@ finishPayment pool personKey paymentHashV startedAt status mfee back reason
         then return (Just balanceUnchanged)
         else do
           egiven <- adjustBalanceTx personKey
-            Credit back Refund (Just reason) now
+            Credit back RealSats Refund (Just reason) now
           case egiven of
             -- the claim goes back with it, so the payment stays Pending
             -- and the scheduler finishes it rather than it being left

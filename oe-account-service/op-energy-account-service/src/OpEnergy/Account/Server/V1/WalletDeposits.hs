@@ -43,7 +43,8 @@ import           OpEnergy.Account.Server.V1.Class
                  ( AppT, State(..), profile, runLogging
                  )
 import           OpEnergy.Account.Server.V1.LedgerEntry
-                 ( LedgerDirection(..), adjustBalanceTx, ledgerReference
+                 ( FundsKind(..), LedgerDirection(..), adjustBalanceTx
+                 , ledgerReference
                  )
 import           OpEnergy.Account.Server.V1.WalletPayment
 import           OpEnergy.Error
@@ -101,6 +102,7 @@ creditDepositOnce paymentHashV now = runExceptT $ do
             (walletPaymentPersonId payment)
             Credit
             (walletPaymentAmountSats payment)
+            RealSats
             Deposit
             (Just (ledgerReference "payment" (unPaymentHash paymentHashV)))
             now

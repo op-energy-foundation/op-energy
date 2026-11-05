@@ -38,6 +38,7 @@ import           GHC.Generics
 import           Database.Persist
 import           Database.Persist.Sql
                  ( PersistFieldSql(..), SqlBackend
+                 , rawExecuteCount
                  , updateWhereCount
                  )
 import           Database.Persist.TH
@@ -75,11 +76,37 @@ ledgerDirectionFromText "debit"  = Right Debit
 ledgerDirectionFromText other    =
   Left $ "LedgerDirection: unknown direction: " <> other
 
+-- | which of an account's two pockets a movement belongs to.
+--
+-- 'FreeSats' are sats the account was given: they can be staked, and they
+-- can be won and lost, but they can never be withdrawn. 'RealSats' are sats
+-- somebody paid in, or won on top of a stake, and those can.
+--
+-- One movement belongs to one pocket: a stake is paid for with free sats or
+-- with real sats, never with a mix of both, so a payout or a refund can be
+-- returned to the pocket it came out of.
+data FundsKind
+  = FreeSats
+  | RealSats
+  deriving (Show, Eq, Ord, Generic, Enum, Bounded)
+
+-- | lowercase serialisation, so the stored value stays readable in psql
+fundsKindToText :: FundsKind -> Text
+fundsKindToText FreeSats = "free"
+fundsKindToText RealSats = "real"
+
+fundsKindFromText :: Text -> Either Text FundsKind
+fundsKindFromText "free" = Right FreeSats
+fundsKindFromText "real" = Right RealSats
+fundsKindFromText other  =
+  Left $ "FundsKind: unknown kind: " <> other
+
 share [mkPersist sqlSettings, mkMigrate "migrateLedgerEntry"] [persistLowerCase|
 LedgerEntry
   personId PersonId -- local relation, as the row is always written where the key is known
   direction LedgerDirection
   amountSats Sats -- positive magnitude: 'direction' says which way it moved
+  fundsKind FundsKind default='real' -- which pocket moved: free sats, which can never be withdrawn, or real ones. Rows written before the two pockets existed are real, as that is what they were
   reason LedgerReason
   balanceAfter Sats -- the balance this entry produced, read in the same transaction
   reference Text Maybe -- what the change relates to, eg "offer:42" or "contract:17"
@@ -102,37 +129,71 @@ instance PersistField LedgerDirection where
 instance PersistFieldSql LedgerDirection where
   sqlType _ = SqlString
 
+instance PersistField FundsKind where
+  toPersistValue = toPersistValue . fundsKindToText
+  fromPersistValue v = fromPersistValue v >>= fundsKindFromText
+instance PersistFieldSql FundsKind where
+  sqlType _ = SqlString
+
 -- | moves the given account's balance and records why, in one transaction:
 -- either the balance changes and the entry exists, or neither does.
 --
--- A debit is guarded with @PersonBalance >=.@, so the balance can not
--- underflow (Sats is unsigned, so subtracting too much would wrap around).
--- The balance is read back in the same transaction, which holds the
--- account's row lock, so no other change can come in between.
+-- The 'FundsKind' says which pocket moves. A debit of 'RealSats' is the only
+-- movement, which can leave the service, so it is guarded with
+-- @balance - free_sats >= amount@: free sats can not be withdrawn, whatever
+-- a caller asks for. A debit of 'FreeSats' is guarded with
+-- @free_sats >= amount@, so a stake, which says it is paid for with free
+-- sats, is only taken when the account holds that many.
+--
+-- Both guards sit in the statement, which moves the balance, so a refused
+-- movement changes nothing and the balance can not underflow (Sats is
+-- unsigned, so subtracting too much would wrap around). The balance is read
+-- back in the same transaction, which holds the account's row lock, so no
+-- other change can come in between.
 --
 -- Example:
 --
--- > adjustBalanceTx key Debit (Sats 5000) Stake (Just "offer:42") now
+-- > adjustBalanceTx key Debit (Sats 5000) FreeSats Stake (Just "offer:42") now
 adjustBalanceTx
   :: MonadIO m
   => PersonId
   -> LedgerDirection
   -> Sats
+  -> FundsKind
   -> LedgerReason
   -> Maybe Text
   -> POSIXTime
   -> ReaderT SqlBackend m (Either CallstackError Sats)
-adjustBalanceTx key direction amountSats reason reference now = runExceptT $ do
+adjustBalanceTx key direction amountSats funds reason reference now =
+    runExceptT $ do
   unless (reasonDescribes direction reason) $ throwE ledgerReasonMismatch
-  changed <- lift $ case direction of
-    Debit -> updateWhereCount
-      [ PersonId ==. key, PersonBalance >=. amountSats ]
-      [ PersonBalance -=. amountSats
-      , PersonLastUpdated =. now
+  changed <- lift $ case (direction, funds) of
+    -- Persistent's filters compare a column with a value and never with
+    -- another column, so the guard, which keeps free sats out of a
+    -- withdrawal, is written out in SQL. A rename of either column makes
+    -- this statement fail loudly instead of passing quietly, and a
+    -- statement, which fails, refuses the payment
+    (Debit, RealSats) -> rawExecuteCount
+      "UPDATE person SET balance = balance - ?, last_updated = ?\
+      \ WHERE id = ? AND balance - free_sats >= ?"
+      [ toPersistValue amountSats, toPersistValue now
+      , toPersistValue key, toPersistValue amountSats
       ]
-    Credit -> updateWhereCount
+    (Debit, FreeSats) -> rawExecuteCount
+      "UPDATE person SET balance = balance - ?, free_sats = free_sats - ?\
+      \, last_updated = ? WHERE id = ? AND free_sats >= ?"
+      [ toPersistValue amountSats, toPersistValue amountSats
+      , toPersistValue now, toPersistValue key, toPersistValue amountSats
+      ]
+    (Credit, RealSats) -> updateWhereCount
       [ PersonId ==. key ]
       [ PersonBalance +=. amountSats
+      , PersonLastUpdated =. now
+      ]
+    (Credit, FreeSats) -> updateWhereCount
+      [ PersonId ==. key ]
+      [ PersonBalance +=. amountSats
+      , PersonFreeSats +=. amountSats
       , PersonLastUpdated =. now
       ]
   when (changed /= (1 :: Int64)) $ throwE $ case direction of
@@ -143,6 +204,7 @@ adjustBalanceTx key direction amountSats reason reference now = runExceptT $ do
     { ledgerEntryPersonId = key
     , ledgerEntryDirection = direction
     , ledgerEntryAmountSats = amountSats
+    , ledgerEntryFundsKind = funds
     , ledgerEntryReason = reason
     , ledgerEntryBalanceAfter = balanceAfter
     , ledgerEntryReference = reference

@@ -48,7 +48,7 @@ import           Data.OpEnergy.Account.API.V2.LedgerReason
                  ( LedgerReason(..)
                  )
 import           OpEnergy.Account.Server.V1.LedgerEntry
-                 ( LedgerDirection(..), LedgerEntry(..)
+                 ( FundsKind(..), LedgerDirection(..), LedgerEntry(..)
                  )
 import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging)
 import           OpEnergy.Account.Server.V1.Metrics(MetricsState(..))
@@ -103,6 +103,7 @@ register mRequestedName = do
           , personEncryptedSecret = Just encryptedSecret
           , personLoginsCount = 0
           , personBalance = Sats configStartingBalanceSats
+          , personFreeSats = Sats 0
           }
     -- insert record into DB, with the balance it starts with as the first
     -- entry of its ledger, so the ledger of every account sums to its balance
@@ -112,6 +113,7 @@ register mRequestedName = do
         { ledgerEntryPersonId = key
         , ledgerEntryDirection = Credit
         , ledgerEntryAmountSats = Sats configStartingBalanceSats
+        , ledgerEntryFundsKind = RealSats
         , ledgerEntryReason = OpeningBalance
         , ledgerEntryBalanceAfter = Sats configStartingBalanceSats
         , ledgerEntryReference = Nothing
