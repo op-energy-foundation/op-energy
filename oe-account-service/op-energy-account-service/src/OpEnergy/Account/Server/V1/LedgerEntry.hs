@@ -37,8 +37,8 @@ import           GHC.Generics
 
 import           Database.Persist
 import           Database.Persist.Sql
-                 ( PersistFieldSql(..), SqlBackend
-                 , rawExecuteCount
+                 ( PersistFieldSql(..), Single(..), SqlBackend
+                 , rawExecuteCount, rawSql
                  , updateWhereCount
                  )
 import           Database.Persist.TH
@@ -197,6 +197,26 @@ adjustBalanceTx key direction amountSats funds reason reference
     , ledgerEntryCreatedAt = now
     }
   return balanceAfter
+
+-- | how many free sats an account has been given over its life, read from
+-- the entries, which record the grants themselves.
+--
+-- Not the free sats it still holds: that is Person.freeSats, and it is
+-- lower once some of the gift has been staked away. This is the mark a
+-- winner has to climb back to before a payout starts paying real sats.
+freeSatsGrantedTx
+  :: MonadIO m
+  => PersonId
+  -> ReaderT SqlBackend m Sats
+freeSatsGrantedTx key = do
+  rows <- rawSql
+    "SELECT COALESCE(SUM(amount_sats), 0)::int8 FROM ledger_entry\
+    \ WHERE person_id = ? AND reason = 'opening_balance'\
+    \   AND direction = 'credit' AND funds_kind = 'free'"
+    [ toPersistValue key ]
+  return $! case rows of
+    [ Single granted ] -> Sats (fromIntegral (granted :: Int64))
+    _ -> Sats 0
 
 -- | whether a reason can describe a movement in the given direction.
 --

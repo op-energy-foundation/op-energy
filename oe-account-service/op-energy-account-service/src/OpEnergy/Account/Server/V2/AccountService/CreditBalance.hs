@@ -39,7 +39,7 @@ import           Data.OpEnergy.Account.API.V2.FundsKind
 import           OpEnergy.Account.Server.V1.Class
                  ( AppM, State(..), runLogging, profile)
 import           OpEnergy.Account.Server.V1.LedgerEntry
-                 ( LedgerDirection(..), adjustBalanceTx
+                 ( LedgerDirection(..), adjustBalanceTx, freeSatsGrantedTx
                  )
 import           OpEnergy.Account.Server.V1.Person
 
@@ -73,8 +73,16 @@ creditBalanceHandler secret request =
 --
 -- A request may say that part of the amount is free sats: a payout of a
 -- contract gives the winner their stake back in the pocket it was paid
--- from and the profit on top of it in real sats. The two are credited as
--- two entries of one transaction, as one entry can only name one pocket.
+-- from. The two are credited as two entries of one transaction, as one
+-- entry can only name one pocket.
+--
+-- A payout's profit does not become real sats until the account is back
+-- above the free sats it was given. The gift is the service's money, not
+-- the account's: an account, which lost part of it and then won some back,
+-- is still spending what it was given, so its winnings fill the free sats
+-- up to the grant first and only what goes above the grant is real and
+-- can be withdrawn. Deposits never pass through this -- somebody paid
+-- those in, and they stay the account's to send.
 creditBalance
   :: Text
   -> BalanceAdjustRequest
@@ -92,18 +100,35 @@ creditBalance secret request =
   -- the account is looked up in the same transaction as the change, so it
   -- cannot be gone between finding it and crediting it
   balance <- ExceptT $ liftIO $ flip runSqlPersistMPool pool $ runExceptT $ do
-    (Entity key _) <- exceptTMaybeT accountNotFound
+    (Entity key person) <- exceptTMaybeT accountNotFound
       $ selectFirst [ PersonUuid ==. modelUUID ] []
-    let realPart = amount - freeSatsCredited
+    -- the winner's own stake goes back to its pocket, and the profit on
+    -- top of it tops the gift back up before any of it is real
+    granted <- lift $ freeSatsGrantedTx key
+    let profit = amount - freeSatsCredited
+        freeAfterStakeBack = personFreeSats person + freeSatsCredited
+        shortOfGrant = if granted > freeAfterStakeBack
+          then granted - freeAfterStakeBack
+          else Sats 0
+        -- only a win made with free sats repays the gift. An account,
+        -- which lost the gift, deposited its own sats and won with those,
+        -- is playing with its own money: turning that profit into free
+        -- sats would take what it paid in and make it unwithdrawable
+        wonWithFreeSats = freeSatsCredited > Sats 0
+        topUp = if reasonV == Winnings && wonWithFreeSats
+          then min profit shortOfGrant
+          else Sats 0
+        freeCredited = freeSatsCredited + topUp
+        realPart = amount - freeCredited
         credit part kind = ExceptT
           $ adjustBalanceTx key Credit part kind reasonV (reference request)
             (fmap modelApiUUIDPerson (counterparty request))
             (utcTimeToPOSIXSeconds nowUTC)
-    if freeSatsCredited > Sats 0 && realPart > Sats 0
-      then credit freeSatsCredited FreeSats >> credit realPart RealSats
+    if freeCredited > Sats 0 && realPart > Sats 0
+      then credit freeCredited FreeSats >> credit realPart RealSats
       -- an amount of nothing still records an entry, as it did before the
       -- two pockets: it is the caller, which decides whether a movement of
       -- nothing is worth recording
       else credit amount
-             (if freeSatsCredited > Sats 0 then FreeSats else RealSats)
+             (if freeCredited > Sats 0 then FreeSats else RealSats)
   return $! BalanceAdjustResult balance freeSatsCredited
