@@ -1,12 +1,19 @@
-{-- | Which of an account's two pockets a balance change moves.
+{-- | Which of an account's three pockets a balance change moves.
  -
  - Free sats are sats an account was given: they can be staked, and they can
- - be won and lost, but they can never be withdrawn. Real sats are sats
- - somebody paid in, or won on top of a stake, and those can.
+ - be won and lost, but they can never be withdrawn.
  -
- - One movement belongs to one pocket, so a stake is paid for with free sats
- - or with real sats and never with a mix of both, and a refund or a payout
- - can be returned to the pocket it came out of.
+ - Gift won sats are what the gift won: real sats, which came out of staking
+ - sats nobody paid in. They can be withdrawn, but only by an account, which
+ - has cleared the withdrawal limits, as they are the way the gift turns
+ - into money.
+ -
+ - Real sats are sats somebody paid in, or won on top of a stake of their
+ - own money, and those are the account's to send whenever it likes.
+ -
+ - One movement belongs to one pocket, so a stake is paid for out of one of
+ - the three and never with a mix, and a refund or a payout is returned to
+ - the pocket it came out of.
  -}
 {-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE DeriveDataTypeable         #-}
@@ -26,19 +33,25 @@ import           Control.Lens               ((&), (?~))
 import           Data.Swagger
 import           Servant.API                (FromHttpApiData(..), ToHttpApiData(..))
 
--- | the two pockets a balance is made of
+-- | the three pockets a balance is made of.
+--
+-- Ordered as a stake spends them: the gift first, then what the gift won,
+-- and an account's own money last.
 data FundsKind
   = FreeSats -- ^ given to the account: can be staked, never withdrawn
-  | RealSats -- ^ paid in or won on top of a stake: can be withdrawn
+  | GiftWonSats -- ^ won while staking the gift: withdrawn once the limits are cleared
+  | RealSats -- ^ paid in, or won while staking own money: withdrawn freely
   deriving (Show, Eq, Ord, Generic, Typeable, Enum, Bounded)
 
 -- | lowercase serialisation for JSON and query params
 fundsKindToText :: FundsKind -> Text
 fundsKindToText FreeSats = "free"
+fundsKindToText GiftWonSats = "gift_won"
 fundsKindToText RealSats = "real"
 
 fundsKindFromText :: Text -> Either Text FundsKind
 fundsKindFromText "free" = Right FreeSats
+fundsKindFromText "gift_won" = Right GiftWonSats
 fundsKindFromText "real" = Right RealSats
 fundsKindFromText other  =
   Left $ "FundsKind: unknown kind: " <> other

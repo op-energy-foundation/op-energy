@@ -30,6 +30,7 @@ data LedgerReason
   | Stake -- ^ stake taken when posting or accepting an offer
   | Refund -- ^ stake returned when an offer is cancelled or expires
   | Winnings -- ^ payout of a settled contract
+  | Release -- ^ what the gift won, moved into the account's own money once the withdrawal limits are cleared. A pair of entries, which does not change the balance: only which pocket holds it
   deriving (Show, Eq, Ord, Generic, Typeable, Enum, Bounded)
 
 -- | lowercase serialisation for JSON and query params
@@ -37,6 +38,7 @@ ledgerReasonToText :: LedgerReason -> Text
 ledgerReasonToText OpeningBalance = "opening_balance"
 ledgerReasonToText Deposit        = "deposit"
 ledgerReasonToText Withdrawal     = "withdrawal"
+ledgerReasonToText Release        = "release"
 ledgerReasonToText Stake          = "stake"
 ledgerReasonToText Refund         = "refund"
 ledgerReasonToText Winnings       = "winnings"
@@ -45,6 +47,7 @@ ledgerReasonFromText :: Text -> Either Text LedgerReason
 ledgerReasonFromText "opening_balance" = Right OpeningBalance
 ledgerReasonFromText "deposit"         = Right Deposit
 ledgerReasonFromText "withdrawal"      = Right Withdrawal
+ledgerReasonFromText "release"         = Right Release
 ledgerReasonFromText "stake"           = Right Stake
 ledgerReasonFromText "refund"          = Right Refund
 ledgerReasonFromText "winnings"        = Right Winnings

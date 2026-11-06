@@ -23,6 +23,9 @@ import           Data.OpEnergy.Account.API.V1.UUID
 import           Data.OpEnergy.Account.API.V1.Sats
                  ( Sats(..)
                  )
+import           Data.OpEnergy.Account.API.V2.FundsKind
+                 ( FundsKind
+                 )
 import           Data.OpEnergy.Account.API.V2.LedgerReason
                  ( LedgerReason
                  )
@@ -44,19 +47,20 @@ data BalanceAdjustRequest = BalanceAdjustRequest
     -- ^ the account on the other side of what is being credited, where
     -- there was one. Recorded with the entry, so a payout can be counted
     -- towards how many different accounts a winner has won against
-  , freeSats    :: Maybe Sats
-    -- ^ how much of 'amountSats' is free sats, which can be staked but
-    -- never withdrawn. Credit returns a stake to the pocket it was paid
-    -- from and pays a profit into the real one, so a payout of a stake,
-    -- which was paid for with free sats, says so here. Deduct ignores it
-    -- and spends free sats first, answering with what it took. Nothing
-    -- means none, which is what every sat was before the two pockets
+  , stakeSats   :: Maybe Sats
+    -- ^ how much of 'amountSats' is a stake coming back, rather than a
+    -- profit on top of it. Credit returns the stake to the pocket it was
+    -- paid from and pays the profit into the pocket, which that pocket
+    -- wins into. Deduct ignores it. Nothing means none of it is a stake
+  , stakeFundsKind :: Maybe FundsKind
+    -- ^ which pocket 'stakeSats' was paid from. Nothing means the account's
+    -- own money, which is what every sat was before the gift existed
   }
   deriving (Show, Generic, Typeable)
 
 defaultBalanceAdjustRequest :: BalanceAdjustRequest
 defaultBalanceAdjustRequest = BalanceAdjustRequest
-  defaultUUID (Sats 50000) Nothing Nothing Nothing Nothing
+  defaultUUID (Sats 50000) Nothing Nothing Nothing Nothing Nothing
 
 instance ToJSON BalanceAdjustRequest
 instance FromJSON BalanceAdjustRequest

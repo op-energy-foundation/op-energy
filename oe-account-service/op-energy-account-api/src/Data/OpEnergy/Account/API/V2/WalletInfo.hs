@@ -27,6 +27,9 @@ data WalletInfo = WalletInfo
   , freeSats :: Sats
     -- ^ how much of the balance was given rather than paid in. Free sats
     -- can be staked, and can be won and lost, but can never be sent
+  , giftWonSats :: Sats
+    -- ^ how much of the balance the gift won: real sats, which can be sent
+    -- once the withdrawal limits are cleared, and not before
   , withdrawableSats :: Sats
     -- ^ what can actually be sent: the balance less its free sats
   , mode :: WalletMode
@@ -43,6 +46,7 @@ defaultWalletInfo :: WalletInfo
 defaultWalletInfo = WalletInfo
   { balanceSats = Sats 300000
   , freeSats = Sats 300000
+  , giftWonSats = Sats 0
   , withdrawableSats = Sats 0
   , mode = defaultWalletMode
   , canSend = True
