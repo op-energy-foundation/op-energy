@@ -366,6 +366,28 @@ everifyWalletConfig config
       , require (configWalletInvoiceExpirySecs config > 0)
           "WALLET_INVOICE_EXPIRY_SECS must be above 0: an invoice would be \
           \advertised as expired as soon as it is created"
+      -- the four limits on what an account, which has staked free sats, may
+      -- send beyond its deposits. Each of them is the whole of one check,
+      -- so a value, which switches it off, is refused here rather than
+      -- leaving a check, which the code still runs and nothing can fail
+      , require (configWithdrawalProfitCapSats config > Sats 0)
+          "WITHDRAWAL_PROFIT_CAP_SATS must be above 0: nothing won on top \
+          \of a stake could ever be sent out"
+      , require (configWithdrawalProfitCapSats config <= maxStorableSats)
+          "WITHDRAWAL_PROFIT_CAP_SATS must not be above the largest amount \
+          \the DB stores"
+      , require (configWithdrawalFreeSatsPlaythrough config > 0)
+          "WITHDRAWAL_FREE_SATS_PLAYTHROUGH must be above 0: the gift \
+          \could be won with and sent out without being staked at all"
+      , require (configWithdrawalMinDistinctOpponents config > 0)
+          "WITHDRAWAL_MIN_DISTINCT_OPPONENTS must be above 0: winnings, \
+          \which were all won against one account, would be sendable"
+      , require (configWithdrawalWinningsHoldSecs config > 0)
+          "WITHDRAWAL_WINNINGS_HOLD_SECS must be above 0: a win could be \
+          \sent out in the moment it was won"
+      , require (configFreeSatsCheckIntervalSecs config > 0)
+          "FREE_SATS_CHECK_INTERVAL_SECS must be above 0: every scheduler \
+          \tick would read every account's ledger"
       ]
       ++ if configWalletBackend config == WalletModeLNBits
            then lnbitsProblems
