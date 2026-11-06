@@ -117,6 +117,54 @@ instance PersistField FundsKind where
 instance PersistFieldSql FundsKind where
   sqlType _ = SqlString
 
+-- | moves sats from what the gift won into the account's own money, in one
+-- transaction, and records the move as two entries.
+--
+-- The balance does not change: what changes is which pocket holds it, and
+-- so whether it can be sent. Called once an account has cleared the
+-- withdrawal limits for the amount, which is being released, so the
+-- payment, which follows, spends its own money like any other.
+--
+-- Guarded with @gift_won_sats >= amount@, so a release, which is not
+-- covered, moves nothing and answers 'insufficientBalance'.
+--
+-- Example:
+--
+-- > releaseGiftWonTx key (Sats 20000) (Just "payment:7") now
+releaseGiftWonTx
+  :: MonadIO m
+  => PersonId
+  -> Sats
+  -> Maybe Text
+  -> POSIXTime
+  -> ReaderT SqlBackend m (Either CallstackError ())
+releaseGiftWonTx key amountSats reference now = runExceptT $ do
+  changed <- lift $ rawExecuteCount
+    "UPDATE person SET gift_won_sats = gift_won_sats - ?, last_updated = ?\
+    \ WHERE id = ? AND gift_won_sats >= ?"
+    [ toPersistValue amountSats, toPersistValue now
+    , toPersistValue key, toPersistValue amountSats
+    ]
+  when (changed /= (1 :: Int64)) $ throwE insufficientBalance
+  balanceNow <- exceptTMaybeT accountNotFound $ fmap personBalance <$> get key
+  -- the pair nets to nothing, so both entries carry the balance they left
+  -- behind: the ledger still adds up, pocket by pocket, to what the account
+  -- carries
+  let entry kind direction = LedgerEntry
+        { ledgerEntryPersonId = key
+        , ledgerEntryDirection = direction
+        , ledgerEntryAmountSats = amountSats
+        , ledgerEntryFundsKind = kind
+        , ledgerEntryReason = Release
+        , ledgerEntryBalanceAfter = balanceNow
+        , ledgerEntryReference = reference
+        , ledgerEntryCounterparty = Nothing
+        , ledgerEntryCreatedAt = now
+        }
+  _ <- lift $ insert $ entry GiftWonSats Debit
+  _ <- lift $ insert $ entry RealSats Credit
+  return ()
+
 -- | moves the given account's balance and records why, in one transaction:
 -- either the balance changes and the entry exists, or neither does.
 --
@@ -160,9 +208,19 @@ adjustBalanceTx key direction amountSats funds reason reference
     -- statement, which fails, refuses the payment
     (Debit, RealSats) -> rawExecuteCount
       "UPDATE person SET balance = balance - ?, last_updated = ?\
-      \ WHERE id = ? AND balance - free_sats >= ?"
+      \ WHERE id = ? AND balance - free_sats - gift_won_sats >= ?"
       [ toPersistValue amountSats, toPersistValue now
       , toPersistValue key, toPersistValue amountSats
+      ]
+    -- what the gift won is real, so it leaves the balance like any other
+    -- real sat; it is counted apart because a withdrawal of it has limits
+    -- to clear first
+    (Debit, GiftWonSats) -> rawExecuteCount
+      "UPDATE person SET balance = balance - ?, gift_won_sats = \
+      \gift_won_sats - ?, last_updated = ? WHERE id = ?\
+      \ AND gift_won_sats >= ?"
+      [ toPersistValue amountSats, toPersistValue amountSats
+      , toPersistValue now, toPersistValue key, toPersistValue amountSats
       ]
     (Debit, FreeSats) -> rawExecuteCount
       "UPDATE person SET balance = balance - ?, free_sats = free_sats - ?\
@@ -179,6 +237,12 @@ adjustBalanceTx key direction amountSats funds reason reference
       [ PersonId ==. key ]
       [ PersonBalance +=. amountSats
       , PersonFreeSats +=. amountSats
+      , PersonLastUpdated =. now
+      ]
+    (Credit, GiftWonSats) -> updateWhereCount
+      [ PersonId ==. key ]
+      [ PersonBalance +=. amountSats
+      , PersonGiftWonSats +=. amountSats
       , PersonLastUpdated =. now
       ]
   when (changed /= (1 :: Int64)) $ throwE $ case direction of
@@ -236,6 +300,11 @@ reasonDescribes Credit Refund         = True
 reasonDescribes Credit Winnings       = True
 reasonDescribes Credit Withdrawal     = False
 reasonDescribes Credit Stake          = False
+-- a release is a pair of entries, which moves sats between an account's own
+-- pockets: one leaves what the gift won and one arrives in its own money,
+-- so both directions describe it
+reasonDescribes Credit Release        = True
+reasonDescribes Debit  Release        = True
 reasonDescribes Debit  Withdrawal     = True
 reasonDescribes Debit  Stake          = True
 reasonDescribes Debit  OpeningBalance = False

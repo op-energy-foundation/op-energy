@@ -1,34 +1,38 @@
-{-- | The limits on sending out more sats than an account has paid in.
+{-- | The limits on sending out what the gift won.
  -
  - An account is given free sats, which it can stake but never withdraw.
- - What it wins on top of a stake is real sats, which it can. That is what
- - the product promises, and it is also the one way the gift can turn into
- - money: two accounts, which were both given free sats, take opposite sides
- - of the same contract, and whichever of them wins, the pair keeps the
- - profit as money.
+ - What they win on top of a stake is real money, and that is the one way
+ - the gift can turn into money: two accounts, which were both given free
+ - sats, take opposite sides of the same contract, and whichever of them
+ - wins, the pair keeps the profit.
  -
  - It cannot be made impossible without knowing who is behind an account, so
- - it is bounded instead. While an account has staked free sats at all, what
- - it may send beyond its own deposits has to clear four checks: a lifetime
- - cap, a playthrough of the gift, a number of different opponents, and a
- - hold on winnings, which are still fresh. An account, which has only ever
- - staked sats it paid in, is not touched by any of them.
+ - it is bounded instead. Sats, which the gift won, are held in their own
+ - pocket, and they are moved into the account's own money only once four
+ - checks are cleared: a lifetime cap, a playthrough of the gift, a number
+ - of different opponents, and a hold on winnings, which are still fresh.
+ -
+ - Only that pocket is guarded. Sats, which were paid in, and sats won while
+ - staking them, are the account's own money and leave whenever it asks --
+ - an account, which deposits and plays with what it deposited, is not
+ - touched by any of this.
  -}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 module OpEnergy.Account.Server.V2.WalletAPI.WithdrawalLimits
-  ( checkWithdrawalLimitsTx
+  ( releaseForWithdrawalTx
   ) where
 
 import           Control.Monad (when)
 import           Control.Monad.IO.Class (MonadIO)
 import           Control.Monad.Trans (lift)
-import           Control.Monad.Trans.Except (runExceptT, throwE)
+import           Control.Monad.Trans.Except (ExceptT(..), runExceptT, throwE)
 import           Control.Monad.Trans.Reader (ReaderT)
 import           Data.Int (Int64)
+import           Data.Text (Text)
 import           Data.Time.Clock.POSIX (POSIXTime)
 
-import           Database.Persist (toPersistValue)
+import           Database.Persist (get, toPersistValue)
 import           Database.Persist.Sql (SqlBackend, Single(..), rawSql)
 
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
@@ -38,62 +42,71 @@ import           Data.OpEnergy.Account.API.V2.LedgerReason (LedgerReason(..))
 import           OpEnergy.Account.Server.V1.Config
                  ( Config(..)
                  )
--- the PersistField instances of the two enums above are defined here: the
--- totals below are read by comparing against them, so the strings in the
--- query are the ones the rows were written with
-import           OpEnergy.Account.Server.V1.LedgerEntry ()
-import           OpEnergy.Account.Server.V1.Person (PersonId)
+import           OpEnergy.Account.Server.V1.LedgerEntry (releaseGiftWonTx)
+import           OpEnergy.Account.Server.V1.Person
+                 ( PersonId, ownOf, personGiftWonSats
+                 )
 import           OpEnergy.Error
-                 ( CallstackError, dbQueryError
+                 ( CallstackError, accountNotFound, dbQueryError
+                 , insufficientBalance
                  , withdrawalNeedsMoreOpponents, withdrawalOverProfitCap
                  , withdrawalPlaythroughNotMet, withdrawalWinningsOnHold
                  )
+import           OpEnergy.ExceptMaybe (exceptTMaybeT)
 
 -- | what an account's ledger says about the four checks.
 --
 -- Signed, although no sat is ever negative: the checks subtract one total
--- from another -- what an account has sent beyond what it paid in -- and an
--- account, which has deposited more than it has sent, makes that difference
--- negative rather than enormous.
+-- from another, and a difference, which goes below nothing, has to read as
+-- less than nothing rather than as enormous.
 data LedgerTotals = LedgerTotals
-  { totalDepositedSats :: Int64
-  , totalWithdrawnSats :: Int64
-  , totalFreeStakedSats :: Int64
+  { totalFreeStakedSats :: Int64
   , totalFreeGrantedSats :: Int64
   , distinctOpponents :: Int64
-  , matureWinningsSats :: Int64
-    -- ^ real winnings, which are older than the hold, so they are the part
-    -- of what was won, which may be sent out now
+  , totalReleasedSats :: Int64
+    -- ^ what has already been moved out of the gift's winnings into the
+    -- account's own money: the running total the cap and the hold are
+    -- measured against
+  , matureGiftWonSats :: Int64
+    -- ^ what the gift won longer ago than the hold, so it has waited
   }
 
--- | refuses a payment, which would send out more than the account has paid
--- in, unless the account has cleared every limit.
+-- | moves as much of a payment as the account's own money does not cover
+-- out of what the gift won, once the four checks are cleared, so the
+-- payment, which follows, spends its own money like any other.
+--
+-- A payment, which the account's own money covers, releases nothing and
+-- clears nothing: those sats were paid in, or won while staking sats, which
+-- were paid in, and they are the account's to send.
 --
 -- Run in the transaction, which is about to take the balance, so the totals
 -- it reads are the ones the payment is weighed against.
 --
 -- Example:
 --
--- > checkWithdrawalLimitsTx config key (Sats 20000) now
-checkWithdrawalLimitsTx
+-- > releaseForWithdrawalTx config key (Sats 20000) (Just "payment:7") now
+releaseForWithdrawalTx
   :: MonadIO m
   => Config
   -> PersonId
   -> Sats
+  -> Maybe Text
   -> POSIXTime
   -> ReaderT SqlBackend m (Either CallstackError ())
-checkWithdrawalLimitsTx config key (Sats amountSats) now = runExceptT $ do
-  -- winnings, which are younger than this, are still on hold
-  let matureBefore = now
-        - fromIntegral (configWithdrawalWinningsHoldSecs config)
-  etotals <- lift $ readLedgerTotalsTx key matureBefore
-  totals <- either throwE return etotals
-  let beyondDeposits = totalWithdrawnSats totals + fromIntegral amountSats
-        - totalDepositedSats totals
-  -- an account, which has never staked a free sat, can only be sending what
-  -- it paid in or what it won with its own money: nothing to limit
-  when (totalFreeStakedSats totals > 0 && beyondDeposits > 0) $ do
-    when (beyondDeposits
+releaseForWithdrawalTx config key amount reference now = runExceptT $ do
+  person <- exceptTMaybeT accountNotFound $ get key
+  let own = ownOf person
+  -- the account's own money covers it: nothing of the gift's is being sent
+  when (amount > own) $ do
+    let shortfall = amount - own
+    when (shortfall > personGiftWonSats person) $ throwE insufficientBalance
+    -- winnings, which are younger than this, have not waited yet
+    let matureBefore = now
+          - fromIntegral (configWithdrawalWinningsHoldSecs config)
+    etotals <- lift $ readLedgerTotalsTx key matureBefore
+    totals <- either throwE return etotals
+    let released = totalReleasedSats totals + fromIntegral (unSats shortfall)
+    when (released
           > fromIntegral (unSats (configWithdrawalProfitCapSats config)))
       $ throwE withdrawalOverProfitCap
     when (totalFreeStakedSats totals
@@ -103,13 +116,13 @@ checkWithdrawalLimitsTx config key (Sats amountSats) now = runExceptT $ do
     when (distinctOpponents totals
           < fromIntegral (configWithdrawalMinDistinctOpponents config))
       $ throwE withdrawalNeedsMoreOpponents
-    -- winnings wait before they can be sent, which is a hold on each win
-    -- rather than on the account: what is sent beyond the deposits has to
-    -- be covered by the wins, which have already waited. Reading the last
-    -- win instead would start the wait again at every win, so an account,
-    -- which wins often enough, could never send anything at all
-    when (beyondDeposits > matureWinningsSats totals)
+    -- the hold is on each win rather than on the account: what has been
+    -- released has to be covered by the wins, which have already waited.
+    -- Reading the last win instead would start the wait again at every
+    -- win, so an account, which wins often enough, could never send at all
+    when (released > matureGiftWonSats totals)
       $ throwE withdrawalWinningsOnHold
+    ExceptT $ releaseGiftWonTx key shortfall reference now
 
 -- | the totals, read in one pass over the account's ledger.
 --
@@ -131,30 +144,27 @@ readLedgerTotalsTx key matureBefore = do
   -- numeric, which does not read back as an Int64
   rows <- rawSql
     "SELECT\
-    \ COALESCE(SUM(CASE WHEN reason = ?\
-    \   THEN amount_sats ELSE 0 END), 0)::int8,\
-    \ COALESCE(SUM(CASE WHEN reason = ?\
-    \   THEN amount_sats ELSE 0 END), 0)::int8,\
     \ COALESCE(SUM(CASE WHEN reason = ? AND funds_kind = ?\
     \   THEN amount_sats ELSE 0 END), 0)::int8,\
     \ COALESCE(SUM(CASE WHEN reason = ? AND funds_kind = ?\
     \   THEN amount_sats ELSE 0 END), 0)::int8,\
     \ COUNT(DISTINCT counterparty) FILTER (WHERE reason = ?),\
     \ COALESCE(SUM(CASE WHEN reason = ? AND funds_kind = ?\
+    \   THEN amount_sats ELSE 0 END), 0)::int8,\
+    \ COALESCE(SUM(CASE WHEN reason = ? AND funds_kind = ?\
     \   AND created_at <= ? THEN amount_sats ELSE 0 END), 0)::int8\
     \ FROM ledger_entry WHERE person_id = ?"
-    [ toPersistValue Deposit
-    , toPersistValue Withdrawal
-    , toPersistValue Stake, toPersistValue FreeSats
+    [ toPersistValue Stake, toPersistValue FreeSats
     , toPersistValue OpeningBalance, toPersistValue FreeSats
     , toPersistValue Winnings
-    , toPersistValue Winnings, toPersistValue RealSats
+    , toPersistValue Release, toPersistValue GiftWonSats
+    , toPersistValue Winnings, toPersistValue GiftWonSats
     , toPersistValue matureBefore
     , toPersistValue key
     ]
   return $! case rows of
-    [ ( Single deposited, Single withdrawn, Single freeStaked
-      , Single freeGranted, Single opponents, Single matureWinnings ) ] ->
-        Right $! LedgerTotals deposited withdrawn freeStaked freeGranted
-          opponents matureWinnings
+    [ ( Single freeStaked, Single freeGranted, Single opponents
+      , Single released, Single matureGiftWon ) ] ->
+        Right $! LedgerTotals freeStaked freeGranted opponents released
+          matureGiftWon
     _ -> Left dbQueryError

@@ -107,6 +107,9 @@ register mRequestedName = do
           , personLoginsCount = 0
           , personBalance = Sats configStartingBalanceSats
           , personFreeSats = Sats configStartingBalanceSats
+          -- a new account has won nothing yet: what the gift wins arrives
+          -- in its own pocket as contracts settle
+          , personGiftWonSats = Sats 0
           }
     -- insert record into DB, with the balance it starts with as the first
     -- entry of its ledger, so the ledger of every account sums to its balance.

@@ -31,9 +31,6 @@ import           Data.OpEnergy.Account.API.V2.BalanceAdjustResult
                  ( BalanceAdjustResult(..)
                  )
 
-import           Data.OpEnergy.Account.API.V1.Sats
-                 ( Sats(..)
-                 )
 import           Data.OpEnergy.Account.API.V2.FundsKind
                  ( FundsKind(..)
                  )
@@ -95,7 +92,14 @@ deductBalance secret request =
       $ runExceptT $ do
     (Entity key person) <- exceptTMaybeT accountNotFound
       $ selectFirst [ PersonUuid ==. modelUUID ] []
-    let funds = if personFreeSats person >= amount then FreeSats else RealSats
+    -- a stake spends the gift first, then what the gift won, and the
+    -- account's own money last, so what somebody paid in is the last thing
+    -- at risk. One stake comes out of one pocket: a pocket, which does not
+    -- cover the whole of it, is skipped rather than mixed with the next
+    let funds
+          | personFreeSats person >= amount = FreeSats
+          | personGiftWonSats person >= amount = GiftWonSats
+          | otherwise = RealSats
     balanceAfter <- ExceptT $ adjustBalanceTx
         key
         Debit
@@ -106,7 +110,4 @@ deductBalance secret request =
         Nothing -- a stake has no other side yet: the contract is made of two
         (utcTimeToPOSIXSeconds nowUTC)
     return (balanceAfter, funds)
-  return $! BalanceAdjustResult balance
-    $! case taken of
-         FreeSats -> amount
-         RealSats -> Sats 0
+  return $! BalanceAdjustResult balance taken

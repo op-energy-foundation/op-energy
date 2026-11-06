@@ -95,7 +95,8 @@ creditBalance secret request =
   let modelUUID = modelApiUUIDPerson (personUUID request)
       amount = amountSats request
       reasonV = fromMaybe Refund (reason request)
-      freeSatsCredited = min amount $ fromMaybe (Sats 0) (freeSats request)
+      stakeBack = min amount $ fromMaybe (Sats 0) (stakeSats request)
+      stakeKind = fromMaybe RealSats (stakeFundsKind request)
   nowUTC <- liftIO getCurrentTime
   -- the account is looked up in the same transaction as the change, so it
   -- cannot be gone between finding it and crediting it
@@ -105,30 +106,42 @@ creditBalance secret request =
     -- the winner's own stake goes back to its pocket, and the profit on
     -- top of it tops the gift back up before any of it is real
     granted <- lift $ freeSatsGrantedTx key
-    let profit = amount - freeSatsCredited
-        freeAfterStakeBack = personFreeSats person + freeSatsCredited
+    let profit = amount - stakeBack
+        freeAfterStakeBack = personFreeSats person
+          + (if stakeKind == FreeSats then stakeBack else Sats 0)
         shortOfGrant = if granted > freeAfterStakeBack
           then granted - freeAfterStakeBack
           else Sats 0
-        -- only a win made with free sats repays the gift. An account,
-        -- which lost the gift, deposited its own sats and won with those,
-        -- is playing with its own money: turning that profit into free
-        -- sats would take what it paid in and make it unwithdrawable
-        wonWithFreeSats = freeSatsCredited > Sats 0
-        topUp = if reasonV == Winnings && wonWithFreeSats
+        -- a win, which the gift paid for, repays the gift first and only
+        -- then counts as money: what is above the grant is what the gift
+        -- has actually won. A win, which the account's own money paid for,
+        -- is its own, and topping the gift up out of it would take what
+        -- somebody paid in and make it unwithdrawable
+        topUp = if reasonV == Winnings && stakeKind == FreeSats
           then min profit shortOfGrant
           else Sats 0
-        freeCredited = freeSatsCredited + topUp
-        realPart = amount - freeCredited
+        -- the profit goes to the pocket, which the stake that won it came
+        -- out of: the gift and what the gift won both win into what the
+        -- gift won, which the withdrawal limits guard, and the account's
+        -- own money wins into its own money, which nothing guards
+        profitKind = case stakeKind of
+          FreeSats -> GiftWonSats
+          GiftWonSats -> GiftWonSats
+          RealSats -> RealSats
+        stakePart = stakeBack + topUp
+        stakePartKind = if topUp > Sats 0 || stakeKind == FreeSats
+          then FreeSats
+          else stakeKind
+        profitPart = amount - stakePart
         credit part kind = ExceptT
           $ adjustBalanceTx key Credit part kind reasonV (reference request)
             (fmap modelApiUUIDPerson (counterparty request))
             (utcTimeToPOSIXSeconds nowUTC)
-    if freeCredited > Sats 0 && realPart > Sats 0
-      then credit freeCredited FreeSats >> credit realPart RealSats
+    if stakePart > Sats 0 && profitPart > Sats 0
+      then credit stakePart stakePartKind >> credit profitPart profitKind
       -- an amount of nothing still records an entry, as it did before the
-      -- two pockets: it is the caller, which decides whether a movement of
+      -- pockets: it is the caller, which decides whether a movement of
       -- nothing is worth recording
       else credit amount
-             (if freeCredited > Sats 0 then FreeSats else RealSats)
-  return $! BalanceAdjustResult balance freeSatsCredited
+             (if stakePart > Sats 0 then stakePartKind else profitKind)
+  return $! BalanceAdjustResult balance stakeKind

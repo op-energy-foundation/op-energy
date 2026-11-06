@@ -62,6 +62,7 @@ getWalletInfo token =
   return $! WalletInfo
     { balanceSats = personBalance person
     , freeSats = personFreeSats person
+    , giftWonSats = personGiftWonSats person
     , withdrawableSats = withdrawableOf person
     , mode = walletKind walletV
     , canSend = walletCanSend walletV

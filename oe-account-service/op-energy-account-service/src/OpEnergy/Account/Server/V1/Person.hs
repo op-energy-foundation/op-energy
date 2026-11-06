@@ -75,6 +75,7 @@ Person
   displayName AccountAPI.DisplayName
   balance Sats default=300000 -- sandbox wallet balance, in sats
   freeSats Sats default=0 -- how much of 'balance' was given rather than paid in. Free sats can be staked, but never withdrawn, so a withdrawal may only spend 'balance' - 'freeSats'. Always <= balance
+  giftWonSats Sats default=0 -- how much of 'balance' was won while staking the gift. Real sats, which the gift produced, so they can be withdrawn, but only once the withdrawal limits are cleared: they are the way free sats turn into money. 'freeSats' + 'giftWonSats' is always <= balance
   -- metadata
   creationTime POSIXTime
   lastSeenTime POSIXTime -- timestamp of the last seen time. By default the same as creationTime
@@ -157,6 +158,7 @@ modelApiPerson v = Person
   , personDisplayName = AccountAPI.displayName v
   , personBalance = Sats 0 -- API-level Person does not carry balance
   , personFreeSats = Sats 0 -- nor how much of it was given
+  , personGiftWonSats = Sats 0 -- nor how much of it the gift won
   , personCreationTime = AccountAPI.creationTime v
   , personLastSeenTime = AccountAPI.lastSeenTime v
   , personLastUpdated = AccountAPI.lastUpdated v
@@ -202,6 +204,24 @@ withdrawableOf :: Person -> Sats
 withdrawableOf person
   | personFreeSats person >= personBalance person = Sats 0
   | otherwise = personBalance person - personFreeSats person
+
+-- | what an account may send without clearing any limit: its balance less
+-- the gift and less what the gift won.
+--
+-- Sats, which were paid in, and sats won on top of a stake of those, are
+-- the account's own money and leave whenever it asks. The gift can never
+-- leave, and what the gift won leaves only once the limits are cleared, so
+-- neither is counted here.
+--
+-- Example:
+--
+-- > ownOf person -- balance 450000, free 300000, gift won 50000 -> Sats 100000
+ownOf :: Person -> Sats
+ownOf person
+  | spoken >= personBalance person = Sats 0
+  | otherwise = personBalance person - spoken
+  where
+    spoken = personFreeSats person + personGiftWonSats person
 
 -- | decrypts an EncryptedAccountSecret back to the original AccountSecret.
 -- Returns Nothing if the ciphertext does not decrypt with this key.

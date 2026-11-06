@@ -59,7 +59,7 @@ import           OpEnergy.Account.Server.V1.Person
                  , withdrawableOf
                  )
 import           OpEnergy.Account.Server.V2.WalletAPI.WithdrawalLimits
-                 ( checkWithdrawalLimitsTx
+                 ( releaseForWithdrawalTx
                  )
 import           OpEnergy.Account.Server.V1.Wallet.Class
 import           OpEnergy.Account.Server.V1.WalletDeposits
@@ -177,12 +177,17 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
   -- taken together with the amount, so a fee can not take an account
   -- below nothing: a balance, which does not cover both, refuses the
   -- payment here rather than leaving the fee unpaid for afterwards
-  -- what an account may send beyond what it paid in is limited once it
-  -- has staked free sats: the gift turns into money through the profit on
-  -- top of a stake, so a payment, which would take out more than was paid
-  -- in, clears the limits first -- before the wallet is asked for anything
+  -- a payment, which the account's own money does not cover, is reaching
+  -- into what the gift won: that part clears the four limits here and is
+  -- moved into the account's own money, so the debit below spends one
+  -- pocket like any other payment. Before the wallet is asked for anything.
+  --
+  -- A payment, which fails after this, leaves those sats released: the
+  -- account was entitled to send them at this moment, and the limits are
+  -- read again for anything beyond them, so what a retry can release stays
+  -- bounded by the same cap and the same hold
   ExceptT $ liftIO $ flip runSqlPersistMPool pool
-    $ checkWithdrawalLimitsTx config key amount now
+    $ releaseForWithdrawalTx config key amount Nothing now
   let reserve = feeReserve (configWalletFeeReservePercent config) amount
   -- the balance is the backend's to move: it takes the amount and the
   -- reserve in the transaction, which records the payment, and gives back
