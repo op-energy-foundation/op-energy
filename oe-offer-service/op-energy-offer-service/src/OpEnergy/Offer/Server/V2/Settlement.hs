@@ -19,7 +19,6 @@ import           Prometheus (MonadMonitor)
 import           Data.OpEnergy.API.V1.Block (BlockHeight)
 import           Data.OpEnergy.API.V1.Natural (verifyNatural, fromNatural)
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
-import           Data.OpEnergy.Account.API.V2.FundsKind(FundsKind(..))
 import           Data.OpEnergy.Offer.API.V1.ContractStatus (ContractStatus(..))
 import           Data.OpEnergy.Offer.API.V1.OfferSide (OfferSide(..))
 import qualified Data.OpEnergy.Offer.API.V1.Constants as C
@@ -128,12 +127,12 @@ settleContract (Entity contractId contract@Contract{..}) =
                , contractTakerFundsKind )
       payoutSats = potSats - platformFeeSats
       -- the winner gets their own stake back in the pocket they staked it
-      -- from, and the profit on top of it as real sats, which they may
-      -- withdraw. So free sats stay free sats, and nothing turns a gift
-      -- into money except winning more than was staked
-      freeOfPayout = case winnerFundsKind of
-        FreeSats -> Sats (min winnerStakeSats payoutSats)
-        RealSats -> Sats 0
+      -- from, and the profit on top of it in the pocket that one wins
+      -- into: the gift wins into what the gift won, which has limits to
+      -- clear before it can be sent, and an account's own money wins into
+      -- its own money, which has none. So nothing turns a gift into
+      -- somebody's own money except clearing those limits
+      stakeOfPayout = Sats (min winnerStakeSats payoutSats)
   -- the contract and the winner's balance change from here on: in
   -- withLiveEventOrder, so the change's events are published in order
   withLiveEventOrderE $ do
@@ -158,7 +157,8 @@ settleContract (Entity contractId contract@Contract{..}) =
     when settled $ do
       ecredited <- lift
         $ AccountClient.creditWinnings winnerUUID (Sats payoutSats)
-          freeOfPayout loserUUID (Just (contractReference contractId))
+          stakeOfPayout winnerFundsKind loserUUID
+          (Just (contractReference contractId))
       lift $ runLogging $ case ecredited of
         Right _ -> $(logInfo)
           ( "contract " <> tshow (fromSqlKey contractId) <> " settled: "

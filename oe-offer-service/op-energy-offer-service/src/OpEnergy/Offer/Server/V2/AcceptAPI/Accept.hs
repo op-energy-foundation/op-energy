@@ -122,11 +122,9 @@ accept idText token =
   -- balances and offers change from here on: in withLiveEventOrder, so the
   -- change's events are published in the order of the changes
   withLiveEventOrderE $ do
-    BalanceAdjustResult (Sats takerBalance) takerFreeSats <- ExceptT
+    BalanceAdjustResult (Sats takerBalance) takerFundsKindV <- ExceptT
       $ AccountClient.deductBalance takerUUIDV
         (Sats (offerTakerStakeSats offerVal)) Stake (Just (offerReference key))
-    let takerFundsKindV =
-          if takerFreeSats > Sats 0 then FreeSats else RealSats
 
     now <- getCurrentTimeDB
     let contractRow = Contract
@@ -186,7 +184,8 @@ accept idText token =
     -- the expiry sweep changed the offer first -- refund and report which
     when (isNothing mcontractKey) $ do
       _ <- lift $ AccountClient.creditBalance takerUUIDV
-        (Sats (offerTakerStakeSats offerVal)) takerFreeSats Refund
+        (Sats (offerTakerStakeSats offerVal))
+        (Sats (offerTakerStakeSats offerVal)) takerFundsKindV Refund
         (Just (offerReference key))
       mlatest <- liftIO $ flip runSqlPersistMPool pool $ get key
       throwE $ case offerStatus <$> mlatest of

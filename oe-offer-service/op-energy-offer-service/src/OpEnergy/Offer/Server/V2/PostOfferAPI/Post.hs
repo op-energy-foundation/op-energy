@@ -36,7 +36,6 @@ import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
 import           Data.OpEnergy.Account.API.V2.BalanceAdjustResult
                  ( BalanceAdjustResult(..)
                  )
-import           Data.OpEnergy.Account.API.V2.FundsKind(FundsKind(..))
 import           Data.OpEnergy.Account.API.V2.LedgerReason(LedgerReason(..))
 import           OpEnergy.Offer.Server.V1.Offer(Offer(..), offerInfoFromEntity)
 import           OpEnergy.Offer.Server.V1.LiveEvent(LiveEvent(..))
@@ -88,11 +87,9 @@ post token PostOfferRequest{..} =
     -- free sats are spent first, and the answer says which pocket paid, so
     -- the offer can be refunded into the same one and the contracts it
     -- creates can pay their winner in the kind their stake was made of
-    BalanceAdjustResult (Sats makerBalance) makerFreeSats <-
+    BalanceAdjustResult (Sats makerBalance) makerFundsKindV <-
       ExceptT $ AccountClient.deductBalance personUUIDV (Sats totalStake)
         Stake Nothing -- the offer has no id until it is inserted below
-    let makerFundsKindV =
-          if makerFreeSats > Sats 0 then FreeSats else RealSats
 
     now <- getCurrentTimeDB
     State{ offerDBPool = pool } <- lift ask
@@ -129,7 +126,7 @@ post token PostOfferRequest{..} =
       Left insertErr -> do
         ecredited <- lift
           $ AccountClient.creditBalance personUUIDV (Sats totalStake)
-            makerFreeSats Refund Nothing
+            (Sats totalStake) makerFundsKindV Refund Nothing
         lift $ runLogging $ $(logError)
           ( "post: failed to persist offer row after staking "
           <> tshow totalStake
