@@ -163,6 +163,17 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
     $ throwE walletAmountBelowMinimum
   when (amount > configWalletMaxWithdrawalSats config)
     $ throwE walletAmountAboveMaximum
+  -- the amount is weighed against what the balance holds beyond its free
+  -- sats, not against the balance: an account, whose balance does cover the
+  -- amount while its free sats are what the rest of it is made of, is told
+  -- that the gift can not be sent rather than that it has too little. The
+  -- debit refuses it either way -- the two pockets are guarded there -- but
+  -- "insufficient balance" names the wrong thing to somebody, who can see
+  -- the balance
+  let overSendable = amount > sendable
+  when (overSendable && personFreeSats person > Sats 0)
+    $ throwE freeSatsNotWithdrawable
+  when overSendable $ throwE insufficientBalance
   -- taken together with the amount, so a fee can not take an account
   -- below nothing: a balance, which does not cover both, refuses the
   -- payment here rather than leaving the fee unpaid for afterwards
