@@ -88,8 +88,10 @@ accept idText token =
   -- the profit on top of the stake is real sats and the pair keeps the
   -- rest. It is the same two accounts meeting again and again, so a pair,
   -- which has already shared the contracts it is allowed within the window,
-  -- is refused while either side would be staking free sats. A pair, which
-  -- stakes sats it paid in, is not touched by this
+  -- is refused while either side would be staking free sats. A contract,
+  -- where neither side stakes them, is never refused by this, although it
+  -- does count towards the window: what is bounded is how often these two
+  -- accounts have met, not which pocket each meeting was paid from
   State{ config = Config{ configFreeSatsPairMatchLimit = pairLimit
                         , configFreeSatsPairMatchWindowSecs = pairWindowSecs
                         } } <- lift ask
