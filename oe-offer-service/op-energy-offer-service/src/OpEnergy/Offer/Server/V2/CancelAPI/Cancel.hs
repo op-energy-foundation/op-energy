@@ -73,7 +73,7 @@ cancel idText token =
   key <- exceptTMaybeT (invalidRequest "invalid offer id")
     $ return (offerKeyFromIDText idText)
 
-  (AccountV2.WhoAmIResult personUUIDV _displayName _balance) <-
+  (AccountV2.WhoAmIResult personUUIDV _displayName _balance _freeSats) <-
     ExceptT $ AccountClient.verifyAccountToken token
 
   -- balances and offers change from here on: in withLiveEventOrder, so the
@@ -83,9 +83,11 @@ cancel idText token =
     (updatedVal, refundAmount) <-
       closeForCancel key personUUIDV now cancelAttempts
 
-    -- refund unfilled stake
+    -- refund unfilled stake, into the pocket which paid for it: a stake,
+    -- which the gift paid for, is the gift's again
     ecredited <- lift
-      $ AccountClient.creditBalance personUUIDV (Sats refundAmount) Refund
+      $ AccountClient.creditBalance personUUIDV (Sats refundAmount)
+        (Sats refundAmount) (offerFundsKind updatedVal) Refund
         (Just (offerReference key))
     case ecredited of
       Right _ -> return ()

@@ -28,6 +28,11 @@ module OpEnergy.Error
   , calculatedGuessesCountNotFound
   , secretNotRecoverable
   , insufficientBalance
+  , freeSatsNotWithdrawable
+  , withdrawalOverProfitCap
+  , withdrawalPlaythroughNotMet
+  , withdrawalNeedsMoreOpponents
+  , withdrawalWinningsOnHold
   , invalidServiceSecret
 
   , walletInvoiceNotFound
@@ -68,6 +73,11 @@ data BadRequestError
   | CalculatedGuessesCountNotFound
   | SecretNotRecoverable
   | InsufficientBalance
+  | FreeSatsNotWithdrawable
+  | WithdrawalOverProfitCap
+  | WithdrawalPlaythroughNotMet
+  | WithdrawalNeedsMoreOpponents
+  | WithdrawalWinningsOnHold
   | InvalidServiceSecret
   | WalletInvoiceNotFound
   | WalletInvoiceAlreadyPaid
@@ -91,6 +101,20 @@ instance Show BadRequestError where
   show InvalidCredentials = "invalid credentials"
   show DisplayNameAlreadyTaken = "display name already taken"
   show InsufficientBalance = "insufficient balance"
+  show WithdrawalOverProfitCap =
+    "this account has sent out as much beyond what it paid in as an\
+    \ account, which stakes free sats, may ever send"
+  show WithdrawalPlaythroughNotMet =
+    "free sats have to be staked a few times over before what they win\
+    \ can be sent out"
+  show WithdrawalNeedsMoreOpponents =
+    "winnings can be sent out once they were won against enough\
+    \ different accounts"
+  show WithdrawalWinningsOnHold =
+    "winnings wait a while before they can be sent out"
+  show FreeSatsNotWithdrawable =
+    "free sats can be staked but not withdrawn: only sats, which were\
+    \ paid in or won on top of a stake, can be sent"
   show InvalidServiceSecret = "invalid service secret"
   show WalletInvoiceNotFound = "invoice not found"
   show WalletInvoiceAlreadyPaid = "invoice has already been paid"
@@ -182,6 +206,26 @@ secretNotRecoverable :: CallstackError
 secretNotRecoverable = CallstackError "" $! BadRequest SecretNotRecoverable
 insufficientBalance :: CallstackError
 insufficientBalance = CallstackError "" $! BadRequest InsufficientBalance
+
+freeSatsNotWithdrawable :: CallstackError
+freeSatsNotWithdrawable =
+  CallstackError "" $! BadRequest FreeSatsNotWithdrawable
+
+withdrawalOverProfitCap :: CallstackError
+withdrawalOverProfitCap =
+  CallstackError "" $! BadRequest WithdrawalOverProfitCap
+
+withdrawalPlaythroughNotMet :: CallstackError
+withdrawalPlaythroughNotMet =
+  CallstackError "" $! BadRequest WithdrawalPlaythroughNotMet
+
+withdrawalNeedsMoreOpponents :: CallstackError
+withdrawalNeedsMoreOpponents =
+  CallstackError "" $! BadRequest WithdrawalNeedsMoreOpponents
+
+withdrawalWinningsOnHold :: CallstackError
+withdrawalWinningsOnHold =
+  CallstackError "" $! BadRequest WithdrawalWinningsOnHold
 invalidServiceSecret :: CallstackError
 invalidServiceSecret = CallstackError "" $! BadRequest InvalidServiceSecret
 walletInvoiceNotFound :: CallstackError

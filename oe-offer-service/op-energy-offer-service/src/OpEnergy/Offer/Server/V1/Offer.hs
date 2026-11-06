@@ -38,6 +38,11 @@ import           Data.OpEnergy.API.V1.Natural(Natural, fromNatural)
 import           Data.OpEnergy.API.V1.Block(BlockHeight)
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountAPI
 import qualified Data.OpEnergy.Account.API.V1.UUID as AccountAPI
+import           Data.OpEnergy.Account.API.V2.FundsKind
+                 ( FundsKind(..)
+                 , fundsKindToText
+                 , fundsKindFromText
+                 )
 import           Data.OpEnergy.Offer.API.V1.OfferStatus
                  ( OfferStatus(..)
                  )
@@ -88,6 +93,14 @@ instance PersistField ContractStatus where
 instance PersistFieldSql ContractStatus where
   sqlType _ = SqlString
 
+-- FundsKind is an API type, so its Persist instances live here, in the
+-- service layer, as ContractStatus's and OfferStatus's do
+instance PersistField FundsKind where
+  toPersistValue = toPersistValue . fundsKindToText
+  fromPersistValue v = fromPersistValue v >>= fundsKindFromText
+instance PersistFieldSql FundsKind where
+  sqlType _ = SqlString
+
 share [mkPersist sqlSettings, mkMigrate "migrateOffer"] [persistLowerCase|
 
 -- | one row per offer group
@@ -100,6 +113,7 @@ Offer
   validTillBlock (Natural Int)
   makerStakeSats Word64
   takerStakeSats Word64
+  fundsKind FundsKind default='real' -- which pocket paid the maker's stake. A free offer is refunded in free sats and pays its maker's stake back in free sats, so the gift can not turn into money through an offer
   blockRate Double
   totalContracts (Natural Int)
   matchedCount (Natural Int)
@@ -119,9 +133,11 @@ Contract
   makerUUID (AccountAPI.UUID AccountAPI.Person)
   makerDisplayName AccountAPI.DisplayName
   makerStakeSats Word64
+  makerFundsKind FundsKind default='real' -- which pocket paid the maker's side
   takerUUID (AccountAPI.UUID AccountAPI.Person)
   takerDisplayName AccountAPI.DisplayName
   takerStakeSats Word64
+  takerFundsKind FundsKind default='real' -- which pocket paid the taker's side
   blockRate Double
   status ContractStatus
   actualMtpEpoch Word64 Maybe

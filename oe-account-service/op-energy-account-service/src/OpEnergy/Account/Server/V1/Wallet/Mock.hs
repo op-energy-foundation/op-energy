@@ -42,6 +42,9 @@ import           Data.OpEnergy.Account.API.V2.PaymentHash
                  )
 import           Data.OpEnergy.Account.API.V2.WalletMode (WalletMode(..))
 
+import           Data.OpEnergy.Account.API.V2.FundsKind
+                 ( FundsKind(..)
+                 )
 import           OpEnergy.Account.Server.V1.LedgerEntry
                  ( LedgerDirection(..), adjustBalanceTx
                  )
@@ -211,7 +214,7 @@ payInvoiceOrThrow pool params = do
           -- reserve is taken: this backend charges no fee
           flip runSqlPersistMPool pool $ do
             edebited <- adjustBalanceTx payer Debit amount
-              Withdrawal Nothing now
+              RealSats Withdrawal Nothing Nothing now
             case edebited of
               Left err -> return $! Left err
               Right balanceAfter -> do
@@ -286,7 +289,7 @@ payInvoiceOrThrow pool params = do
           -- payment, so neither is ever written without the other
           flip runSqlPersistMPool pool $ do
             edebited <- adjustBalanceTx payer Debit amount
-              Withdrawal Nothing now
+              RealSats Withdrawal Nothing Nothing now
             case edebited of
               Left err -> return $! Left err
               Right balanceAfter -> do

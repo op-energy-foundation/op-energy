@@ -39,11 +39,15 @@ import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
 import           Data.OpEnergy.Account.API.V2.LedgerReason (LedgerReason(..))
 import           Data.OpEnergy.Account.API.V2.PaymentHash (PaymentHash(..))
 
+import           Data.OpEnergy.Account.API.V2.FundsKind
+                 ( FundsKind(..)
+                 )
 import           OpEnergy.Account.Server.V1.Class
                  ( AppT, State(..), profile, runLogging
                  )
 import           OpEnergy.Account.Server.V1.LedgerEntry
-                 ( LedgerDirection(..), adjustBalanceTx, ledgerReference
+                 ( LedgerDirection(..), adjustBalanceTx
+                 , ledgerReference
                  )
 import           OpEnergy.Account.Server.V1.WalletPayment
 import           OpEnergy.Error
@@ -101,8 +105,10 @@ creditDepositOnce paymentHashV now = runExceptT $ do
             (walletPaymentPersonId payment)
             Credit
             (walletPaymentAmountSats payment)
+            RealSats
             Deposit
             (Just (ledgerReference "payment" (unPaymentHash paymentHashV)))
+            Nothing
             now
           case ebalance of
             -- the claim goes back with it, so the payment stays waiting

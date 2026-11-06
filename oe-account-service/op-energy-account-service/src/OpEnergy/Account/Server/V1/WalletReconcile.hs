@@ -52,6 +52,9 @@ import           Data.OpEnergy.Account.API.V2.PaymentHash
                  ( PaymentHash, unPaymentHash
                  )
 
+import           Data.OpEnergy.Account.API.V2.FundsKind
+                 ( FundsKind(..)
+                 )
 import           OpEnergy.Account.Server.V1.Class
                  ( AppT, State(..), profile, runLogging
                  )
@@ -371,7 +374,7 @@ reconcilePendingPayments =
           )
         when ((claimed :: Int64) == 1 && givesBack) $ do
           egiven <- adjustBalanceTx (walletPaymentPersonId payment) Credit
-            back Refund (Just reason) now
+            back RealSats Refund (Just reason) Nothing now
           -- thrown rather than returned, so the claim above is rolled back
           -- with it: a payment, whose sats could not be given back, stays
           -- Pending and is tried again, rather than being left finished

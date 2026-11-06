@@ -59,6 +59,7 @@ library
                    , OpEnergy.Account.Server.V1.Person
                    , OpEnergy.Account.Server.V1.LedgerEntry
                    , OpEnergy.Account.Server.V1.WalletPayment
+                   , OpEnergy.Account.Server.V1.FreeSatsCheck
                    , OpEnergy.Account.Server.V1.WalletDeposits
                    , OpEnergy.Account.Server.V1.Wallet
                    , OpEnergy.Account.Server.V1.Wallet.Class
@@ -71,11 +72,13 @@ library
                    , OpEnergy.Account.Server.V2.WalletAPI.GetWalletInfo
                    , OpEnergy.Account.Server.V2.WalletAPI.CreateInvoice
                    , OpEnergy.Account.Server.V2.WalletAPI.PayInvoice
+                   , OpEnergy.Account.Server.V2.WalletAPI.WithdrawalLimits
                    , OpEnergy.Account.Server.V2.WalletAPI.GetTransactions
                    , OpEnergy.Account.Server.V2.WalletMockAPI
                    , OpEnergy.Account.Server.V2.WalletMockAPI.SettleInvoice
                    , OpEnergy.Account.Server.V1.DB.Migrations.BackfillLedgerOpeningBalance.Migration
                    , OpEnergy.Account.Server.V1.DB.Migrations.DropOversizedWalletPaymentInvoices.Migration
+                   , OpEnergy.Account.Server.V1.DB.Migrations.MarkOpeningBalanceFree.Migration
                    , OpEnergy.Account.Server.V2
                    , OpEnergy.Account.Server.V2.AccountService.Login
                    , OpEnergy.Account.Server.V2.AccountService.SetPassword

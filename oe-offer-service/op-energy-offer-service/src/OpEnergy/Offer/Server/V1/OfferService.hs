@@ -94,8 +94,11 @@ refundAndCloseOffer offerId newStatus now = do
     Just offerVal -> do
       let unfilled = fromNatural (offerTotalContracts offerVal) - fromNatural (offerMatchedCount offerVal)
           refundAmount = offerMakerStakeSats offerVal * fromIntegral unfilled
+      -- the whole of it is stake coming back, into the pocket which paid
+      -- for it
       ecredited <- AccountClient.creditBalance (offerPersonUUID offerVal)
-        (Sats refundAmount) Refund (Just (offerReference offerId))
+        (Sats refundAmount) (Sats refundAmount) (offerFundsKind offerVal)
+        Refund (Just (offerReference offerId))
       case ecredited of
         Right _ -> return ()
         Left err -> runLogging $ $(logError)

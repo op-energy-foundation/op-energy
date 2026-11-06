@@ -20,6 +20,9 @@ import           Database.Persist.Sql (SqlBackend)
 
 import           Data.OpEnergy.Account.API.V2.LedgerReason (LedgerReason(..))
 
+import           Data.OpEnergy.Account.API.V2.FundsKind
+                 ( FundsKind(..)
+                 )
 import           OpEnergy.Account.Server.V1.Config (Config)
 import           OpEnergy.Account.Server.V1.LedgerEntry
 import           OpEnergy.Account.Server.V1.Person
@@ -37,8 +40,10 @@ migration _config = do
       { ledgerEntryPersonId = key
       , ledgerEntryDirection = Credit
       , ledgerEntryAmountSats = personBalance person
+      , ledgerEntryFundsKind = RealSats
       , ledgerEntryReason = OpeningBalance
       , ledgerEntryBalanceAfter = personBalance person
       , ledgerEntryReference = Nothing
+      , ledgerEntryCounterparty = Nothing
       , ledgerEntryCreatedAt = personCreationTime person
       }

@@ -29,9 +29,15 @@ import           Data.OpEnergy.Offer.API.V1.LiveMessage(LiveMessage(..))
 import qualified Control.Concurrent.STM.TVar as TVar
 
 import           OpEnergy.Offer.Server.V1.Time(getCurrentTimeDB)
+import           Data.Time.Clock(addUTCTime)
 import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
+import           OpEnergy.Offer.Server.V1.Config(Config(..))
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
+import           Data.OpEnergy.Account.API.V2.BalanceAdjustResult
+                 ( BalanceAdjustResult(..)
+                 )
+import           Data.OpEnergy.Account.API.V2.FundsKind(FundsKind(..))
 import           Data.OpEnergy.Account.API.V2.LedgerReason(LedgerReason(..))
 import           OpEnergy.Offer.Server.V1.Offer
 import           OpEnergy.Offer.Server.V1.OfferService(isOfferAcceptableAt)
@@ -47,6 +53,7 @@ import           OpEnergy.Error
                    , CallstackError, invalidRequest
                    , offerNotFound, offerNotOpen, offerFilled
                    , offerExpired, offerChanged, cannotAcceptOwnOffer
+                   , tooManyFreeSatsContractsWithSameAccount
                    , chainTipUnknown
                    )
 
@@ -65,7 +72,8 @@ accept idText token =
   key <- exceptTMaybeT (invalidRequest "invalid offer id")
     $ return (offerKeyFromIDText idText)
 
-  (AccountV2.WhoAmIResult takerUUIDV takerDisplayNameV _balance) <-
+  (AccountV2.WhoAmIResult takerUUIDV takerDisplayNameV _balance
+    takerFreeBalance) <-
     ExceptT $ AccountClient.verifyAccountToken token
 
   State{ offerDBPool = pool, currentTip = currentTipV } <- lift ask
@@ -75,6 +83,36 @@ accept idText token =
   when (offerStatus offerVal /= Open) $ throwE offerNotOpen
   when (fromNatural (offerMatchedCount offerVal) >= fromNatural (offerTotalContracts offerVal)) $ throwE offerFilled
   when (offerPersonUUID offerVal == takerUUIDV) $ throwE cannotAcceptOwnOffer
+  -- Two accounts, which were both given free sats, turn them into money by
+  -- taking opposite sides of their own contracts: whichever of them wins,
+  -- the profit on top of the stake is real sats and the pair keeps the
+  -- rest. It is the same two accounts meeting again and again, so a pair,
+  -- which has already shared the contracts it is allowed within the window,
+  -- is refused while either side would be staking free sats. A contract,
+  -- where neither side stakes them, is never refused by this, although it
+  -- does count towards the window: what is bounded is how often these two
+  -- accounts have met, not which pocket each meeting was paid from
+  State{ config = Config{ configFreeSatsPairMatchLimit = pairLimit
+                        , configFreeSatsPairMatchWindowSecs = pairWindowSecs
+                        } } <- lift ask
+  let takerStakesFreeSats =
+        takerFreeBalance >= Sats (offerTakerStakeSats offerVal)
+  when ( pairLimit > 0
+      && (offerFundsKind offerVal == FreeSats || takerStakesFreeSats)) $ do
+    nowUTC <- getCurrentTimeDB
+    let since = addUTCTime (negate (fromIntegral pairWindowSecs)) nowUTC
+    shared <- liftIO $ flip runSqlPersistMPool pool $ count
+      (   [ ContractMakerUUID ==. offerPersonUUID offerVal
+          , ContractTakerUUID ==. takerUUIDV
+          , ContractMatchedAt >=. since
+          ]
+      ||. [ ContractMakerUUID ==. takerUUIDV
+          , ContractTakerUUID ==. offerPersonUUID offerVal
+          , ContractMatchedAt >=. since
+          ]
+      )
+    when (fromIntegral shared >= pairLimit)
+      $ throwE tooManyFreeSatsContractsWithSameAccount
   -- The expiry sweep closes an offer, which can't be accepted anymore, but
   -- it runs once per scheduler tick, so it may not have run since the tip
   -- moved. Without a known tip, this can't be checked.
@@ -84,8 +122,9 @@ accept idText token =
   -- balances and offers change from here on: in withLiveEventOrder, so the
   -- change's events are published in the order of the changes
   withLiveEventOrderE $ do
-    Sats takerBalance <- ExceptT $ AccountClient.deductBalance takerUUIDV
-      (Sats (offerTakerStakeSats offerVal)) Stake (Just (offerReference key))
+    BalanceAdjustResult (Sats takerBalance) takerFundsKindV <- ExceptT
+      $ AccountClient.deductBalance takerUUIDV
+        (Sats (offerTakerStakeSats offerVal)) Stake (Just (offerReference key))
 
     now <- getCurrentTimeDB
     let contractRow = Contract
@@ -96,9 +135,11 @@ accept idText token =
           , contractMakerUUID = offerPersonUUID offerVal
           , contractMakerDisplayName = offerCreatorDisplayName offerVal
           , contractMakerStakeSats = offerMakerStakeSats offerVal
+          , contractMakerFundsKind = offerFundsKind offerVal
           , contractTakerUUID = takerUUIDV
           , contractTakerDisplayName = takerDisplayNameV
           , contractTakerStakeSats = offerTakerStakeSats offerVal
+          , contractTakerFundsKind = takerFundsKindV
           , contractBlockRate = offerBlockRate offerVal
           , contractStatus = Live
           , contractActualMtpEpoch = Nothing
@@ -143,7 +184,9 @@ accept idText token =
     -- the expiry sweep changed the offer first -- refund and report which
     when (isNothing mcontractKey) $ do
       _ <- lift $ AccountClient.creditBalance takerUUIDV
-        (Sats (offerTakerStakeSats offerVal)) Refund (Just (offerReference key))
+        (Sats (offerTakerStakeSats offerVal))
+        (Sats (offerTakerStakeSats offerVal)) takerFundsKindV Refund
+        (Just (offerReference key))
       mlatest <- liftIO $ flip runSqlPersistMPool pool $ get key
       throwE $ case offerStatus <$> mlatest of
         Just Open -> offerChanged -- another accept took a slot: try again

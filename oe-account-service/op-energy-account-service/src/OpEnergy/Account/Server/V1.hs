@@ -26,6 +26,9 @@ import qualified OpEnergy.Account.Server.GitCommitHash as Server
 import           OpEnergy.Account.Server.V1.Class (AppT, State(..))
 import           OpEnergy.Account.Server.V1.AccountService
 import           OpEnergy.Account.Server.V1.Config (Config(..))
+import           OpEnergy.Account.Server.V1.FreeSatsCheck
+                 ( checkFreeSatsAddUp
+                 )
 import           OpEnergy.Account.Server.V1.WalletDeposits
                  ( creditWaitingDeposits
                  )
@@ -60,6 +63,9 @@ schedulerIteration = do
   -- otherwise hold up crediting the deposits, which are already settled
   forgetSpentPayAttempts
   creditWaitingDeposits
+  -- reads every account, so it keeps its own interval and most ticks
+  -- only read the time it last ran
+  checkFreeSatsAddUp
   reconcilePendingPayments
 
 -- | drops the accounts, whose window of payment attempts is over, so what

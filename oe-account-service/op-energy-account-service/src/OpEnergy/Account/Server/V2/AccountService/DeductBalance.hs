@@ -31,6 +31,9 @@ import           Data.OpEnergy.Account.API.V2.BalanceAdjustResult
                  ( BalanceAdjustResult(..)
                  )
 
+import           Data.OpEnergy.Account.API.V2.FundsKind
+                 ( FundsKind(..)
+                 )
 import           OpEnergy.Account.Server.V1.Class
                  ( AppM, State(..), runLogging, profile)
 import           OpEnergy.Account.Server.V1.LedgerEntry
@@ -60,7 +63,13 @@ deductBalanceHandler secret request =
       ( runLogging . $(logError))
       $ deductBalance secret request
 
--- | business logic for V2 balance deduction. Deducts through
+-- | business logic for V2 balance deduction. Free sats are spent first,
+-- and a stake is paid for out of one pocket -- free when the account's free
+-- sats cover the whole of it, real otherwise -- so the answer can say which
+-- pocket it took, and a refund or a payout of that stake can be returned to
+-- the same one.
+--
+-- Deducts through
 -- 'adjustBalanceTx', which rejects underflow, records why the balance
 -- changed and returns the balance after the deduction, read in the same
 -- transaction as the update. A request without a reason records a stake,
@@ -75,17 +84,30 @@ deductBalance secret request =
   checkInternalServiceSecret secret
   State{ accountDBPool = pool } <- lift ask
   let modelUUID = modelApiUUIDPerson (personUUID request)
+      amount = amountSats request
   nowUTC <- liftIO getCurrentTime
   -- the account is looked up in the same transaction as the change, so it
   -- cannot be gone between finding it and deducting from it
-  balance <- ExceptT $ liftIO $ flip runSqlPersistMPool pool $ runExceptT $ do
-    (Entity key _) <- exceptTMaybeT accountNotFound
+  (balance, taken) <- ExceptT $ liftIO $ flip runSqlPersistMPool pool
+      $ runExceptT $ do
+    (Entity key person) <- exceptTMaybeT accountNotFound
       $ selectFirst [ PersonUuid ==. modelUUID ] []
-    ExceptT $ adjustBalanceTx
+    -- a stake spends the gift first, then what the gift won, and the
+    -- account's own money last, so what somebody paid in is the last thing
+    -- at risk. One stake comes out of one pocket: a pocket, which does not
+    -- cover the whole of it, is skipped rather than mixed with the next
+    let funds
+          | personFreeSats person >= amount = FreeSats
+          | personGiftWonSats person >= amount = GiftWonSats
+          | otherwise = RealSats
+    balanceAfter <- ExceptT $ adjustBalanceTx
         key
         Debit
-        (amountSats request)
+        amount
+        funds
         (fromMaybe Stake (reason request))
         (reference request)
+        Nothing -- a stake has no other side yet: the contract is made of two
         (utcTimeToPOSIXSeconds nowUTC)
-  return $! BalanceAdjustResult balance
+    return (balanceAfter, funds)
+  return $! BalanceAdjustResult balance taken

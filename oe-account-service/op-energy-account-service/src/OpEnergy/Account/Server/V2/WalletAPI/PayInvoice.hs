@@ -55,7 +55,11 @@ import           OpEnergy.Account.Server.V1.Config
                  ( Config(..)
                  )
 import           OpEnergy.Account.Server.V1.Person
-                 ( personBalance
+                 ( personFreeSats
+                 , withdrawableOf
+                 )
+import           OpEnergy.Account.Server.V2.WalletAPI.WithdrawalLimits
+                 ( releaseForWithdrawalTx
                  )
 import           OpEnergy.Account.Server.V1.Wallet.Class
 import           OpEnergy.Account.Server.V1.WalletDeposits
@@ -67,7 +71,8 @@ import           OpEnergy.Account.Server.V1.WalletRateLimit
 import           OpEnergy.Error
                  ( eitherThrowJSON, runExceptPrefixT
                  , CallstackError, accountNotFound, describeError
-                 , eitherException, insufficientBalance, unspecified
+                 , eitherException, freeSatsNotWithdrawable
+                 , insufficientBalance, unspecified
                  , walletAmountAboveMaximum, walletAmountBelowMinimum
                  , walletAmountRequired, walletInvoiceAlreadyPaid
                  , walletInvoiceNotFound, walletSelfPaymentNotAllowed
@@ -103,7 +108,15 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
   -- read one: an account is free to create, so a request, which can not
   -- succeed, would otherwise be a way to have this service call the wallet
   -- as often as the caller likes
-  when (personBalance person < configWalletMinInvoiceSats config)
+  -- free sats are the account's to stake, not to send: what is left of
+  -- the balance after them is what a payment may spend. The two refusals
+  -- are told apart, so an account, whose balance is all free sats, is told
+  -- that rather than that it has too little
+  let sendable = withdrawableOf person
+  when (sendable < configWalletMinInvoiceSats config
+        && personFreeSats person > Sats 0)
+    $ throwE freeSatsNotWithdrawable
+  when (sendable < configWalletMinInvoiceSats config)
     $ throwE insufficientBalance
   now <- liftIO getPOSIXTime
   -- every attempt asks the wallet to read the invoice before any balance
@@ -150,9 +163,31 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
     $ throwE walletAmountBelowMinimum
   when (amount > configWalletMaxWithdrawalSats config)
     $ throwE walletAmountAboveMaximum
+  -- the amount is weighed against what the balance holds beyond its free
+  -- sats, not against the balance: an account, whose balance does cover the
+  -- amount while its free sats are what the rest of it is made of, is told
+  -- that the gift can not be sent rather than that it has too little. The
+  -- debit refuses it either way -- the two pockets are guarded there -- but
+  -- "insufficient balance" names the wrong thing to somebody, who can see
+  -- the balance
+  let overSendable = amount > sendable
+  when (overSendable && personFreeSats person > Sats 0)
+    $ throwE freeSatsNotWithdrawable
+  when overSendable $ throwE insufficientBalance
   -- taken together with the amount, so a fee can not take an account
   -- below nothing: a balance, which does not cover both, refuses the
   -- payment here rather than leaving the fee unpaid for afterwards
+  -- a payment, which the account's own money does not cover, is reaching
+  -- into what the gift won: that part clears the four limits here and is
+  -- moved into the account's own money, so the debit below spends one
+  -- pocket like any other payment. Before the wallet is asked for anything.
+  --
+  -- A payment, which fails after this, leaves those sats released: the
+  -- account was entitled to send them at this moment, and the limits are
+  -- read again for anything beyond them, so what a retry can release stays
+  -- bounded by the same cap and the same hold
+  ExceptT $ liftIO $ flip runSqlPersistMPool pool
+    $ releaseForWithdrawalTx config key amount Nothing now
   let reserve = feeReserve (configWalletFeeReservePercent config) amount
   -- the balance is the backend's to move: it takes the amount and the
   -- reserve in the transaction, which records the payment, and gives back

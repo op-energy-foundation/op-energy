@@ -43,6 +43,9 @@ import           Data.OpEnergy.Account.API.V1.Hash
 import qualified Data.OpEnergy.Account.API.V1.Account as API
 import           Data.OpEnergy.Account.API.V1.UUID
 
+import           Data.OpEnergy.Account.API.V2.FundsKind
+                 ( FundsKind(..)
+                 )
 import           OpEnergy.Account.Server.V1.Config
 import           Data.OpEnergy.Account.API.V2.LedgerReason
                  ( LedgerReason(..)
@@ -103,18 +106,28 @@ register mRequestedName = do
           , personEncryptedSecret = Just encryptedSecret
           , personLoginsCount = 0
           , personBalance = Sats configStartingBalanceSats
+          , personFreeSats = Sats configStartingBalanceSats
+          -- a new account has won nothing yet: what the gift wins arrives
+          -- in its own pocket as contracts settle
+          , personGiftWonSats = Sats 0
           }
     -- insert record into DB, with the balance it starts with as the first
-    -- entry of its ledger, so the ledger of every account sums to its balance
+    -- entry of its ledger, so the ledger of every account sums to its balance.
+    -- The balance is a gift: nobody paid those sats in, so they are free
+    -- sats, which can be staked and can be won and lost, but can never be
+    -- withdrawn -- otherwise an account could pay them out over lightning
+    -- and register again for more
     _ <- liftIO $! P.observeDuration accountInsert $ flip runSqlPersistMPool pool $ do
       key <- insert person
       insert_ $ LedgerEntry
         { ledgerEntryPersonId = key
         , ledgerEntryDirection = Credit
         , ledgerEntryAmountSats = Sats configStartingBalanceSats
+        , ledgerEntryFundsKind = FreeSats
         , ledgerEntryReason = OpeningBalance
         , ledgerEntryBalanceAfter = Sats configStartingBalanceSats
         , ledgerEntryReference = Nothing
+        , ledgerEntryCounterparty = Nothing
         , ledgerEntryCreatedAt = now
         }
       return key

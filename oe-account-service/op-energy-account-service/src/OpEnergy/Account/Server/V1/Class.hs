@@ -17,6 +17,7 @@ import           Control.Monad.Trans(lift)
 import           Control.Monad.Logger (runLoggingT, filterLogger, LoggingT, MonadLoggerIO, Loc, LogSource, LogLevel, LogStr, logError, NoLoggingT)
 import           Servant (Handler )
 import           Data.Pool(Pool)
+import           Data.Time.Clock.POSIX (POSIXTime)
 import           Database.Persist.Postgresql (SqlBackend, runSqlPersistMPool)
 import           Control.Monad.Trans.Resource
 
@@ -64,6 +65,10 @@ data State = State
   -- ^ how many payments each account has attempted in the window, which
   -- counts them, so one account can not decide how often this service
   -- calls the wallet
+  , freeSatsCheckedAt :: TVar.TVar POSIXTime
+  -- ^ when the check, which adds the free sats of every account up
+  -- against its ledger, last ran. It reads every account, so it runs on
+  -- its own interval rather than on every scheduler tick
   , callStack :: Text
   -- ^ dot separated labels
   }
@@ -78,6 +83,7 @@ defaultState config metrics logFunc accountDBPool = do
   blockTimeState <- BlockTime.defaultState config
   walletV <- newWalletBackend config accountDBPool
   walletAttemptsV <- newWalletAttempts
+  freeSatsCheckedAtV <- liftIO $ TVar.newTVarIO 0
   return $ State
     { config = config
     , accountDBPool = accountDBPool
@@ -87,6 +93,7 @@ defaultState config metrics logFunc accountDBPool = do
     , blockTimeState = blockTimeState
     , wallet = walletV
     , walletAttempts = walletAttemptsV
+    , freeSatsCheckedAt = freeSatsCheckedAtV
     , callStack = ""
     }
 

@@ -61,6 +61,9 @@ getWalletInfo token =
   State{ config = config, wallet = walletV } <- lift ask
   return $! WalletInfo
     { balanceSats = personBalance person
+    , freeSats = personFreeSats person
+    , giftWonSats = personGiftWonSats person
+    , withdrawableSats = withdrawableOf person
     , mode = walletKind walletV
     , canSend = walletCanSend walletV
     , canReceive = walletCanReceive walletV

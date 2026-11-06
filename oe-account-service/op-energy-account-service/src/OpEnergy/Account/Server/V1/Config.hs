@@ -91,6 +91,22 @@ data Config = Config
   , configWalletMaxInvoiceSats :: Sats
     -- ^ largest amount an invoice may be created for
   , configWalletMaxWithdrawalSats :: Sats
+  , configWithdrawalProfitCapSats :: Sats
+  -- ^ the most an account may ever send beyond what it paid in, once it
+  -- has staked free sats. Free sats turn into money through the profit on
+  -- top of a stake, so this is what a farmed account is worth at most
+  , configWithdrawalFreeSatsPlaythrough :: Word64
+  -- ^ how many times over the free sats an account was given have to be
+  -- staked before it may send more than it paid in
+  , configWithdrawalMinDistinctOpponents :: Word64
+  -- ^ how many different accounts it has to have won against by then: a
+  -- farm keeps meeting itself
+  , configWithdrawalWinningsHoldSecs :: Word64
+  -- ^ how long after its last win such a payment waits
+  , configFreeSatsCheckIntervalSecs :: Word64
+  -- ^ how often every account's free sats are added up against its
+  -- ledger, so a balance, which the two pockets do not explain, is
+  -- noticed rather than waited for
     -- ^ largest amount one payment may send out of an account
   , configWalletInvoiceExpirySecs :: Word64
     -- ^ how long an invoice is advertised as payable. It is recorded and
@@ -173,6 +189,16 @@ instance FromJSON Config where
     <*> ( v .:? "WALLET_MIN_INVOICE_SATS" .!= (configWalletMinInvoiceSats defaultConfig))
     <*> ( v .:? "WALLET_MAX_INVOICE_SATS" .!= (configWalletMaxInvoiceSats defaultConfig))
     <*> ( v .:? "WALLET_MAX_WITHDRAWAL_SATS" .!= (configWalletMaxWithdrawalSats defaultConfig))
+    <*> ( v .:? "WITHDRAWAL_PROFIT_CAP_SATS"
+          .!= (configWithdrawalProfitCapSats defaultConfig))
+    <*> ( v .:? "WITHDRAWAL_FREE_SATS_PLAYTHROUGH"
+          .!= (configWithdrawalFreeSatsPlaythrough defaultConfig))
+    <*> ( v .:? "WITHDRAWAL_MIN_DISTINCT_OPPONENTS"
+          .!= (configWithdrawalMinDistinctOpponents defaultConfig))
+    <*> ( v .:? "WITHDRAWAL_WINNINGS_HOLD_SECS"
+          .!= (configWithdrawalWinningsHoldSecs defaultConfig))
+    <*> ( v .:? "FREE_SATS_CHECK_INTERVAL_SECS"
+          .!= (configFreeSatsCheckIntervalSecs defaultConfig))
     <*> ( v .:? "WALLET_INVOICE_EXPIRY_SECS" .!= (configWalletInvoiceExpirySecs defaultConfig))
     <*> ( v .:? "WALLET_RECORDS_PER_PAGE" .!= (configWalletRecordsPerPage defaultConfig))
     <*> ((v .:? "LNBITS_API_URL" .!= (showBaseUrl $ configLNBitsURL defaultConfig)) >>= parseBaseUrl)
@@ -223,6 +249,11 @@ defaultConfig = Config
   , configWalletMinInvoiceSats = Sats 1
   , configWalletMaxInvoiceSats = Sats 10000000
   , configWalletMaxWithdrawalSats = Sats 10000000
+  , configWithdrawalProfitCapSats = Sats 1500000
+  , configWithdrawalFreeSatsPlaythrough = 3
+  , configWithdrawalMinDistinctOpponents = 5
+  , configWithdrawalWinningsHoldSecs = 86400 -- a day
+  , configFreeSatsCheckIntervalSecs = 86400 -- a day
   , configWalletInvoiceExpirySecs = 3600
   , configWalletRecordsPerPage = 10
   , configLNBitsURL = BaseUrl Http "127.0.0.1" 5000 ""
@@ -335,6 +366,28 @@ everifyWalletConfig config
       , require (configWalletInvoiceExpirySecs config > 0)
           "WALLET_INVOICE_EXPIRY_SECS must be above 0: an invoice would be \
           \advertised as expired as soon as it is created"
+      -- the four limits on what an account, which has staked free sats, may
+      -- send beyond its deposits. Each of them is the whole of one check,
+      -- so a value, which switches it off, is refused here rather than
+      -- leaving a check, which the code still runs and nothing can fail
+      , require (configWithdrawalProfitCapSats config > Sats 0)
+          "WITHDRAWAL_PROFIT_CAP_SATS must be above 0: nothing won on top \
+          \of a stake could ever be sent out"
+      , require (configWithdrawalProfitCapSats config <= maxStorableSats)
+          "WITHDRAWAL_PROFIT_CAP_SATS must not be above the largest amount \
+          \the DB stores"
+      , require (configWithdrawalFreeSatsPlaythrough config > 0)
+          "WITHDRAWAL_FREE_SATS_PLAYTHROUGH must be above 0: the gift \
+          \could be won with and sent out without being staked at all"
+      , require (configWithdrawalMinDistinctOpponents config > 0)
+          "WITHDRAWAL_MIN_DISTINCT_OPPONENTS must be above 0: winnings, \
+          \which were all won against one account, would be sendable"
+      , require (configWithdrawalWinningsHoldSecs config > 0)
+          "WITHDRAWAL_WINNINGS_HOLD_SECS must be above 0: a win could be \
+          \sent out in the moment it was won"
+      , require (configFreeSatsCheckIntervalSecs config > 0)
+          "FREE_SATS_CHECK_INTERVAL_SECS must be above 0: every scheduler \
+          \tick would read every account's ledger"
       ]
       ++ if configWalletBackend config == WalletModeLNBits
            then lnbitsProblems

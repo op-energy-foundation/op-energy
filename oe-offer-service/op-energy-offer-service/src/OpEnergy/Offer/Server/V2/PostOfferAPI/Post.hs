@@ -33,6 +33,9 @@ import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLog
 import           OpEnergy.Offer.Server.V1.Config(Config(..))
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
+import           Data.OpEnergy.Account.API.V2.BalanceAdjustResult
+                 ( BalanceAdjustResult(..)
+                 )
 import           Data.OpEnergy.Account.API.V2.LedgerReason(LedgerReason(..))
 import           OpEnergy.Offer.Server.V1.Offer(Offer(..), offerInfoFromEntity)
 import           OpEnergy.Offer.Server.V1.LiveEvent(LiveEvent(..))
@@ -66,7 +69,7 @@ post token PostOfferRequest{..} =
   when (blockRate <= 0) $
     throwE $ invalidRequest "blockRate must be positive"
 
-  (AccountV2.WhoAmIResult personUUIDV displayNameV _balance) <-
+  (AccountV2.WhoAmIResult personUUIDV displayNameV _balance _freeSats) <-
     ExceptT $ AccountClient.verifyAccountToken token
 
   State{ currentTip = currentTipV } <- lift ask
@@ -81,7 +84,10 @@ post token PostOfferRequest{..} =
   withLiveEventOrderE $ do
     let totalStake = makerStakeSats * totalContracts
         takerStakeSatsV = C.totalPotSats - makerStakeSats
-    Sats makerBalance <-
+    -- free sats are spent first, and the answer says which pocket paid, so
+    -- the offer can be refunded into the same one and the contracts it
+    -- creates can pay their winner in the kind their stake was made of
+    BalanceAdjustResult (Sats makerBalance) makerFundsKindV <-
       ExceptT $ AccountClient.deductBalance personUUIDV (Sats totalStake)
         Stake Nothing -- the offer has no id until it is inserted below
 
@@ -96,6 +102,7 @@ post token PostOfferRequest{..} =
           , offerValidTillBlock = validTillBlock
           , offerMakerStakeSats = makerStakeSats
           , offerTakerStakeSats = takerStakeSatsV
+          , offerFundsKind = makerFundsKindV
           , offerBlockRate = blockRate
           , offerTotalContracts = verifyNatural (fromIntegral totalContracts)
           , offerMatchedCount = verifyNatural 0
@@ -118,7 +125,8 @@ post token PostOfferRequest{..} =
           { offers = [ offerInfo ] }
       Left insertErr -> do
         ecredited <- lift
-          $ AccountClient.creditBalance personUUIDV (Sats totalStake) Refund Nothing
+          $ AccountClient.creditBalance personUUIDV (Sats totalStake)
+            (Sats totalStake) makerFundsKindV Refund Nothing
         lift $ runLogging $ $(logError)
           ( "post: failed to persist offer row after staking "
           <> tshow totalStake

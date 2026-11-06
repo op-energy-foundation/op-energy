@@ -172,7 +172,8 @@ authenticate
 authenticate state personV token = runAppT state $ do
   eperson <- AccountClient.verifyAccountToken token
   case eperson of
-    Right (AccountV2.WhoAmIResult personUUIDV _displayName _balance) ->
+    Right (AccountV2.WhoAmIResult personUUIDV _displayName _balance
+            _freeSats) ->
       liftIO $ STM.atomically $ TVar.writeTVar personV (Just personUUIDV)
     Left err -> do
       liftIO $ STM.atomically $ TVar.writeTVar personV Nothing

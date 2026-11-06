@@ -27,6 +27,7 @@ module OpEnergy.Error
   , offerExpired
   , offerChanged
   , cannotAcceptOwnOffer
+  , tooManyFreeSatsContractsWithSameAccount
   ) where
 
 import           Data.Text(Text)
@@ -54,6 +55,7 @@ data BadRequestError
   | OfferExpired
   | OfferChanged
   | CannotAcceptOwnOffer
+  | TooManyFreeSatsContractsWithSameAccount
 instance Show BadRequestError where
   show AuthenticationFailure = "authentication failure"
   show (InvalidRequest reason) = Text.unpack reason
@@ -65,6 +67,9 @@ instance Show BadRequestError where
   show OfferExpired = "offer has expired at the current chain tip"
   show OfferChanged = "offer has changed meanwhile, try again"
   show CannotAcceptOwnOffer = "cannot accept your own offer"
+  show TooManyFreeSatsContractsWithSameAccount =
+    "these two accounts have already shared as many contracts as free\
+    \ sats may be staked between them for now"
 
 data InternalError
   = Unspecified Text
@@ -122,6 +127,9 @@ offerChanged :: CallstackError
 offerChanged = CallstackError "" $! BadRequest OfferChanged
 cannotAcceptOwnOffer :: CallstackError
 cannotAcceptOwnOffer = CallstackError "" $! BadRequest CannotAcceptOwnOffer
+tooManyFreeSatsContractsWithSameAccount :: CallstackError
+tooManyFreeSatsContractsWithSameAccount =
+  CallstackError "" $! BadRequest TooManyFreeSatsContractsWithSameAccount
 
 -- | converts Error into printable version
 errorToServerError :: Error -> (ServerError, Text)
@@ -133,6 +141,8 @@ errorToServerError (BadRequest OfferFilled) = (err409, tshow OfferFilled)
 errorToServerError (BadRequest OfferExpired) = (err409, tshow OfferExpired)
 errorToServerError (BadRequest OfferChanged) = (err409, tshow OfferChanged)
 errorToServerError (BadRequest CannotAcceptOwnOffer) = (err403, tshow CannotAcceptOwnOffer)
+errorToServerError (BadRequest TooManyFreeSatsContractsWithSameAccount) =
+  (err403, tshow TooManyFreeSatsContractsWithSameAccount)
 errorToServerError (BadRequest specificError) = (err400, tshow specificError)
 errorToServerError (Internal specificError) = (err500, tshow specificError)
 errorToServerError (AccountServiceUnavailable reason) = (err502, "account service unavailable: " <> reason)

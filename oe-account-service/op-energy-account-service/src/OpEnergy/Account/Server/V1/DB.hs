@@ -49,6 +49,8 @@ import qualified OpEnergy.Account.Server.V1.DB.Migrations.DropOversizedWalletPay
                  as DropOversizedWalletPaymentInvoices
 import qualified OpEnergy.Account.Server.V1.DB.Migrations.BackfillLedgerOpeningBalance.Migration
                  as BackfillLedgerOpeningBalance
+import qualified OpEnergy.Account.Server.V1.DB.Migrations.MarkOpeningBalanceFree.Migration
+                 as MarkOpeningBalanceFree
 import           OpEnergy.Account.Server.V1.Person
 import           OpEnergy.BlockTimeStrike.Server.V1.DB.Migrations.SplitBlockTimeStrikeObservedFromBlockTimeStrike
                    ( transformBlockTimeStrikeGuessGuessFromTextToBool
@@ -156,6 +158,7 @@ accountDBMigrations =
   [ (\_-> return ()) -- dummy, for compatibility reasons
   , BackfillLedgerOpeningBalance.migration
   , DropOversizedWalletPaymentInvoices.migration
+  , MarkOpeningBalanceFree.migration
   ]
 
 -- | custom migration procedure

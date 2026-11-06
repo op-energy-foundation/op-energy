@@ -58,6 +58,15 @@ data Config = Config
     -- mediantime of a contract's target block during settlement
   , configPlatformFeeSats :: Word64
     -- ^ fee deducted from the pot of every settled contract
+  , configFreeSatsPairMatchLimit :: Word64
+    -- ^ how many contracts two accounts may share within
+    -- 'configFreeSatsPairMatchWindowSecs' when either side is staking free
+    -- sats. A farm of accounts, which were all given free sats, turns them
+    -- into money by taking both sides of its own contracts, which means the
+    -- same two accounts meeting again and again. 0 switches the check off
+  , configFreeSatsPairMatchWindowSecs :: Word64
+    -- ^ how far back 'configFreeSatsPairMatchLimit' counts the contracts
+    -- two accounts have already shared
   }
   deriving Show
 instance FromJSON Config where
@@ -77,6 +86,10 @@ instance FromJSON Config where
     <*> ((v .:? "BLOCKSPAN_WS_URL" .!= (showBaseUrl $ configBlockspanWebsocketURL defaultConfig)) >>= parseWebsocketUrl)
     <*> ((v .:? "BLOCKSPAN_API_URL" .!= (showBaseUrl $ configBlockspanURL defaultConfig)) >>= parseBaseUrl)
     <*> ( v .:? "PLATFORM_FEE_SATS" .!= (configPlatformFeeSats defaultConfig))
+    <*> ( v .:? "FREE_SATS_PAIR_MATCH_LIMIT"
+          .!= (configFreeSatsPairMatchLimit defaultConfig))
+    <*> ( v .:? "FREE_SATS_PAIR_MATCH_WINDOW_SECS"
+          .!= (configFreeSatsPairMatchWindowSecs defaultConfig))
 
 defaultConfig:: Config
 defaultConfig = Config
@@ -95,6 +108,8 @@ defaultConfig = Config
   , configBlockspanWebsocketURL = BaseUrl Http "127.0.0.1" 8999 "/api/v1/ws"
   , configBlockspanURL = BaseUrl Http "127.0.0.1" 8999 ""
   , configPlatformFeeSats = 1000
+  , configFreeSatsPairMatchLimit = 3
+  , configFreeSatsPairMatchWindowSecs = 604800 -- a week
   }
 
 -- | parses websocket URL. The websocket client does not support TLS, so
