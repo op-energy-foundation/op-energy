@@ -57,14 +57,16 @@ data Config = Config
     -- ^ base URL of blockspan service's HTTP API, used to get the
     -- mediantime of a contract's target block during settlement
   , configPlatformFeeSats :: Word64
-  , configFreeSatsPairMatchLimit :: Word64
-  -- ^ how many contracts two accounts may share within
-  -- 'configFreeSatsPairMatchWindowSecs' when either side is staking free
-  -- sats. A farm of accounts, which were all given free sats, turns them
-  -- into money by taking both sides of its own contracts, which means the
-  -- same two accounts meeting again and again
-  , configFreeSatsPairMatchWindowSecs :: Word64
     -- ^ fee deducted from the pot of every settled contract
+  , configFreeSatsPairMatchLimit :: Word64
+    -- ^ how many contracts two accounts may share within
+    -- 'configFreeSatsPairMatchWindowSecs' when either side is staking free
+    -- sats. A farm of accounts, which were all given free sats, turns them
+    -- into money by taking both sides of its own contracts, which means the
+    -- same two accounts meeting again and again. 0 switches the check off
+  , configFreeSatsPairMatchWindowSecs :: Word64
+    -- ^ how far back 'configFreeSatsPairMatchLimit' counts the contracts
+    -- two accounts have already shared
   }
   deriving Show
 instance FromJSON Config where
