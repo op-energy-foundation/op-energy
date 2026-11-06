@@ -13,8 +13,9 @@ import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Logger(logError)
 import           Control.Monad.Trans (lift)
-import           Control.Monad.Trans.Except (ExceptT(..), runExceptT)
-import           Data.Maybe(fromMaybe)
+import           Control.Monad.Trans.Except (ExceptT(..), runExceptT, throwE)
+import           Control.Monad(when)
+import           Data.Maybe(fromMaybe, isNothing)
 import           Data.Text(Text)
 import           Data.Time.Clock(getCurrentTime)
 import           Data.Time.Clock.POSIX(utcTimeToPOSIXSeconds)
@@ -45,7 +46,7 @@ import           OpEnergy.Account.Server.V1.Person
 
 import           OpEnergy.Error
                  ( eitherThrowJSON, runExceptPrefixT
-                 , CallstackError, accountNotFound
+                 , CallstackError, accountNotFound, stakeFundsKindRequired
                  )
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 
@@ -53,6 +54,25 @@ import           OpEnergy.Account.Server.V2.AccountService.CheckInternalSecret
                  ( checkInternalServiceSecret
                  )
 
+
+-- | whether a reason describes a movement, which returns a stake.
+--
+-- A payout and a refund both hand back sats, which were staked, so both
+-- have to say which pocket that stake came out of. A deposit does not:
+-- nobody staked it.
+--
+-- Written out per reason rather than with a catch-all, so a reason added
+-- later does not silently inherit an answer.
+returnsAStake :: LedgerReason -> Bool
+returnsAStake Winnings       = True
+returnsAStake Refund         = True
+returnsAStake Deposit        = False
+returnsAStake Withdrawal     = False
+returnsAStake Stake          = False
+returnsAStake OpeningBalance = False
+-- a release moves sats between an account's own pockets rather than
+-- returning a stake, and it is this service, which writes it
+returnsAStake Release        = False
 
 -- | V2 internal/balance/credit endpoint
 creditBalanceHandler
@@ -97,6 +117,14 @@ creditBalance secret request =
       reasonV = fromMaybe Refund (reason request)
       stakeBack = min amount $ fromMaybe (Sats 0) (stakeSats request)
       stakeKind = fromMaybe RealSats (stakeFundsKind request)
+  -- a payout and a refund both return a stake, and which pocket that stake
+  -- was paid from decides which pocket the sats go back into. A caller,
+  -- which does not say, is refused rather than guessed at: the guess is
+  -- the account's own money, and that is the one answer, which turns the
+  -- gift into sats, which can be withdrawn. A deposit has no stake behind
+  -- it and is left alone
+  when (returnsAStake reasonV && isNothing (stakeFundsKind request))
+    $ throwE stakeFundsKindRequired
   nowUTC <- liftIO getCurrentTime
   -- the account is looked up in the same transaction as the change, so it
   -- cannot be gone between finding it and crediting it

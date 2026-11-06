@@ -29,6 +29,7 @@ module OpEnergy.Error
   , secretNotRecoverable
   , insufficientBalance
   , freeSatsNotWithdrawable
+  , stakeFundsKindRequired
   , withdrawalOverProfitCap
   , withdrawalPlaythroughNotMet
   , withdrawalNeedsMoreOpponents
@@ -74,6 +75,7 @@ data BadRequestError
   | SecretNotRecoverable
   | InsufficientBalance
   | FreeSatsNotWithdrawable
+  | StakeFundsKindRequired
   | WithdrawalOverProfitCap
   | WithdrawalPlaythroughNotMet
   | WithdrawalNeedsMoreOpponents
@@ -112,6 +114,9 @@ instance Show BadRequestError where
     \ different accounts"
   show WithdrawalWinningsOnHold =
     "winnings wait a while before they can be sent out"
+  show StakeFundsKindRequired =
+    "a payout or a refund has to say which pocket the stake it returns\
+    \ was paid from"
   show FreeSatsNotWithdrawable =
     "free sats can be staked but not withdrawn: only sats, which were\
     \ paid in or won on top of a stake, can be sent"
@@ -210,6 +215,10 @@ insufficientBalance = CallstackError "" $! BadRequest InsufficientBalance
 freeSatsNotWithdrawable :: CallstackError
 freeSatsNotWithdrawable =
   CallstackError "" $! BadRequest FreeSatsNotWithdrawable
+
+stakeFundsKindRequired :: CallstackError
+stakeFundsKindRequired =
+  CallstackError "" $! BadRequest StakeFundsKindRequired
 
 withdrawalOverProfitCap :: CallstackError
 withdrawalOverProfitCap =
