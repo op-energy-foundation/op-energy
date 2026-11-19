@@ -28,6 +28,7 @@ import           Data.OpEnergy.Account.API.V2.CreateInvoiceRequest
 import           Data.OpEnergy.Account.API.V2.CreateInvoiceResult
                  ( CreateInvoiceResult(..)
                  )
+import           Data.OpEnergy.Account.API.V2.Note (Note(..))
 
 import           OpEnergy.Account.Server.V1.AccountService
                  ( mgetPersonByAccountToken
@@ -105,7 +106,9 @@ createInvoice token (CreateInvoiceRequest requestAmountSats requestNote) =
   ecreated <- lift $ liftIO $ walletCreateInvoice walletV $ CreateInvoiceParams
     { createInvoicePersonId = key
     , createInvoiceAmountSats = amount
-    , createInvoiceNote = requestNote
+    -- the note is an API type, which has been checked, and the wallet and
+    -- the DB take the text it carries
+    , createInvoiceNote = fmap unNote requestNote
     , createInvoiceExpirySecs = configWalletInvoiceExpirySecs config
     , createInvoiceNow = now
     }
