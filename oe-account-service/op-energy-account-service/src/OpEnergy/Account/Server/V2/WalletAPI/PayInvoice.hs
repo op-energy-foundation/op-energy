@@ -34,7 +34,6 @@ import           Data.Text.Show (tshow)
 import           Data.Time.Clock.POSIX (getPOSIXTime)
 import           Data.Word (Word64)
 import           Database.Persist (Entity(..))
-import           Database.Persist.Postgresql (runSqlPersistMPool)
 
 import qualified Data.OpEnergy.Account.API.V1.Account as API
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
@@ -49,7 +48,7 @@ import           OpEnergy.Account.Server.V1.AccountService
                  ( mgetPersonByAccountToken
                  )
 import           OpEnergy.Account.Server.V1.Class
-                 ( AppM, State(..), profile, runLogging
+                 ( AppM, State(..), profile, runLogging, withDBTransaction
                  )
 import           OpEnergy.Account.Server.V1.Config
                  ( Config(..)
@@ -67,7 +66,7 @@ import           OpEnergy.Account.Server.V1.WalletRateLimit
 import           OpEnergy.Error
                  ( eitherThrowJSON, runExceptPrefixT
                  , CallstackError, accountNotFound, describeError
-                 , eitherException, insufficientBalance, unspecified
+                 , insufficientBalance, unspecified
                  , walletAmountAboveMaximum, walletAmountBelowMinimum
                  , walletAmountRequired, walletInvoiceAlreadyPaid
                  , walletInvoiceNotFound, walletSelfPaymentNotAllowed
@@ -96,7 +95,7 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
     in profile name $ runExceptPrefixT name $ do
   (Entity key person) <- exceptTMaybeT accountNotFound
     $ mgetPersonByAccountToken token
-  State{ config = config, accountDBPool = pool, wallet = walletV
+  State{ config = config, wallet = walletV
        , walletAttempts = attemptsV } <- lift ask
   -- an account, which can not cover the smallest amount this wallet takes,
   -- can not pay any invoice. It is refused before the wallet is asked to
@@ -189,13 +188,16 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
   -- creditedAt is unset, so a credit written beside the claim is made
   -- again by the next tick
   when (isJust (paidInvoiceRecipientPersonId paid)) $ do
-    -- guarded: the payment has already happened, so a pool failure here
-    -- must be written down rather than thrown, which would answer the
-    -- payer with a bare 500 and name nothing. creditWaitingDeposits
-    -- credits it on the next tick either way
-    ecredited <- fmap (either (Left . unspecified) id) $ liftIO
-      $ eitherException $ flip runSqlPersistMPool pool
+    -- withDBTransaction: the payment has already happened, so a pool
+    -- failure here must be written down rather than thrown, which would
+    -- answer the payer with a bare 500 and name nothing.
+    -- creditWaitingDeposits credits it on the next tick either way
+    mcredited <- lift $ withDBTransaction ""
       $ creditDepositOnceTx (paidInvoicePaymentHash paid) now
+    let ecredited = maybe
+          (Left (unspecified "the transaction, which credits it, failed"))
+          id
+          mcredited
     logUnreconciled
       ( "paid " <> tshow (unSats (paidInvoiceAmountSats paid))
       <> " sats, but crediting the receiving account failed"
