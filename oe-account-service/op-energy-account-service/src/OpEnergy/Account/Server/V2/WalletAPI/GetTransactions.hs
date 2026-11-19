@@ -36,6 +36,9 @@ import           Data.OpEnergy.Account.API.V2.WalletTransactionsResult
                  ( WalletTransactionsResult(..)
                  )
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
+import           Data.OpEnergy.Account.API.V2.LedgerReference
+                 ( LedgerReference(..)
+                 )
 import           Data.OpEnergy.Account.API.V2.WalletTransaction
                  ( WalletTransaction(..)
                  )
@@ -140,7 +143,8 @@ pageOffset page recordsPerPage
 -- every account: from the gap between two of its own rows an account could
 -- read how many rows every other account had written in between, which is a
 -- platform-wide activity and volume oracle. Salted, so the small integers
--- behind it can not simply be hashed back
+-- behind it can not simply be hashed back.
+--
 opaqueId :: Text -> Key LedgerEntry -> Text
 opaqueId salt key = TE.decodeUtf8 $ B16.encode $ BS.take 16 $ SHA256.hash
   $ TE.encodeUtf8 (salt <> ":ledgerEntry:" <> Text.pack (show (fromSqlKey key)))
@@ -153,7 +157,8 @@ renderWalletTransaction salt (Entity key entry) = WalletTransaction
   , walletTransactionAmountSats = signed (ledgerEntryAmountSats entry)
   , walletTransactionReason = ledgerEntryReason entry
   , walletTransactionBalanceAfter = ledgerEntryBalanceAfter entry
-  , walletTransactionReference = ledgerEntryReference entry
+  , walletTransactionReference =
+      fmap LedgerReference (ledgerEntryReference entry)
   , walletTransactionCreatedAt = ledgerEntryCreatedAt entry
   }
   where
