@@ -13,6 +13,8 @@ module Data.OpEnergy.Offer.API.V1.ContractInfo
   , defaultContractID
   , ContractInfo(..)
   , defaultContractInfo
+  , PaginatedContracts(..)
+  , defaultPaginatedContracts
   ) where
 
 import           Data.Swagger
@@ -113,4 +115,28 @@ defaultContractInfo = ContractInfo
   , createdAtBlock = defaultBlockHeight
   , matchedAt = read "2026-08-14 12:00:00 UTC"
   , settledAt = Nothing
+  }
+
+-- | One page of a contract listing, with the count of every contract the
+-- filter matches so a caller can tell how much is left to page through.
+data PaginatedContracts = PaginatedContracts
+  { contracts  :: [ContractInfo]
+  , page       :: Word64
+  , limit      :: Word64
+  , totalCount :: Word64
+  }
+  deriving (Show, Generic, Typeable)
+instance ToJSON   PaginatedContracts
+instance FromJSON PaginatedContracts
+instance ToSchema PaginatedContracts where
+  declareNamedSchema proxy = genericDeclareNamedSchema defaultSchemaOptions proxy
+    & mapped.schema.description ?~ "PaginatedContracts schema"
+    & mapped.schema.example ?~ toJSON defaultPaginatedContracts
+
+defaultPaginatedContracts :: PaginatedContracts
+defaultPaginatedContracts = PaginatedContracts
+  { contracts = [ defaultContractInfo ]
+  , page = 1
+  , limit = 20
+  , totalCount = 1
   }
