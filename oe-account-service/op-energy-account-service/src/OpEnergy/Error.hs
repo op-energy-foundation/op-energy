@@ -19,6 +19,7 @@ module OpEnergy.Error
 
   , authenticationFailure
   , accountNotFound
+  , accountBanned
   , passwordNotSet
   , invalidCredentials
   , displayNameAlreadyTaken
@@ -57,7 +58,7 @@ import           Control.Exception.Safe (SomeException)
 import qualified Control.Exception.Safe as E
 
 import           Servant
-                 ( ServerError(..), err400, err401, err500
+                 ( ServerError(..), err400, err401, err403, err500
                  )
 import           Data.Text.Show( tshow)
 import           Data.OpEnergy.API.V1.Error(throwJSON)
@@ -65,6 +66,7 @@ import           Data.OpEnergy.API.V1.Error(throwJSON)
 data BadRequestError
   = AuthenticationFailure
   | AccountNotFound
+  | AccountBanned
   | PasswordNotSet
   | InvalidCredentials
   | DisplayNameAlreadyTaken
@@ -99,6 +101,7 @@ instance Show BadRequestError where
   show StrikeNotFound = "strike not found"
   show AuthenticationFailure = "authentication failure"
   show AccountNotFound = "account not found with given token"
+  show AccountBanned = "this account has been banned"
   show PasswordNotSet = "account has no password set"
   show InvalidCredentials = "invalid credentials"
   show DisplayNameAlreadyTaken = "display name already taken"
@@ -193,6 +196,8 @@ authenticationFailure :: CallstackError
 authenticationFailure = CallstackError "" $! BadRequest AuthenticationFailure
 accountNotFound :: CallstackError
 accountNotFound = CallstackError "" $! BadRequest AccountNotFound
+accountBanned :: CallstackError
+accountBanned = CallstackError "" $! BadRequest AccountBanned
 passwordNotSet :: CallstackError
 passwordNotSet = CallstackError "" $! BadRequest PasswordNotSet
 invalidCredentials :: CallstackError
@@ -277,6 +282,9 @@ tooManyRequests = ServerError
 -- | converts Error into printable version
 errorToServerError :: Error -> (ServerError, Text)
 errorToServerError (BadRequest InvalidServiceSecret) = (err401, tshow InvalidServiceSecret)
+-- a ban is a refusal to serve this account at all, not a fault in the
+-- request, so it is answered as forbidden rather than as a bad request
+errorToServerError (BadRequest AccountBanned) = (err403, tshow AccountBanned)
 -- a refusal for asking too often is answered as such, so a client can
 -- tell it apart from a request, which is wrong, and wait rather than
 -- change what it sends

@@ -82,6 +82,7 @@ Person
   balance Sats default=300000 -- sandbox wallet balance, in sats
   freeSats Sats default=0 -- how much of 'balance' was given rather than paid in. Free sats can be staked, but never withdrawn, so a withdrawal may only spend 'balance' - 'freeSats'. Always <= balance
   giftWonSats Sats default=0 -- how much of 'balance' was won while staking the gift. Real sats, which the gift produced, so they can be withdrawn, but only once the withdrawal limits are cleared: they are the way free sats turn into money. 'freeSats' + 'giftWonSats' is always <= balance
+  bannedAt POSIXTime Maybe -- when this account was banned, Nothing while it is not. A ban is permanent: it is cleared by hand in psql or not at all
   -- metadata
   creationTime POSIXTime
   lastSeenTime POSIXTime -- timestamp of the last seen time. By default the same as creationTime
@@ -171,6 +172,7 @@ modelApiPerson v = Person
   , personEmail = AccountAPI.email v
   , personDisplayName = AccountAPI.displayName v
   , personRole = User -- API-level Person does not carry a role
+  , personBannedAt = Nothing -- nor whether it is banned
   , personBalance = Sats 0 -- API-level Person does not carry balance
   , personFreeSats = Sats 0 -- nor how much of it was given
   , personGiftWonSats = Sats 0 -- nor how much of it the gift won

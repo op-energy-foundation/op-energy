@@ -106,6 +106,7 @@ register mRequestedName = do
           , personDisplayName = chosenName
           -- every account starts as a plain user: a role is granted by hand
           , personRole = User
+          , personBannedAt = Nothing
           , personHashedSecret = hashedSecret
           , personHashedPassword = Nothing
           , personEncryptedSecret = Just encryptedSecret
@@ -214,7 +215,7 @@ mgetPersonByDisplayName displayName = do
           update key [ PersonLastSeenTime =. now ]
           return (Just (Entity key person { personLastSeenTime = now}))
 
--- | 2 * O(ln n): lookup + update. This function returns Nothing if there is no Person exist in DB with given AccountToken. Otherwise, it will update LastSeenTime to the current UTC time and returns (Entity Person)
+-- | 2 * O(ln n): lookup + update. This function returns Nothing if there is no Person exist in DB with given AccountToken, or if that Person is banned. Otherwise, it will update LastSeenTime to the current UTC time and returns (Entity Person)
 -- this function is expected to be used by other services in order to authenticate user
 mgetPersonByAccountToken :: (MonadIO m, MonadMonitor m) => API.AccountToken-> AppT m (Maybe (Entity Person))
 mgetPersonByAccountToken token = do
@@ -241,7 +242,14 @@ mgetPersonByAccountToken token = do
         nowUTC <- liftIO getCurrentTime
         let now = utcTimeToPOSIXSeconds nowUTC
         P.observeDuration accountDBLookup $ liftIO $! flip runSqlPersistMPool pool $ do
-          mperson <- selectFirst [ PersonUuid ==. uuid, PersonLoginsCount ==. loginsCount ] []
+          -- a banned account is not found at all, so every endpoint, which
+          -- authenticates by token -- in this service, and in the offer
+          -- service, which asks this one -- refuses it from here on
+          mperson <- selectFirst
+            [ PersonUuid ==. uuid
+            , PersonLoginsCount ==. loginsCount
+            , PersonBannedAt ==. Nothing
+            ] []
           case mperson of
             Nothing -> return Nothing
             Just (Entity key person) -> do

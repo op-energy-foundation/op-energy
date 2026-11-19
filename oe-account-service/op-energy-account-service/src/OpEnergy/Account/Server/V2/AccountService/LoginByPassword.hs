@@ -8,6 +8,7 @@ module OpEnergy.Account.Server.V2.AccountService.LoginByPassword
   ) where
 
 import           Control.Monad (when)
+import           Data.Maybe (isJust)
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Logger(logError)
@@ -43,6 +44,7 @@ import           OpEnergy.Account.Server.V1.Person
 import           OpEnergy.Error
                  ( eitherThrowJSON, runExceptPrefixT
                  , CallstackError, invalidCredentials, passwordNotSet
+                 , accountBanned
                  )
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 
@@ -81,6 +83,9 @@ loginByPassword (PasswordLoginRequest dn pw) =
         (Text.encodeUtf8 storedHash)
         (Text.encodeUtf8 (unPassword pw))
   when (not valid) $ throwE invalidCredentials
+  -- checked after the password, so a wrong password tells a stranger
+  -- nothing about whether the account exists or was banned
+  when (isJust (personBannedAt person)) $ throwE accountBanned
   loginsCount <- liftIO $! P.observeDuration accountUpdateLoginsCount
     $ flip runSqlPersistMPool pool $ do
       update personKey [ PersonLoginsCount =. (personLoginsCount person + 1) ]
