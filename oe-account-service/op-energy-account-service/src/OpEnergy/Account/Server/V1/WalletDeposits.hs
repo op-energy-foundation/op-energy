@@ -3,7 +3,7 @@
  - Marking an invoice settled and crediting the balance for it are separate
  - transactions, and more than one path can arrive at the same settled
  - payment: the settle handler, a retry of it, and -- once the wallet is
- - asked what it has settled -- the scheduler. 'creditDepositOnce' is what
+ - asked what it has settled -- the scheduler. 'creditDepositOnceTx' is what
  - makes the credit happen once between them: it claims the payment by
  - writing its creditedAt, and only the claim, which wins, moves the
  - balance.
@@ -15,7 +15,7 @@
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE TemplateHaskell            #-}
 module OpEnergy.Account.Server.V1.WalletDeposits
-  ( creditDepositOnce
+  ( creditDepositOnceTx
   , creditWaitingDeposits
   ) where
 
@@ -42,10 +42,10 @@ import           Data.OpEnergy.Account.API.V2.PaymentHash (PaymentHash(..))
 import           OpEnergy.Account.Server.V1.Class
                  ( AppT, State(..), profile, runLogging
                  )
+import           OpEnergy.Account.Server.V1.Person (PersonId)
 import           OpEnergy.Account.Server.V1.LedgerEntry
                  ( LedgerDirection(..), adjustBalanceTx, ledgerReference
                  )
-import           OpEnergy.Account.Server.V1.Person (PersonId)
 import           OpEnergy.Account.Server.V1.WalletPayment
 import           OpEnergy.Error
                  ( CallstackError, describeError, eitherException
@@ -62,8 +62,8 @@ import           OpEnergy.Error
 --
 -- Example:
 --
--- > creditDepositOnce personKey paymentHash now
-creditDepositOnce
+-- > creditDepositOnceTx personKey paymentHash now
+creditDepositOnceTx
   :: MonadIO m
   => PersonId
      -- ^ the account the payment was made to. A hash alone does not name
@@ -73,14 +73,14 @@ creditDepositOnce
   -> PaymentHash
   -> POSIXTime
   -> ReaderT SqlBackend m (Either CallstackError (Maybe Sats))
-creditDepositOnce personKey paymentHashV now = runExceptT $ do
+creditDepositOnceTx personKey paymentHash now = runExceptT $ do
   -- the row is read before it is claimed and the claim names its id, so
   -- what is credited is the row, which was claimed. Deriving it again
   -- from the hash afterwards would not: a payment, which is credited,
   -- records the second it happened in, so a second read can not tell two
   -- of them apart
   mwaiting <- lift $ selectFirst
-    [ WalletPaymentPaymentHash ==. paymentHashV
+    [ WalletPaymentPaymentHash ==. paymentHash
     -- with the account, so this names the one row, which
     -- UniqueWalletPaymentHashPersonDirection makes unique
     , WalletPaymentPersonId ==. personKey
@@ -111,7 +111,7 @@ creditDepositOnce personKey paymentHashV now = runExceptT $ do
             Credit
             (walletPaymentAmountSats payment)
             Deposit
-            (Just (ledgerReference "payment" (unPaymentHash paymentHashV)))
+            (Just (ledgerReference "payment" (unPaymentHash paymentHash)))
             now
           case ebalance of
             -- the claim goes back with it, so the payment stays waiting
@@ -172,7 +172,7 @@ creditWaitingDeposits =
       -- guarded per payment, so one, which cannot be credited, is skipped
       -- and the rest of the tick still runs
       ecredited <- liftIO $ eitherException $ flip runSqlPersistMPool pool
-        $ creditDepositOnce (walletPaymentPersonId payment)
+        $ creditDepositOnceTx (walletPaymentPersonId payment)
             (walletPaymentPaymentHash payment) now
       case ecredited of
         -- Nothing means somebody else claimed it first, which is not news
