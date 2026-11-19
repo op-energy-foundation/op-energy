@@ -21,8 +21,8 @@ import qualified OpEnergy.Offer.Server.V2.CancelAPI as CancelAPI
 import qualified OpEnergy.Offer.Server.V2.AcceptAPI as AcceptAPI
 
 -- | V1 offer server wiring. OffersAPI is one combined sub-API:
--- post :<|> cancel :<|> accept :<|> mine :<|> list :<|> getById
--- :<|> getDetails
+-- post :<|> cancel :<|> accept :<|> mine :<|> list :<|> contracts
+-- :<|> getById :<|> getDetails
 offerServer :: ServerT OfferV1API (AppT Handler)
 offerServer
   =    PostOfferAPI.postHandler
@@ -30,5 +30,6 @@ offerServer
   :<|> AcceptAPI.acceptHandler
   :<|> OffersAPI.getMineHandler
   :<|> OffersAPI.getListHandler
+  :<|> OffersAPI.getContractsHandler
   :<|> OffersAPI.getByIdHandler
   :<|> OffersAPI.getDetailsHandler

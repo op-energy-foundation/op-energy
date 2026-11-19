@@ -2,6 +2,7 @@
 module OpEnergy.Offer.Server.V2.OffersAPI
   ( getMineHandler
   , getListHandler
+  , getContractsHandler
   , getByIdHandler
   , getDetailsHandler
   ) where
@@ -17,6 +18,12 @@ import           Data.OpEnergy.Offer.API.V1.OfferInfo
 import           Data.OpEnergy.Offer.API.V1.OfferDetails
                  ( OfferDetails
                  )
+import           Data.OpEnergy.Offer.API.V1.ContractInfo
+                 ( PaginatedContracts
+                 )
+import           Data.OpEnergy.Offer.API.V1.ContractStatus
+                 ( ContractStatus
+                 )
 import           Data.OpEnergy.API.V1.Positive
 
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountV1
@@ -25,6 +32,7 @@ import           OpEnergy.Offer.Server.V1.Class (AppM)
 
 import qualified OpEnergy.Offer.Server.V2.OffersAPI.GetMine as GetMine
 import qualified OpEnergy.Offer.Server.V2.OffersAPI.GetList as GetList
+import qualified OpEnergy.Offer.Server.V2.OffersAPI.GetContracts as GetContracts
 import qualified OpEnergy.Offer.Server.V2.OffersAPI.GetById as GetById
 import qualified OpEnergy.Offer.Server.V2.OffersAPI.GetDetails as GetDetails
 
@@ -40,6 +48,13 @@ getListHandler
   -> Maybe (Positive Int)
   -> AppM PaginatedOffers
 getListHandler = GetList.getListHandler
+
+getContractsHandler
+  :: Maybe ContractStatus
+  -> Maybe (Positive Int)
+  -> Maybe (Positive Int)
+  -> AppM PaginatedContracts
+getContractsHandler = GetContracts.getContractsHandler
 
 getByIdHandler
   :: OfferID
