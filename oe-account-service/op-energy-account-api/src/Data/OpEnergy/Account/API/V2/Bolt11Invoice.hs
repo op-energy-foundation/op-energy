@@ -9,7 +9,6 @@ module Data.OpEnergy.Account.API.V2.Bolt11Invoice
   ( Bolt11Invoice(..)
   , defaultBolt11Invoice
   , maxInvoiceLength
-  , verifyBolt11Invoice
   , everifyBolt11Invoice
   ) where
 
@@ -42,10 +41,14 @@ minInvoiceLength, maxInvoiceLength :: Int
 minInvoiceLength = 20
 maxInvoiceLength = 2048
 
--- | checks the shape of an invoice. 'FromJSON' and 'FromHttpApiData' both
--- go through it, so an unchecked value can not enter the service through the
--- API. The shape is all it checks: what the invoice says is the wallet
--- backend's answer, never the client's
+-- | checks the shape of an invoice. 'FromJSON' goes through it, so an
+-- unchecked value can not enter the service through the API. The shape is
+-- all it checks: what the invoice says is the wallet backend's answer, never
+-- the client's.
+--
+-- A caller, which has an invoice from the wallet rather than from a client,
+-- decides what an unexpected shape means to it: there is no verifier here,
+-- which calls 'error' on its behalf
 everifyBolt11Invoice :: Text -> Either Text Bolt11Invoice
 everifyBolt11Invoice raw
   | Text.length cleaned < minInvoiceLength =
@@ -68,11 +71,6 @@ everifyBolt11Invoice raw
     -- wallets copy invoices with a "lightning:" scheme and in upper case
     cleaned = maybe lowered id (Text.stripPrefix "lightning:" lowered)
     lowered = Text.map toLower (Text.strip raw)
-
--- | 'everifyBolt11Invoice', which fails instead of returning an error
-verifyBolt11Invoice :: Text -> Bolt11Invoice
-verifyBolt11Invoice raw =
-  either (error . Text.unpack) id (everifyBolt11Invoice raw)
 
 instance ToJSON Bolt11Invoice where
   toJSON = toJSON . unBolt11Invoice
