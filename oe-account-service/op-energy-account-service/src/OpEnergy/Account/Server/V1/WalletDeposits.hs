@@ -3,7 +3,7 @@
  - Marking an invoice settled and crediting the balance for it are separate
  - transactions, and more than one path can arrive at the same settled
  - payment: the settle handler, a retry of it, and -- once the wallet is
- - asked what it has settled -- the scheduler. 'creditDepositOnce' is what
+ - asked what it has settled -- the scheduler. 'creditDepositOnceTx' is what
  - makes the credit happen once between them: it claims the payment by
  - writing its creditedAt, and only the claim, which wins, moves the
  - balance.
@@ -15,7 +15,7 @@
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE TemplateHaskell            #-}
 module OpEnergy.Account.Server.V1.WalletDeposits
-  ( creditDepositOnce
+  ( creditDepositOnceTx
   , creditWaitingDeposits
   ) where
 
@@ -61,20 +61,20 @@ import           OpEnergy.Error
 --
 -- Example:
 --
--- > creditDepositOnce paymentHash now
-creditDepositOnce
+-- > creditDepositOnceTx paymentHash now
+creditDepositOnceTx
   :: MonadIO m
   => PaymentHash
   -> POSIXTime
   -> ReaderT SqlBackend m (Either CallstackError (Maybe Sats))
-creditDepositOnce paymentHashV now = runExceptT $ do
+creditDepositOnceTx paymentHash now = runExceptT $ do
   -- the row is read before it is claimed and the claim names its id, so
   -- what is credited is the row, which was claimed. Deriving it again
   -- from the hash afterwards would not: a payment, which is credited,
   -- records the second it happened in, so a second read can not tell two
   -- of them apart
   mwaiting <- lift $ selectFirst
-    [ WalletPaymentPaymentHash ==. paymentHashV
+    [ WalletPaymentPaymentHash ==. paymentHash
     , WalletPaymentDirection ==. Incoming
     -- only a payment, which has been paid: the status is what says the
     -- sats arrived, and crediting one, which has not, invents them
@@ -102,7 +102,7 @@ creditDepositOnce paymentHashV now = runExceptT $ do
             Credit
             (walletPaymentAmountSats payment)
             Deposit
-            (Just (ledgerReference "payment" (unPaymentHash paymentHashV)))
+            (Just (ledgerReference "payment" (unPaymentHash paymentHash)))
             now
           case ebalance of
             -- the claim goes back with it, so the payment stays waiting
@@ -163,7 +163,7 @@ creditWaitingDeposits =
       -- guarded per payment, so one, which cannot be credited, is skipped
       -- and the rest of the tick still runs
       ecredited <- liftIO $ eitherException $ flip runSqlPersistMPool pool
-        $ creditDepositOnce (walletPaymentPaymentHash payment) now
+        $ creditDepositOnceTx (walletPaymentPaymentHash payment) now
       case ecredited of
         -- Nothing means somebody else claimed it first, which is not news
         Right (Right _) -> return ()

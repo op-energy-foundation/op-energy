@@ -59,7 +59,7 @@ import           OpEnergy.Account.Server.V1.Person
                  )
 import           OpEnergy.Account.Server.V1.Wallet.Class
 import           OpEnergy.Account.Server.V1.WalletDeposits
-                 ( creditDepositOnce
+                 ( creditDepositOnceTx
                  )
 import           OpEnergy.Account.Server.V1.WalletRateLimit
                  ( takeWalletAttempt
@@ -195,7 +195,7 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
     -- credits it on the next tick either way
     ecredited <- fmap (either (Left . unspecified) id) $ liftIO
       $ eitherException $ flip runSqlPersistMPool pool
-      $ creditDepositOnce (paidInvoicePaymentHash paid) now
+      $ creditDepositOnceTx (paidInvoicePaymentHash paid) now
     logUnreconciled
       ( "paid " <> tshow (unSats (paidInvoiceAmountSats paid))
       <> " sats, but crediting the receiving account failed"
