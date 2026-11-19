@@ -22,6 +22,7 @@ import qualified Data.OpEnergy.Account.API.V1.UUID as AccountAPI
 import           Data.OpEnergy.Account.API.V2.WhoAmIResult (WhoAmIResult)
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
 import           Data.OpEnergy.Account.API.V2.BalanceAdjustRequest (BalanceAdjustRequest(..))
+import           Data.OpEnergy.Account.API.V2.LedgerReference (LedgerReference(..))
 import           Data.OpEnergy.Account.API.V2.LedgerReason (LedgerReason)
 import           Data.OpEnergy.Account.API.V2.BalanceAdjustResult (BalanceAdjustResult(..))
 import qualified Data.OpEnergy.Account.Client as Client
@@ -114,8 +115,11 @@ adjustBalance clientCall classify personUUIDV amountSats reasonV referenceV = do
   State{ config = config } <- ask
   let url = configAccountServiceURL config
       secret = configInternalServiceSharedSecret config
+      -- this service names the record itself, so the reference is built
+      -- rather than read: the check its type carries is for one, which
+      -- arrives over the API
       request = BalanceAdjustRequest personUUIDV amountSats
-                  (Just reasonV) referenceV
+                  (Just reasonV) (fmap LedgerReference referenceV)
   liftIO $! E.handle onConnectException $ do
     eclientResult <- Client.withClientEither url (clientCall secret request)
     return $! either (Left . classify) (Right . (\(BalanceAdjustResult b) -> b)) eclientResult
