@@ -52,3 +52,4 @@ getMe token =
     (personDisplayName person)
     (isJust (personHashedPassword person))
     (personBalance person)
+    (personRole person)

@@ -46,6 +46,9 @@ import           Data.OpEnergy.Account.API.V1.UUID
 import           Data.OpEnergy.Account.API.V2.FundsKind
                  ( FundsKind(..)
                  )
+import           Data.OpEnergy.Account.API.V2.PersonRole
+                 ( PersonRole(..)
+                 )
 import           OpEnergy.Account.Server.V1.Config
 import           Data.OpEnergy.Account.API.V2.LedgerReason
                  ( LedgerReason(..)
@@ -101,6 +104,8 @@ register mRequestedName = do
           , personLastUpdated = now
           , personEmail = Nothing
           , personDisplayName = chosenName
+          -- every account starts as a plain user: a role is granted by hand
+          , personRole = User
           , personHashedSecret = hashedSecret
           , personHashedPassword = Nothing
           , personEncryptedSecret = Just encryptedSecret
