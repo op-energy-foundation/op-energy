@@ -93,11 +93,12 @@ takeWalletAttempt (WalletAttempts attemptsV) limit maxAccounts window now key =
           TVar.writeTVar attemptsV $! Map.insert key taken attempts
           return True
 
--- | drops the accounts, whose window is over, so the map holds the
--- accounts, which are spending now, rather than every account, which ever
--- paid. Run from the scheduler: an account, which is dropped, is counted
--- in a new window the next time it asks, which is what it would get by
--- staying
+-- | drops the accounts, whose window is over -- which is what resets what
+-- they are counted as having spent -- so the map holds the accounts, which
+-- are spending now, rather than every account, which ever paid.
+--
+-- Run from the scheduler: an account, which is dropped, is counted in a new
+-- window the next time it asks, which is what it would get by staying
 forgetFinishedWindows
   :: MonadIO m
   => WalletAttempts
