@@ -23,7 +23,7 @@ import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Logger (logError)
 import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Except (runExceptT, throwE)
-import           Control.Monad.Trans.Reader (ReaderT)
+import           Control.Monad.Trans.Reader (ReaderT, ask)
 import           Data.Int (Int64)
 import           Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
 import           Prometheus (MonadMonitor)
@@ -38,8 +38,9 @@ import           Data.OpEnergy.Account.API.V2.LedgerReason (LedgerReason(..))
 import           Data.OpEnergy.Account.API.V2.PaymentHash (PaymentHash(..))
 
 import           OpEnergy.Account.Server.V1.Class
-                 ( AppT, profile, runLogging, withDBTransaction
+                 ( AppT, State(..), profile, runLogging, withDBTransaction
                  )
+import           OpEnergy.Account.Server.V1.Config (Config(..))
 import           OpEnergy.Account.Server.V1.Person (PersonId)
 import           OpEnergy.Account.Server.V1.LedgerEntry
                  ( LedgerDirection(..), adjustBalanceTx, ledgerReference
@@ -121,11 +122,6 @@ creditDepositOnceTx personKey paymentHash now = runExceptT $ do
               throwE err
             Right balance -> return $! Just balance
 
--- | how many waiting deposits one tick credits, so the work a tick does is
--- bounded whatever has accumulated
-maxDepositsPerTick :: Int
-maxDepositsPerTick = 100
-
 -- | credits the incoming payments, which are settled and not yet credited.
 -- Run from the scheduler.
 --
@@ -146,6 +142,7 @@ creditWaitingDeposits :: (MonadIO m, MonadMonitor m) => AppT m ()
 creditWaitingDeposits =
     let name = "V1.creditWaitingDeposits"
     in profile name $ do
+  State{ config = config } <- ask
   -- withDBTransaction, as this runs on the scheduler thread and the process
   -- waits on any of its threads ending: an exception here would take the
   -- API down with it rather than skipping a tick. It logs the one it
@@ -156,7 +153,9 @@ creditWaitingDeposits =
       , WalletPaymentStatus ==. Settled
       , WalletPaymentCreditedAt ==. Nothing
       ]
-      [ Asc WalletPaymentUpdatedAt, LimitTo maxDepositsPerTick ]
+      [ Asc WalletPaymentUpdatedAt
+      , LimitTo (configWalletMaxDepositsPerTick config)
+      ]
   case mwaiting of
     Nothing -> return ()
     Just waiting -> mapM_ creditOne waiting

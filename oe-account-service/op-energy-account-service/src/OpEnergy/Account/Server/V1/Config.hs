@@ -143,6 +143,9 @@ data Config = Config
     -- ^ how long a slot, which is held for a call to the wallet, counts
     -- against the invoices an account may have at once. It stands for a
     -- call, which is in flight, so it only has to outlast that call
+  , configWalletMaxDepositsPerTick :: Int
+    -- ^ how many waiting deposits one tick credits, so the work a tick
+    -- does is bounded whatever has accumulated
   }
   deriving Show
 instance FromJSON Config where
@@ -191,6 +194,7 @@ instance FromJSON Config where
     <*> ( v .:? "WALLET_RECONCILE_INTERVAL_SECS" .!= (configWalletReconcileIntervalSecs defaultConfig))
     <*> ( v .:? "WALLET_UNKNOWN_PAYMENT_GRACE_SECS" .!= (configWalletUnknownPaymentGraceSecs defaultConfig))
     <*> ( v .:? "WALLET_INVOICE_RESERVATION_TTL_SECS" .!= (configWalletInvoiceReservationTtlSecs defaultConfig))
+    <*> ( v .:? "WALLET_MAX_DEPOSITS_PER_TICK" .!= (configWalletMaxDepositsPerTick defaultConfig))
 
 -- need to get Key from json, which represented as base64-encoded string
 instance FromJSON Key where
@@ -257,6 +261,9 @@ defaultConfig = Config
   -- a call to a wallet is answered in seconds, so a minute outlasts one
   -- and a slot, which is held by nothing, stops counting a minute later
   , configWalletInvoiceReservationTtlSecs = 60
+  -- a hundred is more than a tick is expected to find, and few enough
+  -- that crediting them does not hold the pool for the whole of a tick
+  , configWalletMaxDepositsPerTick = 100
   }
 
 -- | the largest amount, which survives a round trip through the DB:
