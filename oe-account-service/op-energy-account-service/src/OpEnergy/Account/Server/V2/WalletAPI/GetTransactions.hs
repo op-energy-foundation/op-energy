@@ -12,7 +12,6 @@ module OpEnergy.Account.Server.V2.WalletAPI.GetTransactions
   , pageOffset
   ) where
 
-import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Logger(logError)
 import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Reader (ask)
@@ -27,7 +26,6 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as B16
 import qualified Crypto.Hash.SHA256 as SHA256
 import           Database.Persist
-import           Database.Persist.Postgresql (runSqlPersistMPool)
 import           Database.Persist.Sql (fromSqlKey, rawExecute)
 
 import           Data.OpEnergy.API.V1.Natural (Natural)
@@ -51,7 +49,7 @@ import           OpEnergy.Account.Server.V1.AccountService
                  ( mgetPersonByAccountToken
                  )
 import           OpEnergy.Account.Server.V1.Class
-                 ( AppM, State(..), profile, runLogging
+                 ( AppM, State(..), profile, runLogging, withDBTransaction
                  )
 import           OpEnergy.Account.Server.V1.Config
                  ( Config(..)
@@ -59,7 +57,7 @@ import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.Account.Server.V1.LedgerEntry
 import           OpEnergy.Error
                  ( eitherThrowJSON, runExceptPrefixT
-                 , CallstackError, accountNotFound
+                 , CallstackError, accountNotFound, dbQueryError
                  )
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 
@@ -89,12 +87,12 @@ getWalletTransactions token mpage =
     in profile name $ runExceptPrefixT name $ do
   (Entity key _) <- exceptTMaybeT accountNotFound
     $ mgetPersonByAccountToken token
-  State{ config = config, accountDBPool = pool } <- lift ask
+  State{ config = config } <- lift ask
   let requestedPage = fromIntegral (fromMaybe 0 mpage) :: Int
       recordsPerReply = fromIntegral (configWalletRecordsPerPage config) :: Int
   -- the total is what lets a client show numbered pages rather than only a
   -- "next" step
-  (total, entries) <- liftIO $ flip runSqlPersistMPool pool $ do
+  (total, entries) <- exceptTMaybeT dbQueryError $ withDBTransaction "" $ do
     rawExecute "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ" []
     totalV <- count [ LedgerEntryPersonId ==. key ]
     entriesV <- case pageOffset requestedPage recordsPerReply of

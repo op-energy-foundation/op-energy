@@ -19,7 +19,6 @@ import           Control.Monad.Trans.Except (ExceptT(..), throwE)
 import           Control.Monad.Trans.Reader (ask)
 import           Data.Time.Clock.POSIX (getPOSIXTime)
 import           Database.Persist (Entity(..))
-import           Database.Persist.Postgresql (runSqlPersistMPool)
 
 import qualified Data.OpEnergy.Account.API.V1.Account as API
 import           Data.OpEnergy.Account.API.V2.CreateInvoiceRequest
@@ -34,7 +33,7 @@ import           OpEnergy.Account.Server.V1.AccountService
                  ( mgetPersonByAccountToken
                  )
 import           OpEnergy.Account.Server.V1.Class
-                 ( AppM, State(..), profile, runLogging
+                 ( AppM, State(..), profile, runLogging, withDBTransaction
                  )
 import           OpEnergy.Account.Server.V1.Config
                  ( Config(..)
@@ -47,7 +46,6 @@ import           OpEnergy.Account.Server.V1.WalletInvoiceReservation
 import           OpEnergy.Error
                  ( eitherThrowJSON, runExceptPrefixT
                  , CallstackError, accountNotFound, dbQueryError
-                 , eitherException
                  , walletAmountAboveMaximum, walletAmountBelowMinimum
                  , walletTooManyPendingInvoices
                  )
@@ -74,7 +72,7 @@ createInvoice token (CreateInvoiceRequest requestAmountSats requestNote) =
     in profile name $ runExceptPrefixT name $ do
   (Entity key _) <- exceptTMaybeT accountNotFound
     $ mgetPersonByAccountToken token
-  State{ config = config, accountDBPool = pool, wallet = walletV } <- lift ask
+  State{ config = config, wallet = walletV } <- lift ask
   let amount = requestAmountSats -- named, as it is what the wallet is asked for
   when (amount < configWalletMinInvoiceSats config)
     $ throwE walletAmountBelowMinimum
@@ -94,9 +92,7 @@ createInvoice token (CreateInvoiceRequest requestAmountSats requestNote) =
   -- limit can only be held here -- refusing one, which the wallet has
   -- already made, would leave it payable with no row to credit against.
   -- See OpEnergy.Account.Server.V1.WalletInvoiceReservation
-  mslot <- ExceptT $ liftIO
-    $ fmap (either (const (Left dbQueryError)) Right)
-    $ eitherException $ flip runSqlPersistMPool pool
+  mslot <- exceptTMaybeT dbQueryError $ withDBTransaction ""
     $ claimInvoiceSlotTx
       (fromIntegral (configWalletMaxPendingInvoices config))
       invoiceReservationTtl
@@ -115,7 +111,7 @@ createInvoice token (CreateInvoiceRequest requestAmountSats requestNote) =
   -- the slot goes back whether the wallet answered or not, so a call,
   -- which failed, does not hold it for the whole of its lifetime. One,
   -- which can not be given back, stops counting by itself
-  _ <- lift $ liftIO $ eitherException $ flip runSqlPersistMPool pool
+  _ <- lift $ withDBTransaction ""
     $ releaseInvoiceSlotTx slot
   created <- ExceptT $ return ecreated
   -- positional, as several wallet types share these field names

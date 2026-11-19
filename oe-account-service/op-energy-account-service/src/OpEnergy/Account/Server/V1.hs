@@ -20,13 +20,12 @@ import           Control.Monad.IO.Class(MonadIO, liftIO)
 import           Control.Monad.Logger (logError)
 import           Control.Monad.Trans.Reader (ask)
 import           Data.Time.Clock.POSIX (getPOSIXTime)
-import           Database.Persist.Postgresql (runSqlPersistMPool)
 
 import           Data.OpEnergy.Account.API.V1
 import           Data.OpEnergy.API.V1(GitHashResponse(..))
 import qualified OpEnergy.Account.Server.GitCommitHash as Server
 import           OpEnergy.Account.Server.V1.Class
-                 ( AppT, State(..), runLogging
+                 ( AppT, State(..), runLogging, withDBTransaction
                  )
 import           OpEnergy.Account.Server.V1.AccountService
 import           OpEnergy.Account.Server.V1.Config (Config(..))
@@ -43,7 +42,6 @@ import           OpEnergy.Account.Server.V1.WalletReconcile
                  ( reconcilePendingPayments
                  )
 
-import           OpEnergy.Error (eitherException)
 import           Prometheus(MonadMonitor)
 
 -- | this is the implementation of OpEnergy.Account.API.V1.AccountV1API. Check this type for the reference and API
@@ -76,18 +74,18 @@ schedulerIteration = do
 -- the account by the time this runs, so this only keeps the table small
 dropStaleInvoiceSlots :: (MonadIO m, MonadMonitor m) => AppT m ()
 dropStaleInvoiceSlots = do
-  State{ accountDBPool = pool } <- ask
   now <- liftIO getPOSIXTime
-  -- guarded, as this runs on the scheduler thread and the process waits
-  -- on any of its threads ending: an exception here would take the API
-  -- down with it rather than skipping a tick
-  edropped <- liftIO $ eitherException $ flip runSqlPersistMPool pool
+  -- withDBTransaction, as this runs on the scheduler thread and the process
+  -- waits on any of its threads ending: an exception here would take the
+  -- API down with it rather than skipping a tick. It logs the one it
+  -- catches and answers Nothing
+  mdropped <- withDBTransaction ""
     $ dropStaleInvoiceSlotsTx invoiceReservationTtl now
-  case edropped of
-    Right () -> return ()
-    Left err -> runLogging $ $(logError)
+  case mdropped of
+    Just () -> return ()
+    Nothing -> runLogging $ $(logError)
       ( "dropStaleInvoiceSlots: could not delete the slots, which have "
-      <> "stopped counting: " <> err
+      <> "stopped counting"
       )
 
 -- | drops the accounts, whose window of payment attempts is over, so what

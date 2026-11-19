@@ -23,14 +23,12 @@ import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Logger (logError)
 import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Except (runExceptT, throwE)
-import           Control.Monad.Trans.Reader (ReaderT, ask)
+import           Control.Monad.Trans.Reader (ReaderT)
 import           Data.Int (Int64)
-import           Data.Pool (Pool)
 import           Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
 import           Prometheus (MonadMonitor)
 
 import           Database.Persist
-import           Database.Persist.Postgresql (runSqlPersistMPool)
 import           Database.Persist.Sql
                  ( SqlBackend, transactionUndo, updateWhereCount
                  )
@@ -40,7 +38,7 @@ import           Data.OpEnergy.Account.API.V2.LedgerReason (LedgerReason(..))
 import           Data.OpEnergy.Account.API.V2.PaymentHash (PaymentHash(..))
 
 import           OpEnergy.Account.Server.V1.Class
-                 ( AppT, State(..), profile, runLogging
+                 ( AppT, profile, runLogging, withDBTransaction
                  )
 import           OpEnergy.Account.Server.V1.Person (PersonId)
 import           OpEnergy.Account.Server.V1.LedgerEntry
@@ -48,7 +46,7 @@ import           OpEnergy.Account.Server.V1.LedgerEntry
                  )
 import           OpEnergy.Account.Server.V1.WalletPayment
 import           OpEnergy.Error
-                 ( CallstackError, describeError, eitherException
+                 ( CallstackError, describeError
                  )
 
 -- | credits the account of an incoming payment, unless it has been credited
@@ -148,47 +146,46 @@ creditWaitingDeposits :: (MonadIO m, MonadMonitor m) => AppT m ()
 creditWaitingDeposits =
     let name = "V1.creditWaitingDeposits"
     in profile name $ do
-  State{ accountDBPool = pool } <- ask
-  -- guarded, as this runs on the scheduler thread and the process waits on
-  -- any of its threads ending: an exception here would take the API down
-  -- with it rather than skipping a tick
-  ewaiting <- liftIO $ eitherException $ flip runSqlPersistMPool pool
+  -- withDBTransaction, as this runs on the scheduler thread and the process
+  -- waits on any of its threads ending: an exception here would take the
+  -- API down with it rather than skipping a tick. It logs the one it
+  -- catches and answers Nothing, so a tick, which could not read, skips
+  mwaiting <- withDBTransaction ""
     $ selectList
       [ WalletPaymentDirection ==. Incoming
       , WalletPaymentStatus ==. Settled
       , WalletPaymentCreditedAt ==. Nothing
       ]
       [ Asc WalletPaymentUpdatedAt, LimitTo maxDepositsPerTick ]
-  case ewaiting of
-    Left err -> runLogging $ $(logError)
-      ( "creditWaitingDeposits: could not read the payments waiting to be "
-      <> "credited: " <> err
-      )
-    Right waiting -> mapM_ creditOne waiting
+  case mwaiting of
+    Nothing -> return ()
+    Just waiting -> mapM_ creditOne waiting
   where
     creditOne (Entity key payment) = do
-      State{ accountDBPool = pool } <- ask
       now <- liftIO getPOSIXTime
-      -- guarded per payment, so one, which cannot be credited, is skipped
-      -- and the rest of the tick still runs
-      ecredited <- liftIO $ eitherException $ flip runSqlPersistMPool pool
+      -- one transaction per payment, so one, which cannot be credited, is
+      -- skipped and the rest of the tick still runs
+      mcredited <- withDBTransaction ""
         $ creditDepositOnceTx (walletPaymentPersonId payment)
             (walletPaymentPaymentHash payment) now
-      case ecredited of
-        -- Nothing means somebody else claimed it first, which is not news
-        Right (Right _) -> return ()
-        Right (Left err) -> do
+      case mcredited of
+        -- the inner Nothing means somebody else claimed it first, which is
+        -- not news
+        Just (Right _) -> return ()
+        Just (Left err) -> do
           runLogging $ $(logError)
             ( "creditWaitingDeposits: a settled payment could not be "
             <> "credited, needs manual reconciliation: " <> describeError err
             )
-          sendToBack pool key now
-        Left err -> do
+          sendToBack key now
+        -- the transaction itself failed, which withDBTransaction has
+        -- logged: the payment still needs a hand
+        Nothing -> do
           runLogging $ $(logError)
             ( "creditWaitingDeposits: crediting a settled payment failed, "
-            <> "needs manual reconciliation: " <> err
+            <> "needs manual reconciliation"
             )
-          sendToBack pool key now
+          sendToBack key now
     -- a payment, which could not be credited, keeps its place in the
     -- queue: its transaction was undone, so it is still settled and still
     -- uncredited, and every tick reads the same oldest rows. Enough of
@@ -197,16 +194,17 @@ creditWaitingDeposits =
     -- not been. A note, which itself fails, only leaves it where it was
     sendToBack
       :: (MonadIO m, MonadMonitor m)
-      => Pool SqlBackend
-      -> Key WalletPayment
+      => Key WalletPayment
       -> POSIXTime
       -> AppT m ()
-    sendToBack pool key now = do
-      enoted <- liftIO $ eitherException $ flip runSqlPersistMPool pool
+    sendToBack key now = do
+      mnoted <- withDBTransaction ""
         $ update key [ WalletPaymentUpdatedAt =. now ]
-      case enoted of
-        Right () -> return ()
-        Left err -> runLogging $ $(logError)
+      case mnoted of
+        Just () -> return ()
+        -- withDBTransaction has logged what went wrong; a note, which
+        -- failed, only leaves the payment where it was
+        Nothing -> runLogging $ $(logError)
           ( "creditWaitingDeposits: could not note when the payment was "
-          <> "last tried: " <> err
+          <> "last tried"
           )
