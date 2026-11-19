@@ -11,6 +11,7 @@ import qualified Data.OpEnergy.Account.API.V2.PasswordAPI as PasswordAPI
 import qualified Data.OpEnergy.Account.API.V2.RegisterAPI as RegisterAPI
 import qualified Data.OpEnergy.Account.API.V2.ProfileAPI as ProfileAPI
 import qualified Data.OpEnergy.Account.API.V2.SecretAPI as SecretAPI
+import           Data.OpEnergy.Account.API.V2.AdminAPI (AdminAPI)
 import           Data.OpEnergy.Account.API.V2.WhoAmIAPI (WhoAmIAPI)
 import           Data.OpEnergy.Account.API.V2.WalletAPI (WalletAPI)
 import           Data.OpEnergy.Account.API.V2.WalletMockAPI (WalletMockAPI)
@@ -44,6 +45,10 @@ type AccountV2PublicAPI
   :<|> Tags "Wallet API"
     :> "wallet"
     :> WalletAPI
+
+  :<|> Tags "Admin API"
+    :> "admin"
+    :> AdminAPI
 
 -- | endpoint of the mock wallet, which is served but left out of the
 -- swagger: it exists only until a lightning node does, and a published

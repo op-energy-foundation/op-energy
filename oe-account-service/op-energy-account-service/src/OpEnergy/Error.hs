@@ -20,6 +20,8 @@ module OpEnergy.Error
   , authenticationFailure
   , accountNotFound
   , accountBanned
+  , notAModerator
+  , cannotBanSelf
   , passwordNotSet
   , invalidCredentials
   , displayNameAlreadyTaken
@@ -67,6 +69,8 @@ data BadRequestError
   = AuthenticationFailure
   | AccountNotFound
   | AccountBanned
+  | NotAModerator
+  | CannotBanSelf
   | PasswordNotSet
   | InvalidCredentials
   | DisplayNameAlreadyTaken
@@ -102,6 +106,8 @@ instance Show BadRequestError where
   show AuthenticationFailure = "authentication failure"
   show AccountNotFound = "account not found with given token"
   show AccountBanned = "this account has been banned"
+  show NotAModerator = "this account is not a moderator"
+  show CannotBanSelf = "an account cannot ban itself"
   show PasswordNotSet = "account has no password set"
   show InvalidCredentials = "invalid credentials"
   show DisplayNameAlreadyTaken = "display name already taken"
@@ -198,6 +204,10 @@ accountNotFound :: CallstackError
 accountNotFound = CallstackError "" $! BadRequest AccountNotFound
 accountBanned :: CallstackError
 accountBanned = CallstackError "" $! BadRequest AccountBanned
+notAModerator :: CallstackError
+notAModerator = CallstackError "" $! BadRequest NotAModerator
+cannotBanSelf :: CallstackError
+cannotBanSelf = CallstackError "" $! BadRequest CannotBanSelf
 passwordNotSet :: CallstackError
 passwordNotSet = CallstackError "" $! BadRequest PasswordNotSet
 invalidCredentials :: CallstackError
@@ -285,6 +295,9 @@ errorToServerError (BadRequest InvalidServiceSecret) = (err401, tshow InvalidSer
 -- a ban is a refusal to serve this account at all, not a fault in the
 -- request, so it is answered as forbidden rather than as a bad request
 errorToServerError (BadRequest AccountBanned) = (err403, tshow AccountBanned)
+-- the request is well formed and the token is good: what is refused is
+-- this account doing it, so it is forbidden rather than a bad request
+errorToServerError (BadRequest NotAModerator) = (err403, tshow NotAModerator)
 -- a refusal for asking too often is answered as such, so a client can
 -- tell it apart from a request, which is wrong, and wait rather than
 -- change what it sends

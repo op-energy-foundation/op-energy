@@ -95,6 +95,9 @@ library
                    , OpEnergy.Account.Server.V2.AccountService.DeductBalance
                    , OpEnergy.Account.Server.V2.AccountService.CreditBalance
                    , OpEnergy.Account.Server.V2.AccountService.CheckInternalSecret
+                   , OpEnergy.Account.Server.V2.AccountService.CheckModerator
+                   , OpEnergy.Account.Server.V2.AdminAPI
+                   , OpEnergy.Account.Server.V2.AdminAPI.BanUser
                    , OpEnergy.Account.Server.V2.PasswordAPI
                    , OpEnergy.Account.Server.V2.RegisterAPI
                    , OpEnergy.Account.Server.V2.ProfileAPI

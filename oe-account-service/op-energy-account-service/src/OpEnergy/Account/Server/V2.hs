@@ -40,6 +40,7 @@ import           Data.OpEnergy.Account.API.V2.ProfileAPI
 import           Data.OpEnergy.Account.API.V2.SecretAPI
                  ( SecretAPI
                  )
+import           Data.OpEnergy.Account.API.V2.AdminAPI (AdminAPI)
 import           Data.OpEnergy.Account.API.V2.WhoAmIAPI (WhoAmIAPI)
 import           Data.OpEnergy.Account.API.V2.InternalBalanceAPI (InternalBalanceAPI)
 import           OpEnergy.Account.Server.V1.Class
@@ -56,6 +57,8 @@ import qualified OpEnergy.Account.Server.V2.ProfileAPI
                  as ProfileAPIHandlers
 import qualified OpEnergy.Account.Server.V2.SecretAPI
                  as SecretAPIHandlers
+import qualified OpEnergy.Account.Server.V2.AdminAPI
+                 as AdminAPIHandlers
 import qualified OpEnergy.Account.Server.V2.WhoAmIAPI
                  as WhoAmIAPIHandlers
 import qualified OpEnergy.Account.Server.V2.InternalBalanceAPI
@@ -114,4 +117,8 @@ accountPublicServer
 
   :<|> ( WalletAPIHandlers.handlers
          :: ServerT WalletAPI (AppT Handler)
+       )
+
+  :<|> ( AdminAPIHandlers.handlers
+         :: ServerT AdminAPI (AppT Handler)
        )
