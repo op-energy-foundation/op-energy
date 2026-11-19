@@ -4,6 +4,7 @@ module OpEnergy.Account.Server.V1.Config where
 import           Data.Int (Int64)
 import qualified Data.List as List
 import           Data.Text (Text)
+import qualified Data.Text as T
 import           Data.Word (Word32, Word64)
 import qualified Data.Text.Encoding as Text
 import           Data.Maybe
@@ -272,10 +273,10 @@ maxWalletRecordsPerPage = 1000
 -- Example:
 --
 -- > everifyWalletConfig defaultConfig { configSalt = "a secret" } == Right ()
-everifyWalletConfig :: Config -> Either String ()
+everifyWalletConfig :: Config -> Either Text ()
 everifyWalletConfig config
   | List.null problems = Right ()
-  | otherwise = Left (List.intercalate "; " problems)
+  | otherwise = Left (T.intercalate "; " problems)
   where
     problems = catMaybes
       [ require (configWalletRecordsPerPage config > 0)
@@ -283,7 +284,7 @@ everifyWalletConfig config
           \queried without a limit, which answers with the whole history"
       , require (configWalletRecordsPerPage config <= maxWalletRecordsPerPage)
           ( "WALLET_RECORDS_PER_PAGE must not be above "
-         <> show maxWalletRecordsPerPage
+         <> T.pack (show maxWalletRecordsPerPage)
          <> ": a page of more rows than that answers with as much of the \
             \history as a single reply can carry, which is what bounding \
             \it at all is for"
@@ -401,5 +402,6 @@ getConfigFromEnvironment = do
     Left some -> error $ configFilePath ++ " is not a valid config: " ++ some
     Right config -> case everifyWalletConfig config of
       Left problem ->
-        error $ configFilePath ++ " is not a usable config: " ++ problem
+        error $ configFilePath ++ " is not a usable config: "
+          ++ T.unpack problem
       Right () -> return config
