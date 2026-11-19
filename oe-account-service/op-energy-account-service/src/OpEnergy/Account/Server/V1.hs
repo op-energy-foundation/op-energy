@@ -33,7 +33,7 @@ import           OpEnergy.Account.Server.V1.WalletDeposits
                  ( creditWaitingDeposits
                  )
 import           OpEnergy.Account.Server.V1.WalletInvoiceReservation
-                 ( dropStaleInvoiceSlotsTx, invoiceReservationTtl
+                 ( dropStaleInvoiceSlotsTx
                  )
 import           OpEnergy.Account.Server.V1.WalletRateLimit
                  ( forgetFinishedWindows
@@ -74,13 +74,15 @@ schedulerIteration = do
 -- the account by the time this runs, so this only keeps the table small
 dropStaleInvoiceSlots :: (MonadIO m, MonadMonitor m) => AppT m ()
 dropStaleInvoiceSlots = do
+  State{ config = config } <- ask
   now <- liftIO getPOSIXTime
   -- withDBTransaction, as this runs on the scheduler thread and the process
   -- waits on any of its threads ending: an exception here would take the
   -- API down with it rather than skipping a tick. It logs the one it
   -- catches and answers Nothing
   mdropped <- withDBTransaction ""
-    $ dropStaleInvoiceSlotsTx invoiceReservationTtl now
+    $ dropStaleInvoiceSlotsTx
+      (fromIntegral (configWalletInvoiceReservationTtlSecs config)) now
   case mdropped of
     Just () -> return ()
     Nothing -> runLogging $ $(logError)

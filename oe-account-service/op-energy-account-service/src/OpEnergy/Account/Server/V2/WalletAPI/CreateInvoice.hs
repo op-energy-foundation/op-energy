@@ -40,8 +40,7 @@ import           OpEnergy.Account.Server.V1.Config
                  )
 import           OpEnergy.Account.Server.V1.Wallet.Class
 import           OpEnergy.Account.Server.V1.WalletInvoiceReservation
-                 ( claimInvoiceSlotTx, invoiceReservationTtl
-                 , releaseInvoiceSlotTx
+                 ( claimInvoiceSlotTx, releaseInvoiceSlotTx
                  )
 import           OpEnergy.Error
                  ( eitherThrowJSON, runExceptPrefixT
@@ -95,7 +94,7 @@ createInvoice token (CreateInvoiceRequest requestAmountSats requestNote) =
   mslot <- exceptTMaybeT dbQueryError $ withDBTransaction ""
     $ claimInvoiceSlotTx
       (fromIntegral (configWalletMaxPendingInvoices config))
-      invoiceReservationTtl
+      (fromIntegral (configWalletInvoiceReservationTtlSecs config))
       key
       now
   slot <- exceptTMaybeT walletTooManyPendingInvoices $ return mslot

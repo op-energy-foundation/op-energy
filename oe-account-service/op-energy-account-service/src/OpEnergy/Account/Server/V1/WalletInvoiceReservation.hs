@@ -22,7 +22,7 @@
  -
  - A reservation, which is never given back -- the process stopped between
  - taking it and the wallet answering -- stops counting once it is older
- - than 'invoiceReservationTtl', rather than counting for good. A slot held
+ - than the configured reservation ttl, rather than counting for good. A slot held
  - by nothing would otherwise leave the account unable to ask to be paid,
  - and no answer from the wallet is waited on for longer than that anyway.
  - The scheduler deletes them once they have stopped counting.
@@ -69,14 +69,6 @@ WalletInvoiceReservation
   createdAt POSIXTime -- when the call, which this stands for, started
   deriving Eq Show Generic
 |]
-
--- | how long a reservation counts against the limit.
---
--- It stands for a call to the wallet, which is in flight, so it only has
--- to outlast that call. Past it the reservation is taken to belong to a
--- call, which will never finish, and stops counting
-invoiceReservationTtl :: POSIXTime
-invoiceReservationTtl = 60
 
 -- | locks the account's row for the rest of the transaction, and answers
 -- how many rows that was (one, for an account, which exists).
@@ -147,7 +139,8 @@ hasInvoiceSlot limit waiting held = waiting + held < limit
 --
 -- Example:
 --
--- > claimInvoiceSlotTx 10 invoiceReservationTtl personKey now
+-- > claimInvoiceSlotTx 10 60 personKey now
+
 -- | the moment a slot counts from, never earlier than the epoch.
 --
 -- A ttl longer than the time, which has passed, would otherwise put the
@@ -194,7 +187,7 @@ claimInvoiceSlotTx limit ttl personKey now = do
 -- | gives a slot back, once the call it was held for is over. Called
 -- whether the wallet answered or not: a slot, which is given back, is one
 -- the account can use again at once, while one, which is not, has to wait
--- out 'invoiceReservationTtl' first
+-- out the configured reservation ttl first
 releaseInvoiceSlotTx
   :: MonadIO m
   => Key WalletInvoiceReservation

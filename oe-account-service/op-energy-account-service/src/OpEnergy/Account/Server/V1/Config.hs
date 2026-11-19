@@ -139,6 +139,10 @@ data Config = Config
     -- left before its sats are given back. A wallet, which was unreachable
     -- when the payment was sent, never had it, so it would otherwise be
     -- held for good
+  , configWalletInvoiceReservationTtlSecs :: Word64
+    -- ^ how long a slot, which is held for a call to the wallet, counts
+    -- against the invoices an account may have at once. It stands for a
+    -- call, which is in flight, so it only has to outlast that call
   }
   deriving Show
 instance FromJSON Config where
@@ -186,6 +190,7 @@ instance FromJSON Config where
     <*> ( v .:? "WALLET_MAX_PAY_ATTEMPT_ACCOUNTS" .!= (configWalletMaxPayAttemptAccounts defaultConfig))
     <*> ( v .:? "WALLET_RECONCILE_INTERVAL_SECS" .!= (configWalletReconcileIntervalSecs defaultConfig))
     <*> ( v .:? "WALLET_UNKNOWN_PAYMENT_GRACE_SECS" .!= (configWalletUnknownPaymentGraceSecs defaultConfig))
+    <*> ( v .:? "WALLET_INVOICE_RESERVATION_TTL_SECS" .!= (configWalletInvoiceReservationTtlSecs defaultConfig))
 
 -- need to get Key from json, which represented as base64-encoded string
 instance FromJSON Key where
@@ -249,6 +254,9 @@ defaultConfig = Config
   -- The day is there so a wallet, which is briefly confused about one, is
   -- not taken at its word
   , configWalletUnknownPaymentGraceSecs = 86400
+  -- a call to a wallet is answered in seconds, so a minute outlasts one
+  -- and a slot, which is held by nothing, stops counting a minute later
+  , configWalletInvoiceReservationTtlSecs = 60
   }
 
 -- | the largest amount, which survives a round trip through the DB:
