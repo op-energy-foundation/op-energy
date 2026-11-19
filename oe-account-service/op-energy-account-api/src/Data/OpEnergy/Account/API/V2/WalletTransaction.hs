@@ -1,8 +1,8 @@
 {-- | One line of an account's wallet history.
  -
  - Fields are prefixed, as a record field named "id" would clash with
- - Prelude's id and "type" is a keyword: the JSON names are produced by
- - dropping the prefix, as PagingResult does.
+ - Prelude's id: the JSON names are produced by dropping the prefix, as
+ - PagingResult does.
  -}
 {-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE DeriveDataTypeable         #-}
@@ -30,6 +30,9 @@ import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
 import           Data.OpEnergy.Account.API.V2.LedgerReason
                  ( LedgerReason(..), defaultLedgerReason
                  )
+import           Data.OpEnergy.Account.API.V2.LedgerReference
+                 ( LedgerReference, defaultLedgerReference
+                 )
 
 -- | one change of an account's balance, as its owner sees it
 data WalletTransaction = WalletTransaction
@@ -40,7 +43,7 @@ data WalletTransaction = WalletTransaction
     -- own sign here
   , walletTransactionReason :: LedgerReason
   , walletTransactionBalanceAfter :: Sats
-  , walletTransactionReference :: Maybe Text
+  , walletTransactionReference :: Maybe LedgerReference
     -- ^ what the change relates to, eg "offer:42"
   , walletTransactionCreatedAt :: POSIXTime
   }
@@ -52,7 +55,7 @@ defaultWalletTransaction = WalletTransaction
   , walletTransactionAmountSats = -5000
   , walletTransactionReason = defaultLedgerReason
   , walletTransactionBalanceAfter = Sats 295000
-  , walletTransactionReference = Just "offer:42"
+  , walletTransactionReference = Just defaultLedgerReference
   , walletTransactionCreatedAt = 1790000000
   }
 
