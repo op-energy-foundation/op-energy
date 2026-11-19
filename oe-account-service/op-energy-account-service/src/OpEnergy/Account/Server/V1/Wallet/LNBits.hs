@@ -200,11 +200,10 @@ createInvoice
   -> CreateInvoiceParams
   -> IO (Either CallstackError CreatedInvoice)
 createInvoice url invoiceKey identity pool params = runExceptT $ do
-  let Sats amount = createInvoiceAmountSats params
-      now = createInvoiceNow params
+  let now = createInvoiceNow params
   answer <- ExceptT $ callLNBits url $ LNBits.createInvoice invoiceKey
     $ LNBits.CreateInvoiceRequest
-      { LNBits.createInvoiceRequestAmountSats = amount
+      { LNBits.createInvoiceRequestAmountSats = createInvoiceAmountSats params
       , LNBits.createInvoiceRequestMemo = createInvoiceNote params
       , LNBits.createInvoiceRequestExpirySecs = createInvoiceExpirySecs params
       }
