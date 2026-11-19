@@ -42,6 +42,9 @@ import           Data.OpEnergy.Account.API.V2.LedgerReference
 import           Data.OpEnergy.Account.API.V2.WalletTransaction
                  ( WalletTransaction(..)
                  )
+import           Data.OpEnergy.Account.API.V2.WalletTransactionId
+                 ( WalletTransactionId(..)
+                 )
 
 
 import           OpEnergy.Account.Server.V1.AccountService
@@ -145,8 +148,12 @@ pageOffset page recordsPerPage
 -- platform-wide activity and volume oracle. Salted, so the small integers
 -- behind it can not simply be hashed back.
 --
-opaqueId :: Text -> Key LedgerEntry -> Text
-opaqueId salt key = TE.decodeUtf8 $ B16.encode $ BS.take 16 $ SHA256.hash
+-- Built here rather than read from anywhere, so it is constructed: the
+-- check 'WalletTransactionId' carries is for an identifier, which arrives
+-- from outside, and the length it asks for is the one this hash is cut to
+opaqueId :: Text -> Key LedgerEntry -> WalletTransactionId
+opaqueId salt key = WalletTransactionId
+  $ TE.decodeUtf8 $ B16.encode $ BS.take 16 $ SHA256.hash
   $ TE.encodeUtf8 (salt <> ":ledgerEntry:" <> Text.pack (show (fromSqlKey key)))
 
 -- | Model -> API glue: the ledger stores a positive amount and the direction
