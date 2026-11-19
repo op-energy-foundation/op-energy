@@ -23,6 +23,7 @@ import           Data.Int (Int64)
 import           Data.Maybe (isJust)
 import           Data.Pool (Pool)
 import           Data.Text (Text)
+import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TE
 import           Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
 import           Data.Word (Word64)
@@ -37,10 +38,10 @@ import           Database.Persist.Postgresql (runSqlPersistMPool)
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
 import           Data.OpEnergy.Account.API.V2.LedgerReason (LedgerReason(..))
 import           Data.OpEnergy.Account.API.V2.Bolt11Invoice
-                 ( Bolt11Invoice(..), verifyBolt11Invoice
+                 ( Bolt11Invoice(..), everifyBolt11Invoice
                  )
 import           Data.OpEnergy.Account.API.V2.PaymentHash
-                 ( PaymentHash(..), verifyPaymentHash
+                 ( PaymentHash(..), everifyPaymentHash
                  )
 import           Data.OpEnergy.Account.API.V2.WalletMode (WalletMode(..))
 
@@ -412,16 +413,26 @@ secureEntropy = IO.withBinaryFile "/dev/urandom" IO.ReadMode $ \handle -> do
   return $! BS.foldl' (\acc byte -> acc * 256 + fromIntegral byte) 0 bytes
 
 -- | payment hash of a mock payment: the hash of what the payment is, so two
--- payments never share one
+-- payments never share one.
+--
+-- The hash is this service's own, hex of a SHA-256 digest, so the shape the
+-- check asks for is the shape it is built in and the 'Left' is unreachable.
+-- It is this caller, which decides that an unreachable one is a bug here
+-- rather than something to report
 mockPaymentHash :: PersonId -> Sats -> POSIXTime -> Word64 -> PaymentHash
 mockPaymentHash personKey (Sats amount) now entropy =
-  verifyPaymentHash $ TE.decodeUtf8
+  either (error . Text.unpack) id $ everifyPaymentHash $ TE.decodeUtf8
     $ B16.encode $ SHA256.hash $ BS8.pack
     $ show (fromSqlKey personKey) <> ":" <> show amount
       <> ":" <> show (realToFrac now :: Double) <> ":" <> show entropy
 
 -- | invoice of a mock payment. It is marked as belonging to this service, so
--- nobody mistakes it for an invoice a node would pay
+-- nobody mistakes it for an invoice a node would pay.
+--
+-- As with 'mockPaymentHash' the 'Left' is unreachable: the string is built
+-- from a payment hash, which has already been checked, behind a prefix of
+-- this service's own
 mockInvoice :: PaymentHash -> Bolt11Invoice
 mockInvoice (PaymentHash hashText) =
-  verifyBolt11Invoice $ "lntbsmock" <> hashText
+  either (error . Text.unpack) id $ everifyBolt11Invoice
+    $ "lntbsmock" <> hashText
