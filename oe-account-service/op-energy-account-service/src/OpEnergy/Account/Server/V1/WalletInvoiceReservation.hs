@@ -51,6 +51,7 @@ import           Control.Monad.Trans.Reader (ReaderT)
 import           Data.Time.Clock.POSIX (POSIXTime)
 import           Database.Persist
 import           Data.Int (Int64)
+import           Data.Text (Text)
 import           Database.Persist.Sql (Single, SqlBackend, rawSql)
 import           Database.Persist.TH
 import           GHC.Generics (Generic)
@@ -82,16 +83,32 @@ invoiceReservationTtl = 60
 --
 -- Taken before anything is counted, so the requests of one account are
 -- accounted for one after another: without it two of them read the same
--- count and each take the last slot. Read with rawSql rather than
--- rawExecute, as the statement answers a row and execute refuses a
--- statement, which does
+-- count and each take the last slot
 lockPersonTx
   :: MonadIO m
   => PersonId
   -> ReaderT SqlBackend m Int
-lockPersonTx personKey = do
-  rows <- rawSql "SELECT id FROM person WHERE id = ? FOR UPDATE"
-    [ toPersistValue personKey ]
+lockPersonTx personKey = getForUpdate "person" (toPersistValue personKey)
+
+-- | locks the row of a table for the rest of the transaction, and answers
+-- how many rows that was (one, for a row, which exists).
+--
+-- Read with rawSql rather than rawExecute, as the statement answers a row
+-- and execute refuses a statement, which does.
+--
+-- Example:
+--
+-- > getForUpdate "person" (toPersistValue personKey)
+getForUpdate
+  :: MonadIO m
+  => Text
+     -- ^ the table, whose row is locked
+  -> PersistValue
+     -- ^ the key of the row
+  -> ReaderT SqlBackend m Int
+getForUpdate table key = do
+  rows <- rawSql ("SELECT id FROM " <> table <> " WHERE id = ? FOR UPDATE")
+    [ key ]
   return $! length (rows :: [Single Int64])
 
 -- | whether an account has room for another invoice: the invoices, which
