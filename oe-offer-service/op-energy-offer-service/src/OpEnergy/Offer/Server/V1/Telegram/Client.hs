@@ -31,10 +31,14 @@ module OpEnergy.Offer.Server.V1.Telegram.Client
   , defaultGetUpdatesRequest
   , ChatMessageRequest(..)
   , ChatMemberRequest(..)
+  , ChatRequest(..)
+  , SendMessageRequest(..)
   , getUpdates
   , deleteMessage
   , banChatMember
   , getChatMember
+  , getChat
+  , sendMessage
   , withTelegram
   ) where
 
@@ -272,8 +276,30 @@ instance ToJSON ChatMemberRequest where
     , "user_id" .= chatMemberUserId request
     ]
 
--- | the four methods the mirror uses. Written out one by one rather than
--- built from a shared synonym, so a type error names the method it is in.
+-- | names one chat, which is what asking after the group takes.
+newtype ChatRequest = ChatRequest
+  { chatRequestChatId :: Int64
+  }
+  deriving (Show, Eq)
+instance ToJSON ChatRequest where
+  toJSON request = object [ "chat_id" .= chatRequestChatId request ]
+
+-- | what the bot says back to somebody, who talked to it. Only ever used
+-- to answer a connect attempt: pressing Start and being told nothing is
+-- indistinguishable from pressing Start and it not having worked.
+data SendMessageRequest = SendMessageRequest
+  { sendMessageChatId :: Int64
+  , sendMessageText :: Text
+  }
+  deriving (Show, Eq)
+instance ToJSON SendMessageRequest where
+  toJSON request = object
+    [ "chat_id" .= sendMessageChatId request
+    , "text" .= sendMessageText request
+    ]
+
+-- | the methods the mirror uses. Written out one by one rather than built
+-- from a shared synonym, so a type error names the method it is in.
 type TelegramBotAPI
   = Capture "token" BotPath
     :> "getUpdates"
@@ -295,11 +321,28 @@ type TelegramBotAPI
     :> ReqBody '[JSON] ChatMemberRequest
     :> Post '[JSON] (TelegramResponse ChatMember)
 
+  :<|> Capture "token" BotPath
+    :> "getChat"
+    :> ReqBody '[JSON] ChatRequest
+    :> Post '[JSON] (TelegramResponse TelegramChat)
+
+  :<|> Capture "token" BotPath
+    :> "sendMessage"
+    :> ReqBody '[JSON] SendMessageRequest
+    :> Post '[JSON] (TelegramResponse Message)
+
 getUpdates :: BotPath -> GetUpdatesRequest -> ClientM (TelegramResponse [Update])
 deleteMessage :: BotPath -> ChatMessageRequest -> ClientM (TelegramResponse Bool)
 banChatMember :: BotPath -> ChatMemberRequest -> ClientM (TelegramResponse Bool)
 getChatMember :: BotPath -> ChatMemberRequest -> ClientM (TelegramResponse ChatMember)
-getUpdates :<|> deleteMessage :<|> banChatMember :<|> getChatMember =
+getChat :: BotPath -> ChatRequest -> ClientM (TelegramResponse TelegramChat)
+sendMessage :: BotPath -> SendMessageRequest -> ClientM (TelegramResponse Message)
+getUpdates
+  :<|> deleteMessage
+  :<|> banChatMember
+  :<|> getChatMember
+  :<|> getChat
+  :<|> sendMessage =
   client (Proxy :: Proxy TelegramBotAPI)
 
 -- | how long a telegram call may take before it is given up on.

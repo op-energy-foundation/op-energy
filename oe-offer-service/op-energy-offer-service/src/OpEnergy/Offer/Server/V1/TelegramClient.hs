@@ -23,7 +23,8 @@ module OpEnergy.Offer.Server.V1.TelegramClient
   ) where
 
 import           Control.Concurrent (threadDelay)
-import           Control.Monad (forever)
+import           Control.Monad (forever, when)
+import           Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Logger (logInfo, logWarn)
 import           Control.Monad.Trans.Reader (ask)
@@ -32,7 +33,7 @@ import           Data.Int (Int64)
 import           Data.Maybe (catMaybes, mapMaybe)
 import           Data.Text (Text)
 import qualified Data.Text as Text
-import           Data.Time.Clock (UTCTime)
+import           Data.Time.Clock (UTCTime, diffUTCTime, getCurrentTime)
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import           Prometheus (MonadMonitor)
 
@@ -51,14 +52,19 @@ import           OpEnergy.Offer.Server.V1.Config
                  )
 import           OpEnergy.Offer.Server.V1.Telegram.Client
                  ( BotPath(..)
+                 , ChatRequest(..)
                  , GetUpdatesRequest(..)
+                 , SendMessageRequest(..)
                  , Message(..)
                  , TelegramChat(..)
                  , TelegramUser(..)
                  , Update(..)
                  , defaultGetUpdatesRequest
                  , getUpdates
+                 , getChat
                  , isGroupMessage
+                 , isPrivateMessage
+                 , sendMessage
                  , resultOf
                  , senderDisplayNameOf
                  , withTelegram
@@ -67,6 +73,7 @@ import           OpEnergy.Offer.Server.V1.LiveEvent (LiveEvent(..))
 import           OpEnergy.Offer.Server.V1.Time (getCurrentTimeDB)
 import           OpEnergy.Offer.Server.V1.WebSocketService (publishLiveEvent)
 import           Data.OpEnergy.Offer.API.V1.LiveMessage (LiveMessage(..))
+import           OpEnergy.Offer.Server.V1.TelegramLink (redeemLinkCodeTx)
 import           OpEnergy.Offer.Server.V1.TelegramMessage
 import           Data.OpEnergy.API.V1.Positive (fromPositive)
 import           OpEnergy.Error (CallstackError, describeError, dbQueryError)
@@ -79,6 +86,16 @@ import           OpEnergy.Error (CallstackError, describeError, dbQueryError)
 -- only ever paid on the way out of a failure.
 retryDelayMicroseconds :: Int
 retryDelayMicroseconds = 15 * 1000000
+
+-- | how often to ask telegram whether the bot is still in the group.
+--
+-- This is the only way to find out. When a bot is removed from a group,
+-- getUpdates does not fail: it goes on answering, successfully and for
+-- ever, that there is nothing new. A mirror, which has been thrown out of
+-- the room, looks exactly like a quiet room, so the question has to be
+-- asked rather than waited for.
+membershipCheckSeconds :: Double
+membershipCheckSeconds = 300
 
 -- | one message of the group, as it is about to be stored
 data MirroredMessage = MirroredMessage
@@ -105,7 +122,9 @@ runTelegramMirror token chatId' = do
   liftIO $ do
     runAppT state $ runLogging $ $(logInfo)
       ( "runTelegramMirror: following telegram group " <> tshow chatId' )
+    lastCheckedV <- newIORef Nothing
     forever $ do
+      checkStillInGroup state lastCheckedV token chatId'
       -- the inner call contains every telegram and DB failure already, so
       -- this catches only what nothing else expected. It is still here
       -- because the process ends when this thread does
@@ -165,17 +184,23 @@ pollOnce token chatId' = do
         Right updates -> do
           now <- getCurrentTimeDB
           let mirrored = mapMaybe (mirroredOf chatId' now) updates
+              -- somebody pressing Start on the link the website gave them.
+              -- These arrive in a one to one conversation with the bot, not
+              -- in the group, so they are never part of the feed
+              connectAttempts = mapMaybe connectAttemptOf updates
               -- every update read is covered, including the ones this
               -- service does not follow: leaving a gap would have telegram
               -- send them again on every poll, forever
               newOffset = maximum (map updateId updates)
           mwritten <- withDBTransaction "V1.TelegramClient.pollOnce.store" $ do
             written <- mapM store mirrored
+            connected <- mapM (redeem now) connectAttempts
             advancePollStateTx chatId' newOffset now
-            return $! catMaybes written
+            return $! (catMaybes written, connected)
           case mwritten of
             Nothing -> return $! Left dbQueryError
-            Just stored -> do
+            Just (stored, connected) -> do
+              mapM_ (tell token apiURL) connected
               -- after the transaction, never inside it: a connection told
               -- about a message, which the transaction then failed to
               -- write, would be told about something nobody can read
@@ -189,6 +214,21 @@ pollOnce token chatId' = do
               mapM_ announce stored
               return $! Right (length updates)
   where
+    redeem now (privateChatId, senderId', code) = do
+      ok <- redeemLinkCodeTx code senderId' now
+      return (privateChatId, ok)
+    -- pressing Start and being told nothing at all is indistinguishable
+    -- from pressing it and it not having worked, so the bot says which
+    tell token' apiURL (privateChatId, ok) = liftIO $ do
+      _ <- withTelegram apiURL $ sendMessage
+        (BotPath (unTelegramBotToken token'))
+        ( SendMessageRequest privateChatId
+          $ if ok
+            then "Your Telegram is now connected to your Op Energy account."
+            else "That link has already been used or has expired. Open your\
+                 \ profile on the website and press Connect Telegram again."
+        )
+      return ()
     -- only what was actually written is announced: a redelivery, which the
     -- unique constraint turned into nothing, must not be announced twice
     announce (row, wasEdit) = publishLiveEvent $! LiveEvent
@@ -245,6 +285,60 @@ mirroredOf chatId' now update = case (updateMessage update, updateEditedMessage 
         , telegramGroupMessageDeletedByUUID = Nothing
         , telegramGroupMessageCreatedAt = now
         }
+
+-- | asks telegram, now and then, whether the bot is still in the group.
+--
+-- Nothing else notices this: being removed from a group does not make
+-- getUpdates fail, it makes it answer "nothing new" for ever, which is
+-- indistinguishable from a quiet group. So the feed would simply stop
+-- filling and nothing would say why.
+--
+-- A failure here is logged and nothing else: the mirror goes on polling,
+-- because telegram being briefly unreachable is not the same as the bot
+-- having been thrown out, and this check cannot tell the two apart.
+checkStillInGroup
+  :: State
+  -> IORef (Maybe UTCTime)
+  -> TelegramBotToken
+  -> Int64
+  -> IO ()
+checkStillInGroup state lastCheckedV token chatId' = do
+  now <- getCurrentTime
+  mlastChecked <- readIORef lastCheckedV
+  let due = case mlastChecked of
+        Nothing -> True
+        Just lastChecked ->
+          realToFrac (diffUTCTime now lastChecked) > membershipCheckSeconds
+  when due $ do
+    writeIORef lastCheckedV (Just now)
+    State{ config = Config{ configTelegramAPIURL = apiURL } } <- return state
+    eresponse <- withTelegram apiURL
+      $ getChat (BotPath (unTelegramBotToken token)) (ChatRequest chatId')
+    case eresponse >>= resultOf of
+      Right _ -> return ()
+      Left err -> runAppT state $ runLogging $ $(logWarn)
+        ( "checkStillInGroup: telegram will not describe group " <> tshow chatId'
+        <> " (" <> describeError err <> "). The bot may have been removed from"
+        <> " it or had its administrator rights taken away, in which case the"
+        <> " trade chat has stopped filling and nothing else will say so"
+        )
+
+-- | the connect code somebody sent the bot, where this update is one.
+--
+-- The website hands out a link, which opens the bot with a code in it, and
+-- pressing Start sends that code as "/start <code>" from the telegram
+-- account, which pressed it. So the two accounts are proved to be the same
+-- person by the pressing, and no name has to be typed or trusted.
+connectAttemptOf :: Update -> Maybe (Int64, Int64, Text)
+connectAttemptOf update = do
+  message <- updateMessage update
+  _ <- if isPrivateMessage message then Just () else Nothing
+  sender <- messageFrom message
+  body <- messageText message
+  code <- Text.stripPrefix "/start " (Text.strip body)
+  let trimmed = Text.strip code
+  _ <- if Text.null trimmed then Nothing else Just ()
+  return (chatId (messageChat message), userId sender, trimmed)
 
 -- | telegram's seconds since the epoch, as a time this service can store
 telegramTime :: Int64 -> UTCTime
