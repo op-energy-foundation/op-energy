@@ -37,11 +37,13 @@ type AdminAPI
         ]
        "Authorization"
        AccountToken
-    :> Description "Bans the given account. Its token stops working at once, \
-                   \it can no longer log in by secret or by password, and \
-                   \the offer service cancels its open offers and refunds \
-                   \their stakes on its next sweep. Already matched \
-                   \contracts are left to settle, as the stake of the other \
-                   \side is in them. A ban is permanent. \
+    :> Description "Bans the given account. Its token stops working at \
+                   \once and it can no longer log in by secret or by \
+                   \password. A ban is permanent. \
+                   \Note that a ban does not touch the account's offers: \
+                   \its open offers stay open and the sats staked in them \
+                   \stay staked, so a banned account can still be matched \
+                   \against and still settles. Cancelling and refunding \
+                   \them is not built. \
                    \Refused with 403 unless the caller is a moderator."
     :> Post '[JSON] BanUserResult
