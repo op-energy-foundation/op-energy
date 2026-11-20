@@ -30,7 +30,7 @@ import           Control.Monad.Logger (logInfo, logWarn)
 import           Control.Monad.Trans.Reader (ask)
 import qualified Control.Exception.Safe as E
 import           Data.Int (Int64)
-import           Data.Maybe (catMaybes, mapMaybe)
+import           Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import           Data.Text (Text)
 import qualified Data.Text as Text
 import           Data.Time.Clock (UTCTime, diffUTCTime, getCurrentTime)
@@ -245,7 +245,15 @@ pollOnce token chatId' = do
               (telegramGroupMessageChatId row)
               (telegramGroupMessageMessageId row)
               (telegramGroupMessageBody row)
-              (telegramGroupMessageSentAt row)
+              -- the time of the edit, not the time the message was sent:
+              -- an edit carries both, and storing the send time here would
+              -- have every edited message claim it was edited at the moment
+              -- it was written. The fallback is the time this poll read it,
+              -- which is the closest thing we have if telegram ever sends an
+              -- edit with no edit_date
+              ( fromMaybe (telegramGroupMessageCreatedAt row)
+                  (telegramGroupMessageEditedAt row)
+              )
             return $! Just (row, True)
       | otherwise = do
           wasNew <- insertTelegramMessageTx (mirroredRow message)
