@@ -19,15 +19,29 @@ import           Data.OpEnergy.BlockTime.API.V2
 accountAPI :: Proxy AccountAPI
 accountAPI = Proxy
 
+accountPublicAPI :: Proxy AccountPublicAPI
+accountPublicAPI = Proxy
+
 blockTimeAPI :: Proxy BlockTimeAPI
 blockTimeAPI = Proxy
 
 accountBlockTimeAPI :: Proxy AccountBlockTimeAPI
 accountBlockTimeAPI = Proxy
 
+accountBlockTimePublicAPI :: Proxy AccountBlockTimePublicAPI
+accountBlockTimePublicAPI = Proxy
+
 type AccountAPI
   = "api" :> ( "v1" :> "account" :> AccountV1API {- V1 API -}
              :<|> "v2" :> "account" :> AccountV2API {- V2 API -}
+             )
+
+-- | the same API without its service-to-service endpoints, which the swagger
+-- is generated from: publishing them would also publish the name of the
+-- header carrying their shared secret
+type AccountPublicAPI
+  = "api" :> ( "v1" :> "account" :> AccountV1API {- V1 API -}
+             :<|> "v2" :> "account" :> AccountV2PublicAPI {- V2 API -}
              )
 
 type BlockTimeAPI
@@ -39,6 +53,10 @@ type BlockTimeAPI
 -- | Composition of Account and Blocktime APIs
 type AccountBlockTimeAPI
   = AccountAPI :<|> BlockTimeAPI
+
+-- | 'AccountBlockTimeAPI' without the service-to-service endpoints
+type AccountBlockTimePublicAPI
+  = AccountPublicAPI :<|> BlockTimeAPI
 
 -- | API for serving @swagger.json@.
 type AccountSwaggerAPI
@@ -55,7 +73,7 @@ type API
 
 -- | Swagger spec for Todo API.
 accountApiSwagger :: Swagger
-accountApiSwagger = toSwagger accountAPI
+accountApiSwagger = toSwagger accountPublicAPI
   & info.title   .~ "OpEnergy Account API"
   & info.version .~ "1.0"
   & info.description ?~ "OpEnergy"
@@ -69,7 +87,7 @@ blockTimeApiSwagger = toSwagger blockTimeAPI
   & info.license ?~ ("MIT" & url ?~ URL "http://mit.com")
 
 apiSwagger :: Swagger
-apiSwagger = toSwagger accountBlockTimeAPI
+apiSwagger = toSwagger accountBlockTimePublicAPI
   & info.title   .~ "OpEnergy Account and BlockTime API"
   & info.version .~ "2.0"
   & info.description ?~ "OpEnergy"
