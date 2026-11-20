@@ -52,7 +52,8 @@ import           OpEnergy.Offer.Server.V1.Config
                  )
 import           OpEnergy.Offer.Server.V1.Telegram.Client
                  ( BotPath(..)
-                 , ChatRequest(..)
+                 , ChatMember(..)
+                 , ChatMemberRequest(..)
                  , GetUpdatesRequest(..)
                  , SendMessageRequest(..)
                  , Message(..)
@@ -61,7 +62,8 @@ import           OpEnergy.Offer.Server.V1.Telegram.Client
                  , Update(..)
                  , defaultGetUpdatesRequest
                  , getUpdates
-                 , getChat
+                 , getChatMember
+                 , botUserIdOf
                  , MessagePresence(..)
                  , messageStillThere
                  , isGroupMessage
@@ -82,6 +84,7 @@ import           OpEnergy.Offer.Server.V1.TelegramLink (redeemLinkCodeTx)
 import           OpEnergy.Offer.Server.V1.TelegramMessage
                  ( TelegramGroupMessage(..)
                  , advancePollStateTx
+                 , touchPollStateTx
                  , getPollOffsetTx
                  , insertTelegramMessageTx
                  , markTelegramMessageGoneTx
@@ -140,6 +143,20 @@ reconcileBatch = 50
 reconcileSpacingMicroseconds :: Int
 reconcileSpacingMicroseconds = 200000
 
+-- | how many messages in a row telegram may call gone before the sweep
+-- stops believing it.
+--
+-- The classifier reads only telegram's two exact refusals as "gone", so
+-- this should never be reached. It is here because hiding a message cannot
+-- be undone and these rows are the only copy of the chat there will ever
+-- be: if some answer this does not anticipate were ever read as "gone",
+-- this is what keeps the mistake to a handful of messages rather than the
+-- whole feed. Moderation removes a message here and there, never a dozen
+-- consecutively, so a run that long is evidence about the bot rather than
+-- about the group.
+reconcileGoneLimit :: Int
+reconcileGoneLimit = 10
+
 -- | one message of the group, as it is about to be stored
 data MirroredMessage = MirroredMessage
   { mirroredRow :: TelegramGroupMessage
@@ -168,16 +185,18 @@ runTelegramMirror token chatId' = do
     lastCheckedV <- newIORef Nothing
     lastSweptV <- newIORef Nothing
     forever $ do
-      checkStillInGroup state lastCheckedV token chatId'
-      reconcileDeletions state lastSweptV token chatId'
-      -- the inner call contains every telegram and DB failure already, so
-      -- this catches only what nothing else expected. It is still here
-      -- because the process ends when this thread does
-      eresult <- E.tryAny $ runAppT state $ pollOnce token chatId'
+      -- around all three, not only the poll: the process ends when this
+      -- thread does, so anything, which escapes any of them, takes the
+      -- service with it. The calls inside contain their own failures
+      -- already, which leaves this for what nothing else expected
+      eresult <- E.tryAny $ do
+        checkStillInGroup state lastCheckedV token chatId'
+        reconcileDeletions state lastSweptV token chatId'
+        runAppT state $ pollOnce token chatId'
       case eresult of
-        Right (Right updatesRead)
-          | updatesRead > 0 -> return () -- straight round again
-          | otherwise -> return () -- telegram held the poll open and had nothing
+        -- nothing to do either way: telegram either had updates, or held
+        -- the poll open for its timeout and had none
+        Right (Right _updatesRead) -> return ()
         Right (Left err) -> do
           runAppT state $ runLogging $ $(logWarn)
             ( "runTelegramMirror: " <> describeError err
@@ -225,7 +244,14 @@ pollOnce token chatId' = do
         $ getUpdates (BotPath (unTelegramBotToken token)) request
       case eresponse >>= resultOf of
         Left err -> return $! Left err
-        Right [] -> return $! Right 0
+        -- telegram held the poll open and had nothing. The offset does
+        -- not move, but the answer is recorded, so a mirror, which has
+        -- stopped, does not look like a quiet group
+        Right [] -> do
+          now <- getCurrentTimeDB
+          _ <- withDBTransaction "V1.TelegramClient.pollOnce.touch"
+            $ touchPollStateTx chatId' now
+          return $! Right 0
         Right updates -> do
           now <- getCurrentTimeDB
           let mirrored = mapMaybe (mirroredOf chatId' now) updates
@@ -286,7 +312,7 @@ pollOnce token chatId' = do
       | mirroredIsEdit message =
           let row = mirroredRow message
           in do
-            updateTelegramMessageBodyTx
+            changed <- updateTelegramMessageBodyTx
               (telegramGroupMessageChatId row)
               (telegramGroupMessageMessageId row)
               (telegramGroupMessageBody row)
@@ -299,7 +325,9 @@ pollOnce token chatId' = do
               ( fromMaybe (telegramGroupMessageCreatedAt row)
                   (telegramGroupMessageEditedAt row)
               )
-            return $! Just (row, True)
+            -- an edit of a message, which is not mirrored or has been
+            -- removed, changes nothing, so there is nothing to announce
+            return $! if changed then Just (row, True) else Nothing
       | otherwise = do
           wasNew <- insertTelegramMessageTx (mirroredRow message)
           return $! if wasNew then Just (mirroredRow message, False) else Nothing
@@ -378,21 +406,40 @@ reconcileDeletions state lastSweptV token chatId' = do
     case mrows of
       Nothing -> runAppT state $ runLogging $ $(logWarn)
         "reconcileDeletions: the messages to sweep could not be read"
-      Just rows -> mapM_ (probe apiURL) rows
+      Just rows -> sweep apiURL reconcileGoneLimit rows
   where
-    probe apiURL row = do
-      let messageId' = telegramGroupMessageMessageId row
-      presence <- messageStillThere apiURL
-        (BotPath (unTelegramBotToken token)) chatId' messageId'
-      case presence of
-        MessageStillThere -> return ()
-        -- said without being sure, so nothing is done and the next sweep
-        -- asks again
-        MessagePresenceUnknown _ -> return ()
-        MessageGone -> hide messageId'
-      threadDelay reconcileSpacingMicroseconds
+    -- stops the sweep once it has been told that too many messages in a
+    -- row are gone. Telegram answering that about message after message is
+    -- not what a group being moderated looks like, it is what a bot, which
+    -- can no longer see the group, looks like -- and hiding a message
+    -- cannot be undone, so the sweep gives up rather than carry on being
+    -- sure
+    sweep _ _ [] = return ()
+    sweep apiURL budget (row : rest)
+      | budget <= (0 :: Int) = runAppT state $ runLogging $ $(logWarn)
+          ( "reconcileDeletions: telegram said " <> tshow reconcileGoneLimit
+          <> " messages in a row were gone, which is more like the bot"
+          <> " having lost sight of the group than like moderation, so"
+          <> " this sweep stopped rather than hide any more"
+          )
+      | otherwise = do
+          let messageId' = telegramGroupMessageMessageId row
+          presence <- messageStillThere apiURL
+            (BotPath (unTelegramBotToken token)) chatId' messageId'
+          budget' <- case presence of
+            MessageStillThere -> return reconcileGoneLimit -- budget restored
+            -- said without being sure, so nothing is done and the next
+            -- sweep asks again
+            MessagePresenceUnknown _ -> return budget
+            MessageGone -> do
+              hide messageId'
+              return $! budget - 1
+          threadDelay reconcileSpacingMicroseconds
+          sweep apiURL budget' rest
     hide messageId' = do
-      goneAt <- getCurrentTime
+      -- the DB's clock, not this process's: a stored time has to agree
+      -- with what a later read of it returns
+      goneAt <- runAppT state getCurrentTimeDB
       mdone <- runAppT state
         $ withDBTransaction "V1.TelegramClient.reconcileDeletions.hide"
         $ markTelegramMessageGoneTx chatId' messageId' goneAt
@@ -438,16 +485,50 @@ checkStillInGroup state lastCheckedV token chatId' = do
   when due $ do
     writeIORef lastCheckedV (Just now)
     State{ config = Config{ configTelegramAPIURL = apiURL } } <- return state
-    eresponse <- withTelegram apiURL
-      $ getChat (BotPath (unTelegramBotToken token)) (ChatRequest chatId')
-    case eresponse >>= resultOf of
-      Right _ -> return ()
-      Left err -> runAppT state $ runLogging $ $(logWarn)
-        ( "checkStillInGroup: telegram will not describe group " <> tshow chatId'
-        <> " (" <> describeError err <> "). The bot may have been removed from"
-        <> " it or had its administrator rights taken away, in which case the"
-        <> " trade chat has stopped filling and nothing else will say so"
-        )
+    -- what the bot's own standing in the group is, rather than whether the
+    -- group can be described: getChat still answers for a group, which the
+    -- bot has been demoted in, so it cannot tell that moderation has
+    -- stopped working
+    case botUserIdOf (unTelegramBotToken token) of
+      Nothing -> runAppT state $ runLogging $ $(logWarn)
+        "checkStillInGroup: the configured token is not shaped like a bot token"
+      Just botUserId -> do
+        eresponse <- withTelegram apiURL
+          $ getChatMember (BotPath (unTelegramBotToken token))
+              (ChatMemberRequest chatId' botUserId)
+        case eresponse >>= resultOf of
+          Left err -> runAppT state $ runLogging $ $(logWarn)
+            ( "checkStillInGroup: telegram will not say what this bot is in"
+            <> " group " <> tshow chatId' <> " (" <> describeError err
+            <> "). It may have been removed from the group, in which case the"
+            <> " trade chat has stopped filling and nothing else will say so"
+            )
+          Right member -> reportStanding member
+
+  where
+    -- being in the group is not enough: a bot, which is no longer an
+    -- administrator, goes on mirroring perfectly well while every delete
+    -- and every ban a moderator asks for is refused, and nothing else
+    -- anywhere says why
+    reportStanding member
+      | chatMemberStatus member /= "administrator" =
+          runAppT state $ runLogging $ $(logWarn)
+            ( "checkStillInGroup: this bot is \"" <> chatMemberStatus member
+            <> "\" in group " <> tshow chatId' <> " rather than an"
+            <> " administrator, so a moderator cannot remove a message or a"
+            <> " person from the website"
+            )
+      | chatMemberCanDeleteMessages member /= Just True =
+          runAppT state $ runLogging $ $(logWarn)
+            ( "checkStillInGroup: this bot may not delete messages in group "
+            <> tshow chatId' <> ", so a moderator's removal will be refused"
+            )
+      | chatMemberCanRestrictMembers member /= Just True =
+          runAppT state $ runLogging $ $(logWarn)
+            ( "checkStillInGroup: this bot may not restrict members of group "
+            <> tshow chatId' <> ", so a moderator's ban will be refused"
+            )
+      | otherwise = return ()
 
 -- | the connect code somebody sent the bot, where this update is one.
 --

@@ -51,7 +51,7 @@ share [mkPersist sqlSettings, mkMigrate "migrateTelegramLink"] [persistLowerCase
 TelegramLink
   telegramUserId Int64
   personUUID Text -- the op energy account, as the cross service UUID rather than a local key: this service has no accounts table of its own
-  opEnergyDisplayName Text -- their op energy name as it was when they connected, refreshed whenever they next read the feed, so a rename catches up without this service having to be told about it
+  opEnergyDisplayName Text -- their op energy name as it was when they connected. Not refreshed: this service is never told about a rename, so an account, which renames itself, keeps the old name in the chat until it disconnects and connects again
   linkedAt UTCTime
   UniqueTelegramLinkTelegram telegramUserId -- one telegram account cannot be claimed by two op energy accounts
   UniqueTelegramLinkPerson personUUID -- and one op energy account cannot claim two telegram accounts
@@ -146,23 +146,6 @@ redeemLinkCodeTx code' telegramUserId' now = do
               -- Nothing here means this op energy account already has a
               -- telegram connected, which the unique on personUUID refuses
               return $! maybe False (const True) mlink
-
--- | keeps the stored op energy name in step with a rename.
---
--- Called where the account itself is reading the feed, so the name is
--- refreshed by the person it belongs to using the site, and this service
--- never has to be told about a rename.
-refreshLinkedNameTx
-  :: MonadIO m
-  => Text
-  -> Text
-  -> ReaderT SqlBackend m ()
-refreshLinkedNameTx personUUID' displayName =
-  updateWhere
-    [ TelegramLinkPersonUUID ==. personUUID'
-    , TelegramLinkOpEnergyDisplayName !=. displayName
-    ]
-    [ TelegramLinkOpEnergyDisplayName =. displayName ]
 
 -- | disconnects an op energy account from whatever telegram account it had.
 --

@@ -31,7 +31,6 @@ module OpEnergy.Error
   , tooManyFreeSatsContractsWithSameAccount
   , notAModerator
   , telegramMessageNotDeletable
-  , telegramSenderUnknown
   , telegramNotConfigured
   ) where
 
@@ -63,7 +62,6 @@ data BadRequestError
   | TooManyFreeSatsContractsWithSameAccount
   | NotAModerator
   | TelegramMessageNotDeletable
-  | TelegramSenderUnknown
 instance Show BadRequestError where
   show AuthenticationFailure = "authentication failure"
   show (InvalidRequest reason) = Text.unpack reason
@@ -82,8 +80,6 @@ instance Show BadRequestError where
   show TelegramMessageNotDeletable =
     "telegram will not delete this message any more, which is why it is\
     \ still shown here: it has to be removed in telegram itself"
-  show TelegramSenderUnknown =
-    "this message was sent anonymously, so there is no account to ban"
 
 data InternalError
   = Unspecified Text
@@ -147,8 +143,6 @@ notAModerator :: CallstackError
 notAModerator = CallstackError "" $! BadRequest NotAModerator
 telegramMessageNotDeletable :: CallstackError
 telegramMessageNotDeletable = CallstackError "" $! BadRequest TelegramMessageNotDeletable
-telegramSenderUnknown :: CallstackError
-telegramSenderUnknown = CallstackError "" $! BadRequest TelegramSenderUnknown
 offerNotOpen :: CallstackError
 offerNotOpen = CallstackError "" $! BadRequest OfferNotOpen
 offerFilled :: CallstackError

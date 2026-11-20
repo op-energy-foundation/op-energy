@@ -19,7 +19,7 @@ module OpEnergy.Offer.Server.V2.TelegramAPI.BanSender
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Logger (logError, logInfo)
 import           Control.Monad.Trans (lift)
-import           Control.Monad.Trans.Except (throwE)
+import           Control.Monad.Trans.Except (ExceptT(..), throwE)
 import           Control.Monad.Trans.Reader (ask)
 import           Data.Int (Int64)
 
@@ -38,8 +38,8 @@ import qualified OpEnergy.Offer.Server.V1.Telegram.Client as Telegram
 import           OpEnergy.Offer.Server.V2.TelegramAPI.CheckModerator
                  ( checkModerator)
 import           OpEnergy.Error
-                 ( CallstackError, eitherThrowJSON, runExceptPrefixT
-                 , telegramNotConfigured
+                 ( CallstackError, eitherThrowJSON, exceptTMaybeT
+                 , runExceptPrefixT, telegramNotConfigured
                  )
 
 -- | POST a ban of one telegram account
@@ -68,19 +68,16 @@ banSender telegramUserId token =
            , configTelegramChatId = mChatId
            }
        } <- lift ask
-  (botToken, chatId') <- case (mBotToken, mChatId) of
-    (Just botToken, Just chatId') -> return (botToken, chatId')
-    _ -> throwE telegramNotConfigured
-  eresponse <- liftIO $ Telegram.withTelegram apiURL
+  botToken <- exceptTMaybeT telegramNotConfigured $! return mBotToken
+  chatId' <- exceptTMaybeT telegramNotConfigured $! return mChatId
+  response <- ExceptT $ liftIO $ Telegram.withTelegram apiURL
     $ Telegram.banChatMember
         (Telegram.BotPath (unTelegramBotToken botToken))
         (Telegram.ChatMemberRequest chatId' telegramUserId)
-  case eresponse of
-    Left err -> throwE err
-    -- telegram's own words for the refusal, which say what the bot is not
-    -- allowed to do -- usually that it is not an administrator of the group
-    -- or may not restrict members
-    Right response -> either throwE (const (return ())) (Telegram.resultOf response)
+  -- telegram's own words for the refusal, which say what the bot is not
+  -- allowed to do -- usually that it is not an administrator of the group
+  -- or may not restrict members
+  either throwE (const (return ())) (Telegram.resultOf response)
   -- there is nothing of this in the group's own record afterwards, so the
   -- log line is the only place it is written down
   lift $ runLogging $ $(logInfo)

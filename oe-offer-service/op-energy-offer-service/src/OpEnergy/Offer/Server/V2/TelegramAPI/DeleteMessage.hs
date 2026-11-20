@@ -17,7 +17,7 @@ module OpEnergy.Offer.Server.V2.TelegramAPI.DeleteMessage
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Logger (logError)
 import           Control.Monad.Trans (lift)
-import           Control.Monad.Trans.Except (throwE)
+import           Control.Monad.Trans.Except (ExceptT(..), throwE)
 import           Control.Monad.Trans.Reader (ask)
 
 import           Servant (NoContent(..))
@@ -46,7 +46,7 @@ import           OpEnergy.Offer.Server.V2.TelegramAPI.CheckModerator
                  ( checkModerator)
 import           OpEnergy.Error
                  ( CallstackError, dbQueryError, eitherThrowJSON
-                 , exceptTMaybeT, runExceptPrefixT
+                 , exceptTMaybeT, invalidRequest, runExceptPrefixT
                  , telegramMessageNotDeletable, telegramNotConfigured
                  )
 
@@ -78,24 +78,23 @@ deleteMessage messageIdV token =
        } <- lift ask
   botToken <- exceptTMaybeT telegramNotConfigured $! return mBotToken
   chatId' <- exceptTMaybeT telegramNotConfigured $! return mChatId
-  -- total: the id was verified where it arrived, so there is no second
-  -- opinion here about what a message id, which is not one, should do
-  let messageId' = telegramMessageIDNumber messageIdV
+  -- verified where it arrived, so this never refuses in practice; it is
+  -- an exceptTMaybeT rather than a fallback number so that it could never
+  -- quietly name a different message than the caller asked about
+  messageId' <- exceptTMaybeT (invalidRequest "that is not a message id")
+    $! return (telegramMessageIDNumber messageIdV)
   -- telegram first. Only once it has actually removed the message is the
   -- copy marked, so the feed never hides what the group still shows
-  eresponse <- liftIO $ Telegram.withTelegram apiURL
+  -- an unreachable telegram, or one answering with a status, is an outage
+  -- rather than a refusal and is reported as one
+  response <- ExceptT $ liftIO $ Telegram.withTelegram apiURL
     $ Telegram.deleteMessage
         (Telegram.BotPath (unTelegramBotToken botToken))
         (Telegram.ChatMessageRequest chatId' messageId')
-  case eresponse of
-    -- telegram could not be reached or answered with a status: that is an
-    -- outage rather than a refusal, and is reported as one
-    Left err -> throwE err
-    Right response -> case Telegram.resultOf response of
-      -- telegram answered and said no, which is what it says once a
-      -- message is about two days old
-      Left _ -> throwE telegramMessageNotDeletable
-      Right _ -> return ()
+  -- telegram answering and saying no is what it does once a message is
+  -- about two days old
+  either (const (throwE telegramMessageNotDeletable)) (const (return ()))
+    (Telegram.resultOf response)
   now <- getCurrentTimeDB
   exceptTMaybeT dbQueryError $ withDBTransaction "V2.TelegramAPI.DeleteMessage"
     $ markTelegramMessageDeletedTx chatId' messageId' moderatorUUID now

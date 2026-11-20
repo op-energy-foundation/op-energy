@@ -1,16 +1,16 @@
 {-- | V2 ban handler: removes an account from the platform.
  -
- - A ban does three things in one transaction: it records when it happened,
- - so the account is refused from then on, and it bumps the logins count,
- - which is what the account token carries and is matched on, so every
- - token already handed out stops resolving. There is no session table to
- - clear: the counter is the session.
+ - A ban does two things: it records when it happened, so the account is
+ - refused from then on, and it bumps the logins count, which is what the
+ - account token carries and is matched on, so every token already handed
+ - out stops resolving. There is no session table to clear: the counter is
+ - the session.
  -
- - What it deliberately does not do is touch the offer service. That
- - service owns the offers and the money in them, and nothing here can
- - reach across to it. It notices the ban on its next sweep and cancels the
- - account's open offers then, within a tick, so the ban itself is instant
- - and the refund follows.
+ - What it does not do is touch the account's offers. That service owns the
+ - offers and the money staked in them, nothing here can reach across to
+ - it, and no sweep on that side reads the ban: a banned account's open
+ - offers stay open and can still be matched and settled. Cancelling them
+ - and returning the stakes is not built.
  -}
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE OverloadedStrings          #-}

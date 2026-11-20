@@ -2,7 +2,6 @@
 , hspec, text
 , servant, servant-server, servant-client, servant-client-core, servant-swagger, swagger2
 , http-client, http-client-tls, http-types
-, random
 , aeson
 , bytestring
 , containers
@@ -43,7 +42,7 @@ mkDerivation {
     op-energy-offer-api
     servant servant-server servant-client servant-client-core servant-swagger swagger2
     http-client http-client-tls http-types
-    random
+
     aeson
     text bytestring
     containers

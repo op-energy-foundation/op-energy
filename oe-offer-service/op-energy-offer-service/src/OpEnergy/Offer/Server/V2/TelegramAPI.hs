@@ -29,6 +29,7 @@ import qualified OpEnergy.Offer.Server.V2.TelegramAPI.BanSender as BanSender
 import qualified OpEnergy.Offer.Server.V2.TelegramAPI.DeleteMessage as DeleteMessage
 import qualified OpEnergy.Offer.Server.V2.TelegramAPI.GetMessages as GetMessages
 import qualified OpEnergy.Offer.Server.V2.TelegramAPI.StartLink as StartLink
+import qualified OpEnergy.Offer.Server.V2.TelegramAPI.Unlink as Unlink
 
 -- | see Data.OpEnergy.Offer.API.V1.TelegramAPI for the API definition
 handlers :: ServerT TelegramAPI (AppT Handler)
@@ -45,7 +46,7 @@ handlers
          :: AccountAPI.AccountToken -> AppM TelegramLinkStart
        )
 
-  :<|> ( StartLink.unlinkHandler
+  :<|> ( Unlink.unlinkHandler
          :: AccountAPI.AccountToken -> AppM NoContent
        )
 

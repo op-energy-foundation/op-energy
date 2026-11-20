@@ -24,6 +24,7 @@ module OpEnergy.Offer.Server.V1.Telegram.Client
   , TelegramUser(..)
   , TelegramChat(..)
   , ChatMember(..)
+  , botUserIdOf
   , senderDisplayNameOf
   , isGroupMessage
   , isPrivateMessage
@@ -31,13 +32,11 @@ module OpEnergy.Offer.Server.V1.Telegram.Client
   , defaultGetUpdatesRequest
   , ChatMessageRequest(..)
   , ChatMemberRequest(..)
-  , ChatRequest(..)
   , SendMessageRequest(..)
   , getUpdates
   , deleteMessage
   , banChatMember
   , getChatMember
-  , getChat
   , sendMessage
   , ReactionRequest(..)
   , setMessageReaction
@@ -53,6 +52,7 @@ import           Data.Proxy (Proxy(..))
 import           Data.Text (Text)
 import qualified Data.Text as Text
 import           Data.Text.Show (tshow)
+import           Text.Read (readMaybe)
 
 import qualified Control.Exception.Safe as E
 import           Network.HTTP.Client
@@ -195,6 +195,19 @@ instance FromJSON ChatMember where
     <*> v .:? "can_delete_messages"
     <*> v .:? "can_restrict_members"
 
+-- | the bot's own telegram id, which is the part of its token before the
+-- colon.
+--
+-- Taken from the token rather than asked for with getMe, so the membership
+-- check costs one call rather than two and needs nothing kept between them.
+--
+-- Example:
+--
+-- > botUserIdOf "7123456789:AAE..." -- Just 7123456789
+botUserIdOf :: Text -> Maybe Int64
+botUserIdOf token =
+  readMaybe (Text.unpack (Text.takeWhile (/= ':') token))
+
 -- | the name a message is shown under.
 --
 -- @first_name@ is the only name telegram always has, so it is what a sender
@@ -280,14 +293,6 @@ instance ToJSON ChatMemberRequest where
     , "user_id" .= chatMemberUserId request
     ]
 
--- | names one chat, which is what asking after the group takes.
-newtype ChatRequest = ChatRequest
-  { chatRequestChatId :: Int64
-  }
-  deriving (Show, Eq)
-instance ToJSON ChatRequest where
-  toJSON request = object [ "chat_id" .= chatRequestChatId request ]
-
 -- | what the bot says back to somebody, who talked to it. Only ever used
 -- to answer a connect attempt: pressing Start and being told nothing is
 -- indistinguishable from pressing Start and it not having worked.
@@ -340,10 +345,6 @@ type TelegramBotAPI
     :> ReqBody '[JSON] ChatMemberRequest
     :> Post '[JSON] (TelegramResponse ChatMember)
 
-  :<|> Capture "token" BotPath
-    :> "getChat"
-    :> ReqBody '[JSON] ChatRequest
-    :> Post '[JSON] (TelegramResponse TelegramChat)
 
   :<|> Capture "token" BotPath
     :> "sendMessage"
@@ -359,14 +360,12 @@ getUpdates :: BotPath -> GetUpdatesRequest -> ClientM (TelegramResponse [Update]
 deleteMessage :: BotPath -> ChatMessageRequest -> ClientM (TelegramResponse Bool)
 banChatMember :: BotPath -> ChatMemberRequest -> ClientM (TelegramResponse Bool)
 getChatMember :: BotPath -> ChatMemberRequest -> ClientM (TelegramResponse ChatMember)
-getChat :: BotPath -> ChatRequest -> ClientM (TelegramResponse TelegramChat)
 sendMessage :: BotPath -> SendMessageRequest -> ClientM (TelegramResponse Message)
 setMessageReaction :: BotPath -> ReactionRequest -> ClientM (TelegramResponse Bool)
 getUpdates
   :<|> deleteMessage
   :<|> banChatMember
   :<|> getChatMember
-  :<|> getChat
   :<|> sendMessage
   :<|> setMessageReaction =
   client (Proxy :: Proxy TelegramBotAPI)
@@ -422,19 +421,23 @@ data MessagePresence
 -- which is to match the group, has to ask about messages one by one.
 --
 -- The call used for it is setMessageReaction with an empty reaction list,
--- which telegram refuses either way and which therefore changes nothing and
--- shows nothing to anybody. It refuses it differently, though, and that is
--- the answer: a message, which is still there, gets REACTION_EMPTY, because
--- the empty list is what is wrong with the request; a message, which is
--- gone, gets "message to react not found", because telegram looks the
--- message up first and never reaches the list.
+-- which adds nothing and shows nothing to anybody whatever the answer. A
+-- message, which is still there, is accepted or is refused REACTION_EMPTY
+-- depending on the version telegram is running; a message, which is gone,
+-- is refused "message to react not found", because telegram looks the
+-- message up before it reads the list.
 --
--- This leans on the order telegram validates a request in, which is not
--- documented. It is checked by 'messageStillThere' answering
--- 'MessagePresenceUnknown' for anything it does not recognise, and an
--- unknown answer hides nothing -- so if that order ever changes, the mirror
--- stops noticing deletions again, which is where it started, rather than
--- hiding messages, which are really there.
+-- Only those two exact refusals are read as an answer. Everything else --
+-- an unreachable telegram, a rate limit, "chat not found" when the bot has
+-- been removed from the group, an unauthorized token -- is
+-- 'MessagePresenceUnknown', and an unknown answer hides nothing.
+--
+-- That distinction is the whole safety of this: "chat not found" and
+-- "message to react not found" both contain the words "not found", and
+-- reading the second loosely would mean that a bot, which has been thrown
+-- out of its group, answers "gone" for every message it is asked about and
+-- the sweep erases the entire feed -- which is the only copy of the chat
+-- there will ever be, and which nothing can put back.
 messageStillThere
   :: BaseUrl
   -> BotPath
@@ -454,9 +457,12 @@ messageStillThere url path chatId' messageId' = do
     -- deliberately not the exception: it carries the request, and the
     -- request carries the token
     Left _ -> MessagePresenceUnknown "could not reach telegram"
-    -- telegram is not expected to accept this call at all, but a message,
-    -- which answered anything at all, is a message, which is there
-    Right (Right _) -> MessageStillThere
+    -- 200 is not the same as accepted: telegram answers 200 with ok false
+    -- for a refusal, so the body is what says which, here as everywhere
+    -- else in this module
+    Right (Right response)
+      | telegramOk response -> MessageStillThere
+      | otherwise -> presenceOfDescription (telegramDescription response)
     Right (Left clientError) -> presenceOfRefusal clientError
 
 -- | reads one of telegram's refusals of the presence probe.
@@ -467,16 +473,26 @@ presenceOfRefusal :: ClientError -> MessagePresence
 presenceOfRefusal (FailureResponse _ response) =
   case decode (responseBody response) :: Maybe (TelegramResponse Bool) of
     Nothing -> MessagePresenceUnknown "telegram's refusal could not be read"
-    Just body -> case fmap Text.toUpper (telegramDescription body) of
-      Nothing -> MessagePresenceUnknown "telegram refused without saying why"
-      Just description
-        | "REACTION_EMPTY" `Text.isInfixOf` description -> MessageStillThere
-        | "NOT FOUND" `Text.isInfixOf` description -> MessageGone
-        | "MESSAGE_ID_INVALID" `Text.isInfixOf` description -> MessageGone
-        | otherwise -> MessagePresenceUnknown
-            ("telegram refused the probe: " <> description)
+    Just body -> presenceOfDescription (telegramDescription body)
 presenceOfRefusal clientError =
   MessagePresenceUnknown (describeClientError clientError)
+
+-- | reads telegram's own words for refusing the presence probe.
+--
+-- Matched in full rather than by the words "not found", which telegram also
+-- says when it is the chat it cannot find -- see 'messageStillThere' for
+-- what reading that loosely would cost.
+presenceOfDescription :: Maybe Text -> MessagePresence
+presenceOfDescription Nothing =
+  MessagePresenceUnknown "telegram refused without saying why"
+presenceOfDescription (Just description)
+  | normalised == "BAD REQUEST: MESSAGE TO REACT NOT FOUND" = MessageGone
+  | normalised == "BAD REQUEST: MESSAGE_ID_INVALID" = MessageGone
+  | "REACTION_EMPTY" `Text.isInfixOf` normalised = MessageStillThere
+  | otherwise = MessagePresenceUnknown
+      ("telegram refused the probe: " <> description)
+  where
+    normalised = Text.toUpper (Text.strip description)
 
 -- | describes a client error by its status alone.
 --

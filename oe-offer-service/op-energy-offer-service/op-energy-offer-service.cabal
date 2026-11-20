@@ -42,6 +42,7 @@ library
                    , OpEnergy.Offer.Server.V2.TelegramAPI.DeleteMessage
                    , OpEnergy.Offer.Server.V2.TelegramAPI.BanSender
                    , OpEnergy.Offer.Server.V2.TelegramAPI.StartLink
+                   , OpEnergy.Offer.Server.V2.TelegramAPI.Unlink
                    , OpEnergy.Offer.Server.V1.PlatformStats
                    , OpEnergy.Offer.Server.V1.LiveEvent
                    , OpEnergy.Offer.Server.V1.WebSocketService
@@ -74,7 +75,6 @@ library
                     , servant
                     , servant-server, servant-client, servant-client-core
                     , http-client, http-client-tls, http-types
-                    , random
                     , servant-swagger
                     , swagger2
                     , time

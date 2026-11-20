@@ -39,7 +39,7 @@ import           Data.Time.Clock (UTCTime)
 import           GHC.Generics
 
 import           Database.Persist
-import           Database.Persist.Sql (SqlBackend)
+import           Database.Persist.Sql (SqlBackend, updateWhereCount)
 import           Database.Persist.TH
 
 import           Data.OpEnergy.Offer.API.V1.TelegramMessageID
@@ -71,7 +71,7 @@ TelegramGroupMessage
 TelegramPollState
   chatId Int64
   lastUpdateId Int64 -- the next poll asks telegram for this plus one, which is also what confirms to telegram that everything up to it arrived. Advanced in the same transaction as the rows it covers
-  lastPolledAt UTCTime -- when telegram last answered, whether or not it had anything to say. How long ago this was is what tells a dead mirror from a quiet group
+  lastPolledAt UTCTime -- when telegram last answered, whether or not it had anything to say, so how long ago this was tells a mirror, which has stopped, from a group, which is quiet
   UniqueTelegramPollState chatId
   deriving Eq Show Generic
 |]
@@ -125,21 +125,37 @@ insertTelegramMessageTx message = do
 --
 -- Telegram sends an edit as a whole message rather than as a difference, so
 -- what is stored is the new text and when it was edited.
+-- | rewrites a message, which was edited in the group, saying whether
+-- there was one to rewrite.
+--
+-- Two rows are deliberately left alone. One, which was never mirrored,
+-- because telegram replays an edit of a message, which this service never
+-- saw -- anything said before the bot joined, or while it was down longer
+-- than a redelivery covers -- and there is nothing to attach the new text
+-- to. One, which has been removed, because an edit telegram had already
+-- buffered when a moderator removed the message would otherwise write the
+-- text back and announce it, and a reader would watch a removed message
+-- return.
+--
+-- The caller needs to know which happened, as an edit, which changed
+-- nothing, must not be announced to anybody.
 updateTelegramMessageBodyTx
   :: MonadIO m
   => Int64
   -> Int64
   -> Text
   -> UTCTime
-  -> ReaderT SqlBackend m ()
-updateTelegramMessageBodyTx chatId' messageId' body' editedAt' =
-  updateWhere
+  -> ReaderT SqlBackend m Bool
+updateTelegramMessageBodyTx chatId' messageId' body' editedAt' = do
+  changed <- updateWhereCount
     [ TelegramGroupMessageChatId ==. chatId'
     , TelegramGroupMessageMessageId ==. messageId'
+    , TelegramGroupMessageDeletedAt ==. Nothing
     ]
     [ TelegramGroupMessageBody =. body'
     , TelegramGroupMessageEditedAt =. Just editedAt'
     ]
+  return $! changed > 0
 
 -- | the newest messages of a group, which this service still believes are
 -- there, newest first.
@@ -226,6 +242,23 @@ advancePollStateTx chatId' lastUpdateId' now =
     , TelegramPollStateLastPolledAt =. now
     ]
     >> return ()
+
+-- | records that telegram answered, without moving the offset.
+--
+-- A quiet group answers nothing for as long as it is quiet, and a mirror,
+-- which has silently stopped, answers nothing for ever. Without this the
+-- two look identical in the database, and lastPolledAt would be no more
+-- than the time of the last message -- which is the thing it is supposed
+-- to be distinguishable from.
+touchPollStateTx
+  :: MonadIO m
+  => Int64
+  -> UTCTime
+  -> ReaderT SqlBackend m ()
+touchPollStateTx chatId' now =
+  updateWhere
+    [ TelegramPollStateChatId ==. chatId' ]
+    [ TelegramPollStateLastPolledAt =. now ]
 
 -- | where to carry on reading this group from, or Nothing when it has never
 -- been read, which asks telegram for whatever it still holds.

@@ -8,29 +8,25 @@ module OpEnergy.Offer.Server.V2.TelegramAPI.GetMessages
   , getMessages
   ) where
 
-import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Logger (logError)
 import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Reader (ask)
-import           Data.Int (Int64)
 import qualified Data.Map.Strict as Map
 import           Data.Maybe (mapMaybe)
-import qualified Data.Text as Text
-import           Text.Read (readMaybe)
 
 import           Database.Persist
-import           Database.Persist.Postgresql (runSqlPersistMPool)
 
 import           Data.OpEnergy.API.V1.Positive (Positive, fromPositive)
 import           Data.OpEnergy.Offer.API.V1.TelegramFeed
                  ( TelegramFeed(..)
                  )
 import           Data.OpEnergy.Offer.API.V1.TelegramMessageID
-                 ( TelegramMessageID(..)
+                 ( TelegramMessageID
+                 , telegramMessageIDNumber
                  )
 
 import           OpEnergy.Offer.Server.V1.Class
-                 ( AppM, State(..), runLogging, profile)
+                 ( AppM, State(..), runLogging, profile, withDBTransaction)
 import           OpEnergy.Offer.Server.V1.Config (Config(..))
 import           OpEnergy.Offer.Server.V1.TelegramLink (opEnergyNamesTx)
 import           OpEnergy.Offer.Server.V1.TelegramMessage
@@ -39,7 +35,8 @@ import           OpEnergy.Offer.Server.V1.TelegramMessage
                  , telegramMessageInfoOf
                  )
 import           OpEnergy.Error
-                 ( CallstackError, eitherThrowJSON, runExceptPrefixT
+                 ( CallstackError, dbQueryError, eitherThrowJSON
+                 , exceptTMaybeT, runExceptPrefixT
                  )
 
 -- | how many messages a page holds when the caller does not say
@@ -73,9 +70,7 @@ getMessages
 getMessages mBefore mLimit =
     let name = "V2.TelegramAPI.GetMessages.getMessages"
     in profile name $ runExceptPrefixT name $ do
-  State{ offerDBPool = pool
-       , config = Config{ configTelegramChatId = mChatId }
-       } <- lift ask
+  State{ config = Config{ configTelegramChatId = mChatId } } <- lift ask
   let limit' = maybe defaultLimit (min maxLimit . fromPositive) mLimit
   case mChatId of
     Nothing -> return $! TelegramFeed
@@ -83,7 +78,8 @@ getMessages mBefore mLimit =
       , limit = fromIntegral limit'
       , hasMore = False
       }
-    Just chatId' -> liftIO $ flip runSqlPersistMPool pool $ do
+    Just chatId' -> exceptTMaybeT dbQueryError
+      $ withDBTransaction "V2.TelegramAPI.GetMessages" $ do
       -- one more than the page is read, so whether there is an older
       -- message is answered by the read, which produced the page rather
       -- than by counting the whole chat
@@ -109,10 +105,10 @@ getMessages mBefore mLimit =
     nameFor names row = telegramMessageInfoOf
       ( telegramGroupMessageSenderId row >>= flip Map.lookup names )
       row
-    -- a cursor, which is not a number, matches nothing rather than
-    -- everything: it was not an id this service ever handed out
+    -- a cursor, which is not a number, cannot arrive: FromHttpApiData
+    -- refuses one. If it ever did it would read as no cursor, which is the
+    -- newest page -- the same thing a reader gets on their first request
     olderThan Nothing = []
-    olderThan (Just (TelegramMessageID raw)) =
-      case readMaybe (Text.unpack raw) :: Maybe Int64 of
-        Just messageId' -> [ TelegramGroupMessageMessageId <. messageId' ]
-        Nothing -> [ TelegramGroupMessageMessageId <. 0 ]
+    olderThan (Just before) = maybe []
+      (\messageId' -> [ TelegramGroupMessageMessageId <. messageId' ])
+      (telegramMessageIDNumber before)

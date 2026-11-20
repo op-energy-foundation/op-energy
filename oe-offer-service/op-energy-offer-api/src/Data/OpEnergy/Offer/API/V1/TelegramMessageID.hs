@@ -46,13 +46,17 @@ everifyTelegramMessageID raw = case readMaybe (Text.unpack raw) :: Maybe Int64 o
     "TelegramMessageID: telegram numbers its messages, so this is not one"
   Just _ -> Right $! TelegramMessageID raw
 
--- | the id as the number telegram speaks in.
+-- | the id as the number telegram speaks in, where it is one.
 --
--- Total, because nothing can build a 'TelegramMessageID' without going
--- through 'everifyTelegramMessageID' first.
-telegramMessageIDNumber :: TelegramMessageID -> Int64
+-- Every id, which arrived over the API, has been through
+-- 'everifyTelegramMessageID', so this answers 'Just' for all of them. It
+-- is a 'Maybe' rather than a plain 'Int64' because the constructor is
+-- exported -- the mirror builds ids from telegram's own numbers -- and a
+-- fallback number here would quietly name whatever message it happened to
+-- pick.
+telegramMessageIDNumber :: TelegramMessageID -> Maybe Int64
 telegramMessageIDNumber (TelegramMessageID raw) =
-  maybe 0 id (readMaybe (Text.unpack raw))
+  readMaybe (Text.unpack raw)
 
 instance ToJSON TelegramMessageID where
   toJSON (TelegramMessageID t) = toJSON t

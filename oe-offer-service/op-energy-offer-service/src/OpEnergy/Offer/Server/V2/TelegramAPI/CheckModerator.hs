@@ -1,4 +1,4 @@
-{-- | Shared guard for the trade chat's moderator endpoints.
+{-- | Who is calling a trade chat endpoint, and whether they may moderate.
  -
  - This service does not know who a moderator is: the account service does.
  - It already resolves every account token there to find out who is calling,
@@ -8,6 +8,7 @@
 {-# LANGUAGE OverloadedStrings          #-}
 module OpEnergy.Offer.Server.V2.TelegramAPI.CheckModerator
   ( checkModerator
+  , whoIsCalling
   ) where
 
 import           Control.Monad (unless)
@@ -23,6 +24,8 @@ import qualified Data.OpEnergy.Account.API.V2.WhoAmIResult as AccountV2
 
 import qualified Data.ByteString.Short as ShortBS
 import qualified Data.Text.Encoding as Text
+
+import           Servant.API (toQueryParam)
 
 import           OpEnergy.Offer.Server.V1.Class (AppT)
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
@@ -49,3 +52,25 @@ checkModerator token = do
     ExceptT $ AccountClient.verifyAccountToken token
   unless (isModerator role') $ throwE notAModerator
   return $! Text.decodeUtf8 $! ShortBS.fromShort $! AccountAPI.unUUID personUUIDV
+
+-- | the caller's account and the name it currently goes by.
+--
+-- The name is read here rather than stored once and left, so an account,
+-- which connects after renaming itself, stores the new name.
+--
+-- Example:
+--
+-- > (personUUID, displayName) <- whoIsCalling token
+whoIsCalling
+  :: ( MonadIO m
+     , MonadMonitor m
+     )
+  => AccountAPI.AccountToken
+  -> ExceptT CallstackError (AppT m) (Text, Text)
+whoIsCalling token = do
+  (AccountV2.WhoAmIResult personUUIDV displayNameV _balance _freeSats _role) <-
+    ExceptT $ AccountClient.verifyAccountToken token
+  return
+    ( Text.decodeUtf8 $! ShortBS.fromShort $! AccountAPI.unUUID personUUIDV
+    , toQueryParam displayNameV
+    )
