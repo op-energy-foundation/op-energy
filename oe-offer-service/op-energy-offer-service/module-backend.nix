@@ -17,11 +17,18 @@ let
     $$
     ;
   '';
+  # the config key, which a credential is written to: the name without its
+  # _SECRET suffix, which is what credentials_locations below promises
+  credential_assignment = name:
+    ".${lib.removeSuffix "_SECRET" name} = \\\"$(cat $CREDENTIALS_DIRECTORY/${name})\\\"";
+  # one assignment per credential of the set, rather than a list written out
+  # here, so a deployment, which needs another credential -- the token of the
+  # telegram bot, which mirrors the trade chat, say -- adds it to
+  # credentials_locations instead of changing this module
+  credentials_filter = lib.concatStringsSep " | "
+    (map credential_assignment (builtins.attrNames cfg.credentials_locations));
   inject_credentials = src_file: file: pkgs.writeScriptBin "inject_credentials" ''
-    cat ${src_file} | jq "\
-      .DB_PASSWORD = \"$(cat $CREDENTIALS_DIRECTORY/DB_PASSWORD_SECRET)\" \
-      | .INTERNAL_SERVICE_SHARED_SECRET = \"$(cat $CREDENTIALS_DIRECTORY/INTERNAL_SERVICE_SHARED_SECRET_SECRET)\" \
-      " > ${file}
+    cat ${src_file} | jq "${credentials_filter}" > ${file}
     '';
 
   cfg = config.services.op-energy-offer-service;
@@ -185,10 +192,12 @@ in
           Type = "simple";
           Restart = "always";
           RestartSec = "10s";
+          # loaded from the same attrset the filter above is built from, so
+          # a credential cannot be written into the config without systemd
+          # having been asked for it
           LoadCredential =
-            [ "DB_PASSWORD_SECRET:${cfg.credentials_locations.DB_PASSWORD_SECRET}"
-              "INTERNAL_SERVICE_SHARED_SECRET_SECRET:${cfg.credentials_locations.INTERNAL_SERVICE_SHARED_SECRET_SECRET}"
-            ];
+            lib.mapAttrsToList (name: path: "${name}:${path}")
+              cfg.credentials_locations;
           User =  "op-energy-offer";
           Group = "op-energy-offer";
         };
