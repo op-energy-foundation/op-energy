@@ -37,6 +37,7 @@ module OpEnergy.Account.Server.V1.Wallet.LNBits
   ) where
 
 import           Control.Monad (when)
+import           System.Timeout (timeout)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Except
@@ -48,7 +49,7 @@ import           Data.Maybe (fromMaybe, isJust)
 import           Data.Pool (Pool)
 import           Data.Text (Text)
 import qualified Data.Text as Text
-import           Data.Time.Clock.POSIX (POSIXTime)
+import           Data.Time.Clock.POSIX (POSIXTime, utcTimeToPOSIXSeconds)
 
 import           Database.Persist
 import           Database.Persist.Sql
@@ -97,6 +98,19 @@ import           OpEnergy.Error
                  , walletSelfPaymentNotAllowed, walletUnreachable
                  )
 
+-- | how long the startup check waits on one call to LNBits. Short, as
+-- nothing is served until it is done and a check, which does not answer,
+-- is not a reason to refuse to start
+keysCheckDeadlineMicros :: Int
+keysCheckDeadlineMicros = 5 * 1000 * 1000
+
+-- | gives a call a deadline of its own, answering as a call, which failed,
+-- where it is not met
+withDeadline :: IO (Either CallstackError r) -> IO (Either CallstackError r)
+withDeadline call = do
+  manswer <- timeout keysCheckDeadlineMicros call
+  return $! fromMaybe (Left walletUnreachable) manswer
+
 -- | wallet backend, which issues its invoices through the LNBits instance
 -- at the given URL.
 --
@@ -120,8 +134,15 @@ everifyKeysNameOneWallet
   -> Text
   -> IO (Maybe Text)
 everifyKeysNameOneWallet url invoiceKey adminKey = do
-  einvoice <- callLNBits url $ LNBits.readWalletInfo invoiceKey
-  eadmin <- callLNBits url $ LNBits.readWalletInfo adminKey
+  -- bounded, and the second call is only made where the first answered:
+  -- this runs before the API is served, so an LNBits, which is reachable
+  -- but slow to answer, would otherwise hold the service down for as long
+  -- as the client waits -- twice. A check, which does not finish, claims
+  -- nothing, which is what an unreachable LNBits already does
+  einvoice <- withDeadline $ callLNBits url $ LNBits.readWalletInfo invoiceKey
+  eadmin <- case einvoice of
+    Right _ -> withDeadline $ callLNBits url $ LNBits.readWalletInfo adminKey
+    Left err -> return $! Left err
   return $! case (einvoice, eadmin) of
     (Right invoiceWallet, Right adminWallet)
       | LNBits.walletInfoResponseName invoiceWallet
@@ -170,7 +191,6 @@ createInvoice
 createInvoice url invoiceKey pool params = runExceptT $ do
   let Sats amount = createInvoiceAmountSats params
       now = createInvoiceNow params
-      expiresAt = now + fromIntegral (createInvoiceExpirySecs params)
   answer <- ExceptT $ callLNBits url $ LNBits.createInvoice invoiceKey
     $ LNBits.CreateInvoiceRequest
       { LNBits.createInvoiceRequestAmountSats = amount
@@ -178,6 +198,15 @@ createInvoice url invoiceKey pool params = runExceptT $ do
       , LNBits.createInvoiceRequestExpirySecs = createInvoiceExpirySecs params
       }
   (paymentHashV, invoiceV) <- ExceptT $ return $! readInvoiceAnswer answer
+  -- the wallet's own expiry where it reports one: the invoice stops being
+  -- payable a set time after LNBits made it, not after this service asked
+  -- for it, and the reservation and the call itself sit between the two.
+  -- Taking the time this handler started would report an invoice expired
+  -- while it was still payable, and stop counting its slot early
+  let expiresAt = maybe
+        (now + fromIntegral (createInvoiceExpirySecs params))
+        utcTimeToPOSIXSeconds
+        (LNBits.paymentResponseExpiresAt answer)
   ExceptT $ recordInvoice pool params paymentHashV invoiceV expiresAt
 
 -- | the hash and the invoice of an answer, verified as this service's own

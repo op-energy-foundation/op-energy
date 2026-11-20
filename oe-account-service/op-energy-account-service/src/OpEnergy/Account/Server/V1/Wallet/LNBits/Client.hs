@@ -37,6 +37,7 @@ import           Data.Aeson
                  , (.=), (.:), (.:?), (.!=)
                  )
 import           Data.Int (Int64)
+import           Data.Time.Clock (UTCTime)
 import           Data.Maybe (fromMaybe)
 import           Data.Proxy (Proxy(..))
 import           Data.Text (Text)
@@ -124,6 +125,11 @@ data PaymentResponse = PaymentResponse
     -- an attempt, which failed, are separate payments to LNBits and each
     -- has its own. Empty where a version does not answer with one
   , paymentResponseCheckingId :: Text
+    -- | when LNBits says the invoice stops being payable. Its own, so it
+    -- is counted from the moment LNBits made the invoice rather than from
+    -- the moment this service decided to ask for one. Nothing where the
+    -- answer carries none
+  , paymentResponseExpiresAt :: Maybe UTCTime
   }
   deriving (Show, Eq)
 
@@ -145,6 +151,7 @@ instance FromJSON PaymentResponse where
     -- LNBits leaves the field out until there is something to report
     <*> v .:? "status" .!= "pending"
     <*> v .:? "checking_id" .!= ""
+    <*> v .:? "expiry"
 
 -- | what LNBits answers about a payment it is given the hash of. 'paid' is
 -- the explicit answer and 'status' describes how it got there
