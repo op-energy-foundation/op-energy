@@ -3,6 +3,7 @@ module OpEnergy.Offer.Server.V1.Config where
 
 import           Data.Text (Text)
 import           Data.Maybe
+import           Data.Int (Int64)
 import           Data.Word (Word64)
 import           Control.Monad (when)
 import qualified Data.List as List
@@ -28,6 +29,21 @@ instance FromJSON LogLevel where
       "Warn" -> LevelWarn
       "Error" -> LevelError
       other -> LevelOther other
+
+-- | the telegram bot's token.
+--
+-- A newtype with a Show of its own, rather than a Text field, because
+-- Config derives Show and this token is the whole of the bot's authority:
+-- anything, which prints a Config -- a debug line, an exception, a dump of
+-- the parsed settings -- would otherwise hand it out.
+newtype TelegramBotToken = TelegramBotToken
+  { unTelegramBotToken :: Text
+  }
+  deriving Eq
+instance Show TelegramBotToken where
+  show _ = "TelegramBotToken <redacted>"
+instance FromJSON TelegramBotToken where
+  parseJSON = withText "TelegramBotToken" $ pure . TelegramBotToken
 
 -- | Describes configurable options
 data Config = Config
@@ -67,6 +83,22 @@ data Config = Config
   , configFreeSatsPairMatchWindowSecs :: Word64
     -- ^ how far back 'configFreeSatsPairMatchLimit' counts the contracts
     -- two accounts have already shared
+  , configTelegramBotToken :: Maybe TelegramBotToken
+    -- ^ the token of the bot, which mirrors the trade chat. Nothing leaves
+    -- the mirror switched off: the feed is served, empty, and no thread
+    -- follows any group. A deployment without a telegram group is a
+    -- deployment, which has no token to give, so this is left out of the
+    -- defaults rather than failing the service
+  , configTelegramChatId :: Maybe Int64
+    -- ^ the group the bot follows. Negative, as telegram's group ids are.
+    -- Nothing switches the mirror off, as a missing token does
+  , configTelegramPollTimeoutSecs :: Positive Int
+    -- ^ how long telegram is asked to hold a poll open while it waits for
+    -- a message. It answers at once when there is one, so this is what
+    -- makes the mirror immediate rather than a poll rate
+  , configTelegramAPIURL :: BaseUrl
+    -- ^ telegram's bot API. Configurable so a test can point the mirror at
+    -- a stub rather than at telegram
   }
   deriving Show
 instance FromJSON Config where
@@ -90,6 +122,12 @@ instance FromJSON Config where
           .!= (configFreeSatsPairMatchLimit defaultConfig))
     <*> ( v .:? "FREE_SATS_PAIR_MATCH_WINDOW_SECS"
           .!= (configFreeSatsPairMatchWindowSecs defaultConfig))
+    <*> ( v .:? "TELEGRAM_BOT_TOKEN")
+    <*> ( v .:? "TELEGRAM_CHAT_ID")
+    <*> ( v .:? "TELEGRAM_POLL_TIMEOUT_SECS"
+          .!= (configTelegramPollTimeoutSecs defaultConfig))
+    <*> ((v .:? "TELEGRAM_API_URL"
+          .!= (showBaseUrl $ configTelegramAPIURL defaultConfig)) >>= parseBaseUrl)
 
 defaultConfig:: Config
 defaultConfig = Config
@@ -110,6 +148,10 @@ defaultConfig = Config
   , configPlatformFeeSats = 1000
   , configFreeSatsPairMatchLimit = 3
   , configFreeSatsPairMatchWindowSecs = 604800 -- a week
+  , configTelegramBotToken = Nothing
+  , configTelegramChatId = Nothing
+  , configTelegramPollTimeoutSecs = verifyPositive 25
+  , configTelegramAPIURL = BaseUrl Https "api.telegram.org" 443 ""
   }
 
 -- | parses websocket URL. The websocket client does not support TLS, so
