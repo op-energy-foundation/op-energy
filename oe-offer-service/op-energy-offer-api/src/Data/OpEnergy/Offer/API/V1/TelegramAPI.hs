@@ -17,10 +17,14 @@ import           Servant.API
 
 import           Data.OpEnergy.API.V1.Positive (Positive)
 import           Data.OpEnergy.Account.API.V1.Account (AccountToken)
-import           Data.OpEnergy.Offer.API.V1.TelegramMessageInfo
+import           Data.OpEnergy.Offer.API.V1.TelegramFeed
                  ( TelegramFeed
-                 , TelegramLinkStart
-                 , TelegramMessageID
+                 )
+import           Data.OpEnergy.Offer.API.V1.TelegramLinkStart
+                 ( TelegramLinkStart
+                 )
+import           Data.OpEnergy.Offer.API.V1.TelegramMessageID
+                 ( TelegramMessageID
                  )
 
 -- | the trade chat's endpoints

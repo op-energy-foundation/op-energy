@@ -75,11 +75,20 @@ import           OpEnergy.Offer.Server.V1.LiveEvent (LiveEvent(..))
 import           OpEnergy.Offer.Server.V1.Time (getCurrentTimeDB)
 import           OpEnergy.Offer.Server.V1.WebSocketService (publishLiveEvent)
 import           Data.OpEnergy.Offer.API.V1.LiveMessage (LiveMessage(..))
-import           Data.OpEnergy.Offer.API.V1.TelegramMessageInfo
+import           Data.OpEnergy.Offer.API.V1.TelegramMessageID
                  ( TelegramMessageID(..)
                  )
 import           OpEnergy.Offer.Server.V1.TelegramLink (redeemLinkCodeTx)
 import           OpEnergy.Offer.Server.V1.TelegramMessage
+                 ( TelegramGroupMessage(..)
+                 , advancePollStateTx
+                 , getPollOffsetTx
+                 , insertTelegramMessageTx
+                 , markTelegramMessageGoneTx
+                 , messagesToReconcileTx
+                 , telegramMessageInfoOf
+                 , updateTelegramMessageBodyTx
+                 )
 import           Data.OpEnergy.API.V1.Positive (fromPositive)
 import           OpEnergy.Error (CallstackError, describeError, dbQueryError)
 

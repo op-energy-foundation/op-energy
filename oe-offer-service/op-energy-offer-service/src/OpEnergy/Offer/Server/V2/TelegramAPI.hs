@@ -13,10 +13,14 @@ import           Servant
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountAPI
 import           Data.OpEnergy.API.V1.Positive (Positive)
 import           Data.OpEnergy.Offer.API.V1.TelegramAPI (TelegramAPI)
-import           Data.OpEnergy.Offer.API.V1.TelegramMessageInfo
+import           Data.OpEnergy.Offer.API.V1.TelegramFeed
                  ( TelegramFeed
-                 , TelegramLinkStart
-                 , TelegramMessageID
+                 )
+import           Data.OpEnergy.Offer.API.V1.TelegramLinkStart
+                 ( TelegramLinkStart
+                 )
+import           Data.OpEnergy.Offer.API.V1.TelegramMessageID
+                 ( TelegramMessageID
                  )
 
 import           OpEnergy.Offer.Server.V1.Class (AppM, AppT)

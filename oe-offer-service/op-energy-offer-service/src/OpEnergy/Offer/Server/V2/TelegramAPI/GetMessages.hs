@@ -22,9 +22,11 @@ import           Database.Persist
 import           Database.Persist.Postgresql (runSqlPersistMPool)
 
 import           Data.OpEnergy.API.V1.Positive (Positive, fromPositive)
-import           Data.OpEnergy.Offer.API.V1.TelegramMessageInfo
+import           Data.OpEnergy.Offer.API.V1.TelegramFeed
                  ( TelegramFeed(..)
-                 , TelegramMessageID(..)
+                 )
+import           Data.OpEnergy.Offer.API.V1.TelegramMessageID
+                 ( TelegramMessageID(..)
                  )
 
 import           OpEnergy.Offer.Server.V1.Class
@@ -32,6 +34,10 @@ import           OpEnergy.Offer.Server.V1.Class
 import           OpEnergy.Offer.Server.V1.Config (Config(..))
 import           OpEnergy.Offer.Server.V1.TelegramLink (opEnergyNamesTx)
 import           OpEnergy.Offer.Server.V1.TelegramMessage
+                 ( TelegramGroupMessage(..)
+                 , EntityField(..)
+                 , telegramMessageInfoOf
+                 )
 import           OpEnergy.Error
                  ( CallstackError, eitherThrowJSON, runExceptPrefixT
                  )

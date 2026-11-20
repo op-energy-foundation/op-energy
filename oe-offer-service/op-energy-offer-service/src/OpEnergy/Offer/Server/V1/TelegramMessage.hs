@@ -42,9 +42,11 @@ import           Database.Persist
 import           Database.Persist.Sql (SqlBackend)
 import           Database.Persist.TH
 
-import           Data.OpEnergy.Offer.API.V1.TelegramMessageInfo
+import           Data.OpEnergy.Offer.API.V1.TelegramMessageID
                  ( TelegramMessageID(..)
-                 , TelegramMessageInfo(..)
+                 )
+import           Data.OpEnergy.Offer.API.V1.TelegramMessageInfo
+                 ( TelegramMessageInfo(..)
                  )
 
 share [mkPersist sqlSettings, mkMigrate "migrateTelegramMessage"] [persistLowerCase|

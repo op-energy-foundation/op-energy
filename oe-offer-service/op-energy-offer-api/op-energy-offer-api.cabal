@@ -28,7 +28,10 @@ library
                    , Data.OpEnergy.Offer.API.V1.Constants
                    , Data.OpEnergy.Offer.API.V1.OffersAPI
                    , Data.OpEnergy.Offer.API.V1.LiveMessage
+                   , Data.OpEnergy.Offer.API.V1.TelegramMessageID
                    , Data.OpEnergy.Offer.API.V1.TelegramMessageInfo
+                   , Data.OpEnergy.Offer.API.V1.TelegramFeed
+                   , Data.OpEnergy.Offer.API.V1.TelegramLinkStart
                    , Data.OpEnergy.Offer.API.V1.TelegramAPI
 
     build-depends:    base >=4.15.1.0

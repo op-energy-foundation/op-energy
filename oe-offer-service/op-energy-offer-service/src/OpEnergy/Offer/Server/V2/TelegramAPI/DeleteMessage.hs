@@ -19,16 +19,14 @@ import           Control.Monad.Logger (logError)
 import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Except (throwE)
 import           Control.Monad.Trans.Reader (ask)
-import           Data.Int (Int64)
-import qualified Data.Text as Text
-import           Text.Read (readMaybe)
 
 import           Servant (NoContent(..))
 
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountAPI
 import           Data.OpEnergy.Offer.API.V1.LiveMessage (LiveMessage(..))
-import           Data.OpEnergy.Offer.API.V1.TelegramMessageInfo
-                 ( TelegramMessageID(..)
+import           Data.OpEnergy.Offer.API.V1.TelegramMessageID
+                 ( TelegramMessageID
+                 , telegramMessageIDNumber
                  )
 
 import           OpEnergy.Offer.Server.V1.Class
@@ -39,6 +37,8 @@ import           OpEnergy.Offer.Server.V1.Config
                  )
 import           OpEnergy.Offer.Server.V1.LiveEvent (LiveEvent(..))
 import           OpEnergy.Offer.Server.V1.TelegramMessage
+                 ( markTelegramMessageDeletedTx
+                 )
 import qualified OpEnergy.Offer.Server.V1.Telegram.Client as Telegram
 import           OpEnergy.Offer.Server.V1.Time (getCurrentTimeDB)
 import           OpEnergy.Offer.Server.V1.WebSocketService (publishLiveEvent)
@@ -46,8 +46,8 @@ import           OpEnergy.Offer.Server.V2.TelegramAPI.CheckModerator
                  ( checkModerator)
 import           OpEnergy.Error
                  ( CallstackError, dbQueryError, eitherThrowJSON
-                 , invalidRequest, runExceptPrefixT, telegramMessageNotDeletable
-                 , telegramNotConfigured
+                 , exceptTMaybeT, runExceptPrefixT
+                 , telegramMessageNotDeletable, telegramNotConfigured
                  )
 
 -- | POST a removal of one message
@@ -66,7 +66,7 @@ deleteMessage
   :: TelegramMessageID
   -> AccountAPI.AccountToken
   -> AppM (Either CallstackError NoContent)
-deleteMessage (TelegramMessageID rawId) token =
+deleteMessage messageIdV token =
     let name = "V2.TelegramAPI.DeleteMessage.deleteMessage"
     in profile name $ runExceptPrefixT name $ do
   moderatorUUID <- checkModerator token
@@ -76,12 +76,11 @@ deleteMessage (TelegramMessageID rawId) token =
            , configTelegramChatId = mChatId
            }
        } <- lift ask
-  (botToken, chatId') <- case (mBotToken, mChatId) of
-    (Just botToken, Just chatId') -> return (botToken, chatId')
-    _ -> throwE telegramNotConfigured
-  messageId' <- case readMaybe (Text.unpack rawId) :: Maybe Int64 of
-    Just messageId' -> return messageId'
-    Nothing -> throwE $! invalidRequest "that is not a message id"
+  botToken <- exceptTMaybeT telegramNotConfigured $! return mBotToken
+  chatId' <- exceptTMaybeT telegramNotConfigured $! return mChatId
+  -- total: the id was verified where it arrived, so there is no second
+  -- opinion here about what a message id, which is not one, should do
+  let messageId' = telegramMessageIDNumber messageIdV
   -- telegram first. Only once it has actually removed the message is the
   -- copy marked, so the feed never hides what the group still shows
   eresponse <- liftIO $ Telegram.withTelegram apiURL
@@ -98,13 +97,10 @@ deleteMessage (TelegramMessageID rawId) token =
       Left _ -> throwE telegramMessageNotDeletable
       Right _ -> return ()
   now <- getCurrentTimeDB
-  mmarked <- lift $ withDBTransaction "V2.TelegramAPI.DeleteMessage"
+  exceptTMaybeT dbQueryError $ withDBTransaction "V2.TelegramAPI.DeleteMessage"
     $ markTelegramMessageDeletedTx chatId' messageId' moderatorUUID now
-  case mmarked of
-    Nothing -> throwE dbQueryError
-    Just () -> return ()
   lift $ publishLiveEvent $! LiveEvent
-    { liveEventMessage = LiveMessageTelegramDeleted (TelegramMessageID rawId)
+    { liveEventMessage = LiveMessageTelegramDeleted messageIdV
     , liveEventBalances = []
     }
   return NoContent

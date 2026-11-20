@@ -17,8 +17,6 @@ module OpEnergy.Offer.Server.V2.TelegramAPI.StartLink
 import           Control.Monad (replicateM)
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Logger (logError)
-import           Control.Monad.Trans (lift)
-import           Control.Monad.Trans.Except (throwE)
 import           Data.Text (Text)
 import qualified Data.Text as Text
 import           Data.Time.Clock (addUTCTime)
@@ -29,7 +27,7 @@ import           Servant (NoContent(..))
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountAPI
 import qualified Data.OpEnergy.Account.API.V1.UUID as AccountAPI
 import qualified Data.OpEnergy.Account.API.V2.WhoAmIResult as AccountV2
-import           Data.OpEnergy.Offer.API.V1.TelegramMessageInfo
+import           Data.OpEnergy.Offer.API.V1.TelegramLinkStart
                  ( TelegramLinkStart(..)
                  )
 import qualified Data.ByteString.Short as ShortBS
@@ -46,7 +44,7 @@ import           OpEnergy.Offer.Server.V1.TelegramLink
 import           OpEnergy.Offer.Server.V1.Time (getCurrentTimeDB)
 import           OpEnergy.Error
                  ( CallstackError, dbQueryError, eitherThrowJSON
-                 , runExceptPrefixT
+                 , exceptTMaybeT, runExceptPrefixT
                  )
 import           Control.Monad.Trans.Except (ExceptT(..))
 
@@ -93,14 +91,12 @@ startLink token =
         in (codeAlphabet !! index, next)
   now <- getCurrentTimeDB
   let expiresAt' = addUTCTime (fromIntegral linkCodeValidSeconds) now
-  mstored <- lift $ withDBTransaction "V2.TelegramAPI.StartLink"
+  exceptTMaybeT dbQueryError $ withDBTransaction "V2.TelegramAPI.StartLink"
     $ putLinkCodeTx code personUUID' displayName expiresAt'
-  case mstored of
-    Nothing -> throwE dbQueryError
-    Just () -> return $! TelegramLinkStart
-      { linkCode = code
-      , expiresInSeconds = fromIntegral linkCodeValidSeconds
-      }
+  return $! TelegramLinkStart
+    { linkCode = code
+    , expiresInSeconds = fromIntegral linkCodeValidSeconds
+    }
 
 -- | POST a disconnect
 unlinkHandler
@@ -123,11 +119,9 @@ unlink token =
     let name = "V2.TelegramAPI.StartLink.unlink"
     in profile name $ runExceptPrefixT name $ do
   (personUUID', _displayName) <- whoIsCalling token
-  mdone <- lift $ withDBTransaction "V2.TelegramAPI.StartLink.unlink"
+  exceptTMaybeT dbQueryError $ withDBTransaction "V2.TelegramAPI.StartLink.unlink"
     $ unlinkPersonTx personUUID'
-  case mdone of
-    Nothing -> throwE dbQueryError
-    Just () -> return NoContent
+  return NoContent
 
 -- | the caller's account and the name it currently goes by.
 --

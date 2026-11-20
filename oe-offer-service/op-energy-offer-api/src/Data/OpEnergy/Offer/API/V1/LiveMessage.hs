@@ -36,9 +36,11 @@ import           Data.OpEnergy.Account.API.V1.Account
                  )
 import           Data.OpEnergy.Offer.API.V1.OfferInfo (OfferInfo)
 import           Data.OpEnergy.Offer.API.V1.ContractInfo (ContractInfo)
-import           Data.OpEnergy.Offer.API.V1.TelegramMessageInfo
+import           Data.OpEnergy.Offer.API.V1.TelegramMessageID
                  ( TelegramMessageID
-                 , TelegramMessageInfo
+                 )
+import           Data.OpEnergy.Offer.API.V1.TelegramMessageInfo
+                 ( TelegramMessageInfo
                  )
 
 -- | request from the frontend
