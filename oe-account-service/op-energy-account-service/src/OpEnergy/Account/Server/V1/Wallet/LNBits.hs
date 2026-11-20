@@ -602,6 +602,12 @@ recordPendingPaymentTx params paymentHashV amount reserve now = do
         -- would then have the wallet asked about the old attempt and its
         -- failure given back against this one
         , WalletPaymentCheckingId =. Nothing
+        -- the invoice of this attempt, as the hash does not name one: a
+        -- retry can carry a second invoice signed with the same hash, for
+        -- another amount or payee, and it is this invoice, which is sent.
+        -- Left as the attempt before set it, the row would name an
+        -- invoice nobody paid and every lookup by invoice would read it
+        , WalletPaymentInvoice =. payInvoiceBolt11 params
         ]
   if recorded
     then return $! Right ()
