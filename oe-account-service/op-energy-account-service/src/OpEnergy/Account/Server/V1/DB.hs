@@ -101,15 +101,33 @@ getConnection config = do
       []
 
     -- the scheduler asks each tick which incoming payments are settled and
-    -- not yet credited. Partial, so it holds only the rows still waiting --
-    -- normally none -- rather than every payment ever made, and matches
-    -- that query exactly. For both new and existing DBs
+    -- not yet credited, oldest first by when each was last tried. Partial,
+    -- so it holds only the rows still waiting -- normally none -- rather
+    -- than every payment ever made, and matches that query exactly.
+    --
+    -- Direction and status stay columns of the index rather than moving
+    -- into its predicate: the query names them as parameters, and a
+    -- parameter can not be shown to imply a predicate of literals, so an
+    -- index narrowed that way would be passed over.
+    --
+    -- The index, which sorts by updated_at, is created under its own name
+    -- rather than replacing the one sorted by id in place. CREATE INDEX IF
+    -- NOT EXISTS leaves an index, which already exists, with the
+    -- definition it was created with, so the old one has to go; dropping
+    -- it by its own name means both statements are a catalog lookup on
+    -- every startup after the first, rather than a DROP, which takes an
+    -- ACCESS EXCLUSIVE lock on wallet_payment and holds it through the
+    -- rebuild. A rolling restart would otherwise block the reads and
+    -- writes of the payments on each instance, which came up. Created
+    -- before the old one is dropped, so the query is never left without an
+    -- index to use. For both new and existing DBs
     rawExecute
-      ( "CREATE INDEX IF NOT EXISTS wallet_payment_waiting_credit_idx"
-     <> " ON wallet_payment (direction, status, id)"
+      ( "CREATE INDEX IF NOT EXISTS wallet_payment_waiting_credit_updated_idx"
+     <> " ON wallet_payment (direction, status, updated_at)"
      <> " WHERE credited_at IS NULL"
       )
       []
+    rawExecute "DROP INDEX IF EXISTS wallet_payment_waiting_credit_idx" []
 
     -- at this point we start to run our custom migrations, that can't be handled by persisten itself
     migrateAccountDBSchema config
