@@ -132,6 +132,19 @@ getConnection config = do
       []
     rawExecute "DROP INDEX IF EXISTS wallet_payment_waiting_credit_idx" []
 
+    -- the slot, which is held for an invoice being made, is counted per
+    -- account, and that count runs while the account's own row is locked:
+    -- without an index it reads the reservations of every account, so the
+    -- invoices of one account wait on the invoices of all of them, and so
+    -- does anything else, which wants that row. Ordered by the time a
+    -- reservation was made, as the stale ones are dropped by it. For both
+    -- new and existing DBs
+    rawExecute
+      ( "CREATE INDEX IF NOT EXISTS wallet_invoice_reservation_person_idx"
+     <> " ON wallet_invoice_reservation (person_id, created_at)"
+      )
+      []
+
     -- at this point we start to run our custom migrations, that can't be handled by persisten itself
     migrateAccountDBSchema config
     migrateBlockTimeStrikeDBSchema config
