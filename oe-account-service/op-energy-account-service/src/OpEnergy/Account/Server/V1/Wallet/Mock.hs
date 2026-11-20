@@ -22,6 +22,7 @@ import qualified Data.ByteString.Char8 as BS8
 import           Data.Int (Int64)
 import           Data.Maybe (isJust)
 import           Data.Pool (Pool)
+import           Data.Text (Text)
 import qualified Data.Text.Encoding as TE
 import           Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
 import           Data.Word (Word64)
@@ -60,6 +61,10 @@ import           OpEnergy.Error
 mockWalletBackend :: Pool SqlBackend -> WalletBackend
 mockWalletBackend pool = WalletBackend
   { walletKind = WalletModeMock
+  -- one name for every mock wallet: they are all the same database, and a
+  -- payment made here is recognisable as not having been made at a real
+  -- one if the deployment is later pointed at a lightning node
+  , walletIdentity = mockWalletIdentity
   -- this backend issues and pays invoices in its own database, so it can
   -- do both; no sats move over lightning either way
   , walletCanSend = True
@@ -105,6 +110,8 @@ createInvoice pool params = do
     , walletPaymentNote = createInvoiceNote params
     , walletPaymentExpiresAt = Just expiresAt
     , walletPaymentCreditedAt = Nothing
+    , walletPaymentMadeAtWallet = Just mockWalletIdentity
+    , walletPaymentUnknownSince = Nothing
     , walletPaymentCheckingId = Nothing
     , walletPaymentCreatedAt = now
     , walletPaymentUpdatedAt = now
@@ -117,6 +124,10 @@ createInvoice pool params = do
       , createdInvoiceAmountSats = amount
       , createdInvoiceExpiresAt = expiresAt
       }
+
+-- | the name this backend records against the payments it makes
+mockWalletIdentity :: Text
+mockWalletIdentity = "mock"
 
 -- | whether an invoice can still be paid: it is waiting for a payment, and
 -- its expiry, if it was given one, has not passed.
@@ -261,8 +272,10 @@ payInvoiceOrThrow pool params = do
                       , walletPaymentNote = walletPaymentNote payment
                       , walletPaymentExpiresAt = Nothing
                       , walletPaymentCreditedAt = Nothing
+                      , walletPaymentMadeAtWallet = Just mockWalletIdentity
+                      , walletPaymentUnknownSince = Nothing
+                      , walletPaymentCreatedAt = now
                       , walletPaymentCheckingId = Nothing
-      , walletPaymentCreatedAt = now
                       , walletPaymentUpdatedAt = now
                       }
                     return $! Right $! PaidInvoice
@@ -322,8 +335,10 @@ payInvoiceOrThrow pool params = do
                   , walletPaymentNote = Nothing
                   , walletPaymentExpiresAt = Nothing
                   , walletPaymentCreditedAt = Nothing
+                  , walletPaymentMadeAtWallet = Just mockWalletIdentity
+                  , walletPaymentUnknownSince = Nothing
+                  , walletPaymentCreatedAt = now
                   , walletPaymentCheckingId = Nothing
-      , walletPaymentCreatedAt = now
                   , walletPaymentUpdatedAt = now
                   }
                 case minserted of
@@ -374,7 +389,19 @@ settleInvoice pool personKey paymentHashV = do
             , settledInvoicePaymentHash = paymentHashV
             , settledInvoiceAmountSats = walletPaymentAmountSats payment
             }
-      if walletPaymentStatus payment == Settled
+      if maybe False (/= mockWalletIdentity)
+           (walletPaymentMadeAtWallet payment)
+        -- the row was written by another wallet, which settles elsewhere,
+        -- so this one must not settle it: the mock takes any pending
+        -- invoice of the caller, and an invoice a real wallet issued
+        -- would be credited here without a payment ever arriving, then
+        -- withdrawn through that wallet as real sats. Only reachable
+        -- where two instances share a database, which the config of one
+        -- host cannot see. The mock's own invoices carry this identity
+        -- too, so it is the wallet named, not merely that one is named,
+        -- which decides
+        then return $! Left walletInvoiceNotFound
+        else if walletPaymentStatus payment == Settled
         -- whether this call was the one, which settled the invoice, is not
         -- reported: the caller credits from creditedAt, so a settle, whose
         -- credit was lost after it, still credits when it is retried
