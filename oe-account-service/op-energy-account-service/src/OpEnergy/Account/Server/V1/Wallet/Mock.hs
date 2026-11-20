@@ -363,24 +363,33 @@ settleInvoice pool personKey paymentHashV = do
     Nothing -> return $! Left walletInvoiceNotFound
     Just (Entity key payment) -> do
       now <- getPOSIXTime
-      -- the wallet this stands in for would no longer take a payment for
-      -- an invoice, whose expiry has passed, so neither does this
-      -- whether this call was the one, which settled the invoice, is not
-      -- reported: the caller credits from creditedAt, so a settle, whose
-      -- credit was lost after it, still credits when it is retried
-      _ <- if not (invoiceIsPayable now payment)
-        then return (0 :: Int64)
-        else flip runSqlPersistMPool pool $ updateWhereCount
-          [ WalletPaymentId ==. key
-          , WalletPaymentPersonId ==. personKey
-          , WalletPaymentStatus ==. Pending
-          ]
-          [ WalletPaymentStatus =. Settled, WalletPaymentUpdatedAt =. now ]
-      return $! Right $! SettledInvoice
-        { settledInvoicePersonId = walletPaymentPersonId payment
-        , settledInvoicePaymentHash = paymentHashV
-        , settledInvoiceAmountSats = walletPaymentAmountSats payment
-        }
+      let settled = SettledInvoice
+            { settledInvoicePersonId = walletPaymentPersonId payment
+            , settledInvoicePaymentHash = paymentHashV
+            , settledInvoiceAmountSats = walletPaymentAmountSats payment
+            }
+      if walletPaymentStatus payment == Settled
+        -- whether this call was the one, which settled the invoice, is not
+        -- reported: the caller credits from creditedAt, so a settle, whose
+        -- credit was lost after it, still credits when it is retried
+        then return $! Right $! settled
+        else if not (invoiceIsPayable now payment)
+          -- the wallet this stands in for would no longer take a payment
+          -- for an invoice, whose expiry has passed, so neither does this.
+          -- Answering with the invoice settled would say sats arrived,
+          -- while the row stays Pending and nothing is ever credited for
+          -- it, so the caller is told it failed
+          then return $! Left walletInvoiceNotFound
+          else do
+            _ <- flip runSqlPersistMPool pool $ updateWhereCount
+              [ WalletPaymentId ==. key
+              , WalletPaymentPersonId ==. personKey
+              , WalletPaymentStatus ==. Pending
+              ]
+              [ WalletPaymentStatus =. Settled
+              , WalletPaymentUpdatedAt =. now
+              ]
+            return $! Right $! settled
 
 -- | eight bytes from the system's own random source.
 --
