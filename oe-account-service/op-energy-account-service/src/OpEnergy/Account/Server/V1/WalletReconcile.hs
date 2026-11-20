@@ -228,10 +228,18 @@ reconcilePendingPayments =
       eambiguous <- liftIO $ eitherException $ flip runSqlPersistMPool pool
         $ if walletPaymentDirection payment == Incoming
             then return (0 :: Int)
+            -- a row, which has settled, counts as well as one, which is
+            -- waiting: where one account has already paid the invoice and
+            -- another's attempt never reached the wallet, the second is
+            -- the only row still waiting, and the wallet -- asked about
+            -- the hash -- answers with the payment the first account
+            -- made. Counting only the waiting rows would leave that one
+            -- unambiguous and debit the second account for the first
+            -- account's payment
             else count
               [ WalletPaymentPaymentHash ==. paymentHashV
               , WalletPaymentDirection ==. Outgoing
-              , WalletPaymentStatus ==. Pending
+              , WalletPaymentStatus <-. [ Pending, Settled ]
               ]
       case eambiguous of
         Left err -> do
