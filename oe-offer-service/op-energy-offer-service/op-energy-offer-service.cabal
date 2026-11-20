@@ -63,7 +63,7 @@ library
                     , containers
                     , servant
                     , servant-server, servant-client, servant-client-core
-                    , http-client, http-types
+                    , http-client, http-client-tls, http-types
                     , servant-swagger
                     , swagger2
                     , time

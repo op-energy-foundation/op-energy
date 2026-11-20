@@ -1,7 +1,7 @@
 { mkDerivation, lib, base
 , hspec, text
 , servant, servant-server, servant-client, servant-client-core, servant-swagger, swagger2
-, http-client, http-types
+, http-client, http-client-tls, http-types
 , aeson
 , bytestring
 , containers
@@ -41,7 +41,7 @@ mkDerivation {
     op-energy-account-api
     op-energy-offer-api
     servant servant-server servant-client servant-client-core servant-swagger swagger2
-    http-client http-types
+    http-client http-client-tls http-types
     aeson
     text bytestring
     containers
