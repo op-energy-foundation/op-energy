@@ -22,13 +22,12 @@ module OpEnergy.Account.Server.V2.WalletAPI.PayInvoice
   ) where
 
 import           Control.Applicative ((<|>))
-import           Control.Monad (when)
+import           Control.Monad (forM_, when)
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Logger(logError)
 import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Except (ExceptT(..), throwE)
 import           Control.Monad.Trans.Reader (ask)
-import           Data.Maybe (isJust)
 import           Data.Text (Text)
 import           Data.Text.Show (tshow)
 import           Data.Time.Clock.POSIX (getPOSIXTime)
@@ -188,14 +187,14 @@ payInvoice token (PayInvoiceRequest requestInvoice requestAmountSats) =
   -- to one: the scheduler credits every settled payment whose
   -- creditedAt is unset, so a credit written beside the claim is made
   -- again by the next tick
-  when (isJust (paidInvoiceRecipientPersonId paid)) $ do
+  forM_ (paidInvoiceRecipientPersonId paid) $ \recipientKey-> do
     -- guarded: the payment has already happened, so a pool failure here
     -- must be written down rather than thrown, which would answer the
     -- payer with a bare 500 and name nothing. creditWaitingDeposits
     -- credits it on the next tick either way
     ecredited <- fmap (either (Left . unspecified) id) $ liftIO
       $ eitherException $ flip runSqlPersistMPool pool
-      $ creditDepositOnce (paidInvoicePaymentHash paid) now
+      $ creditDepositOnce recipientKey (paidInvoicePaymentHash paid) now
     logUnreconciled
       ( "paid " <> tshow (unSats (paidInvoiceAmountSats paid))
       <> " sats, but crediting the receiving account failed"

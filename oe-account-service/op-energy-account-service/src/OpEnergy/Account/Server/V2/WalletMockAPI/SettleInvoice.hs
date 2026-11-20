@@ -91,7 +91,8 @@ settleInvoice token (SettleInvoiceRequest requestPaymentHash) =
   -- claims it first is the one, which credits
   now <- liftIO getPOSIXTime
   mbalance <- ExceptT $ liftIO $ flip runSqlPersistMPool pool
-    $ creditDepositOnce (settledInvoicePaymentHash settled) now
+    $ creditDepositOnce (settledInvoicePersonId settled)
+        (settledInvoicePaymentHash settled) now
   balance <- case mbalance of
     Just credited -> return credited
     -- somebody else had credited it, so the balance is read as it now is

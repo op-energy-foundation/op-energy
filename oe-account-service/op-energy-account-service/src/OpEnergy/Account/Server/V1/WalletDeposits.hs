@@ -45,6 +45,7 @@ import           OpEnergy.Account.Server.V1.Class
 import           OpEnergy.Account.Server.V1.LedgerEntry
                  ( LedgerDirection(..), adjustBalanceTx, ledgerReference
                  )
+import           OpEnergy.Account.Server.V1.Person (PersonId)
 import           OpEnergy.Account.Server.V1.WalletPayment
 import           OpEnergy.Error
                  ( CallstackError, describeError, eitherException
@@ -61,13 +62,18 @@ import           OpEnergy.Error
 --
 -- Example:
 --
--- > creditDepositOnce paymentHash now
+-- > creditDepositOnce personKey paymentHash now
 creditDepositOnce
   :: MonadIO m
-  => PaymentHash
+  => PersonId
+     -- ^ the account the payment was made to. A hash alone does not name
+     -- one row: the hash is unique per account and direction, so two
+     -- accounts may each hold a row of the same hash, and crediting by
+     -- hash alone could claim the other account's
+  -> PaymentHash
   -> POSIXTime
   -> ReaderT SqlBackend m (Either CallstackError (Maybe Sats))
-creditDepositOnce paymentHashV now = runExceptT $ do
+creditDepositOnce personKey paymentHashV now = runExceptT $ do
   -- the row is read before it is claimed and the claim names its id, so
   -- what is credited is the row, which was claimed. Deriving it again
   -- from the hash afterwards would not: a payment, which is credited,
@@ -75,6 +81,9 @@ creditDepositOnce paymentHashV now = runExceptT $ do
   -- of them apart
   mwaiting <- lift $ selectFirst
     [ WalletPaymentPaymentHash ==. paymentHashV
+    -- with the account, so this names the one row, which
+    -- UniqueWalletPaymentHashPersonDirection makes unique
+    , WalletPaymentPersonId ==. personKey
     , WalletPaymentDirection ==. Incoming
     -- only a payment, which has been paid: the status is what says the
     -- sats arrived, and crediting one, which has not, invents them
@@ -163,7 +172,8 @@ creditWaitingDeposits =
       -- guarded per payment, so one, which cannot be credited, is skipped
       -- and the rest of the tick still runs
       ecredited <- liftIO $ eitherException $ flip runSqlPersistMPool pool
-        $ creditDepositOnce (walletPaymentPaymentHash payment) now
+        $ creditDepositOnce (walletPaymentPersonId payment)
+            (walletPaymentPaymentHash payment) now
       case ecredited of
         -- Nothing means somebody else claimed it first, which is not news
         Right (Right _) -> return ()
