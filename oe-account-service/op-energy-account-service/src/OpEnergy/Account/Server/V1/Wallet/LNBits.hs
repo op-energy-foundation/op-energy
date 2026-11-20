@@ -54,7 +54,8 @@ import           Data.Maybe (fromMaybe, isJust)
 import           Data.Pool (Pool)
 import           Data.Text (Text)
 import qualified Data.Text as Text
-import           Data.Time.Clock.POSIX (POSIXTime, utcTimeToPOSIXSeconds)
+import           Data.Time.Clock.POSIX
+                 (POSIXTime, getPOSIXTime, utcTimeToPOSIXSeconds)
 
 import           Database.Persist
 import           Database.Persist.Sql
@@ -717,7 +718,7 @@ sendPayment url adminKey pool params paymentHashV balanceAfterDebit = do
       -- Written whatever the answer says, as a payment, which is still
       -- going, is the one the scheduler has to ask about
       recordCheckingId pool (payInvoicePersonId params) paymentHashV
-        (payInvoiceNow params) (LNBits.paymentResponseCheckingId answer) now
+        (payInvoiceNow params) (LNBits.paymentResponseCheckingId answer)
       case LNBits.paymentResponseStatus answer of
         "success" -> do
           let fee = msatsToSats (LNBits.paymentResponseFeeMsats answer)
@@ -759,11 +760,18 @@ recordCheckingId
   -> POSIXTime
      -- ^ when the attempt this answer belongs to started
   -> Text
-  -> POSIXTime
   -> IO ()
-recordCheckingId pool personKey paymentHashV startedAt checkingId now
+recordCheckingId pool personKey paymentHashV startedAt checkingId
   | Text.null checkingId = return ()
   | otherwise = do
+      -- the moment this answer arrived, rather than the moment the
+      -- payment was asked for: updatedAt is what the reconcile pass
+      -- measures its interval from, and the request is older than the
+      -- answer by however long the wallet took. Written as the request
+      -- time, the clock moves backwards -- a payment, which was polled
+      -- while the wallet was still answering, becomes due again before
+      -- the interval has passed
+      now <- getPOSIXTime
       _ <- eitherException $ flip runSqlPersistMPool pool $ updateWhereCount
         [ WalletPaymentPaymentHash ==. paymentHashV
         , WalletPaymentPersonId ==. personKey

@@ -18,9 +18,22 @@ let
     ;
   '';
   # the config key, which a credential is written to: the name without its
-  # _SECRET suffix, which is what credentials_locations below promises
+  # _SECRET suffix, which is what credentials_locations below promises.
+  #
+  # The value is handed to jq with --rawfile rather than written into the
+  # filter: a filter is an argument, and the arguments of a running process
+  # are readable by any local user through /proc, so a secret substituted
+  # into one -- the key, which spends the wallet, among them -- is a secret
+  # every account on the host can read. --rawfile has jq open the file
+  # itself, which systemd has already restricted to this unit. The trailing
+  # newline a credential file ends with is dropped, as the value is the key
   credential_assignment = name:
-    ".${lib.removeSuffix "_SECRET" name} = \\\"$(cat $CREDENTIALS_DIRECTORY/${name})\\\"";
+    let key = lib.removeSuffix "_SECRET" name;
+    in ".${key} = ($${key} | rtrimstr(\"\\n\"))";
+  credential_rawfile = name:
+    "--rawfile ${lib.removeSuffix "_SECRET" name} \"$CREDENTIALS_DIRECTORY/${name}\"";
+  credentials_rawfiles = lib.concatStringsSep " "
+    (map credential_rawfile (builtins.attrNames cfg.credentials_locations));
   # one assignment per credential of the set, rather than a list written
   # out here, so a deployment, which needs another credential -- the LNBits
   # keys of the lnbits wallet backend, say -- adds it to
@@ -28,7 +41,7 @@ let
   credentials_filter = lib.concatStringsSep " | "
     (map credential_assignment (builtins.attrNames cfg.credentials_locations));
   inject_credentials = src_file: file: pkgs.writeScriptBin "inject_credentials" ''
-    cat ${src_file} | jq "${credentials_filter}" > ${file}
+    jq ${credentials_rawfiles} '${credentials_filter}' < ${src_file} > ${file}
     '';
 
   cfg = config.services.op-energy-account-service;
