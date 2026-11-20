@@ -62,7 +62,8 @@ banSender telegramUserId token =
     let name = "V2.TelegramAPI.BanSender.banSender"
     in profile name $ runExceptPrefixT name $ do
   moderatorUUID <- checkModerator token
-  State{ config = Config
+  State{ telegramManager = manager
+       , config = Config
            { configTelegramAPIURL = apiURL
            , configTelegramBotToken = mBotToken
            , configTelegramChatId = mChatId
@@ -70,7 +71,7 @@ banSender telegramUserId token =
        } <- lift ask
   botToken <- exceptTMaybeT telegramNotConfigured $! return mBotToken
   chatId' <- exceptTMaybeT telegramNotConfigured $! return mChatId
-  response <- ExceptT $ liftIO $ Telegram.withTelegram apiURL
+  response <- ExceptT $ liftIO $ Telegram.withTelegram manager apiURL
     $ Telegram.banChatMember
         (Telegram.BotPath (unTelegramBotToken botToken))
         (Telegram.ChatMemberRequest chatId' telegramUserId)

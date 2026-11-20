@@ -157,6 +157,18 @@ reconcileSpacingMicroseconds = 200000
 reconcileGoneLimit :: Int
 reconcileGoneLimit = 10
 
+-- | how long one sweep may take before it gives up and leaves the rest to
+-- the next one.
+--
+-- The sweep runs in the poll loop, so while it is going the group is not
+-- being read. Every probe answering slowly rather than failing -- a
+-- half-open network, packets being dropped -- would otherwise hold the
+-- mirror for fifty times the request timeout, and the feed would stop
+-- filling for half an hour at a stretch with nothing but warnings to show
+-- for it.
+reconcileDeadlineSeconds :: Double
+reconcileDeadlineSeconds = 45
+
 -- | one message of the group, as it is about to be stored
 data MirroredMessage = MirroredMessage
   { mirroredRow :: TelegramGroupMessage
@@ -226,7 +238,8 @@ pollOnce
   -> Int64
   -> AppT m (Either CallstackError Int)
 pollOnce token chatId' = do
-  State{ config = Config
+  State{ telegramManager = manager
+       , config = Config
            { configTelegramAPIURL = apiURL
            , configTelegramPollTimeoutSecs = timeoutSecs
            }
@@ -240,7 +253,7 @@ pollOnce token chatId' = do
             { getUpdatesOffset = fmap (+ 1) mlastUpdateId
             , getUpdatesTimeout = fromPositive timeoutSecs
             }
-      eresponse <- liftIO $ withTelegram apiURL
+      eresponse <- liftIO $ withTelegram manager apiURL
         $ getUpdates (BotPath (unTelegramBotToken token)) request
       case eresponse >>= resultOf of
         Left err -> return $! Left err
@@ -271,7 +284,7 @@ pollOnce token chatId' = do
           case mwritten of
             Nothing -> return $! Left dbQueryError
             Just (stored, connected) -> do
-              mapM_ (tell token apiURL) connected
+              mapM_ (tell token (manager, apiURL)) connected
               -- after the transaction, never inside it: a connection told
               -- about a message, which the transaction then failed to
               -- write, would be told about something nobody can read
@@ -290,8 +303,8 @@ pollOnce token chatId' = do
       return (privateChatId, ok)
     -- pressing Start and being told nothing at all is indistinguishable
     -- from pressing it and it not having worked, so the bot says which
-    tell token' apiURL (privateChatId, ok) = liftIO $ do
-      _ <- withTelegram apiURL $ sendMessage
+    tell token' (manager, apiURL) (privateChatId, ok) = liftIO $ do
+      _ <- withTelegram manager apiURL $ sendMessage
         (BotPath (unTelegramBotToken token'))
         ( SendMessageRequest privateChatId
           $ if ok
@@ -399,14 +412,18 @@ reconcileDeletions state lastSweptV token chatId' = do
           realToFrac (diffUTCTime now lastSwept) > reconcileSeconds
   when due $ do
     writeIORef lastSweptV (Just now)
-    State{ config = Config{ configTelegramAPIURL = apiURL } } <- return state
+    let State{ telegramManager = manager
+             , config = Config{ configTelegramAPIURL = apiURL }
+             } = state
     mrows <- runAppT state
       $ withDBTransaction "V1.TelegramClient.reconcileDeletions"
       $ messagesToReconcileTx chatId' reconcileBatch
     case mrows of
       Nothing -> runAppT state $ runLogging $ $(logWarn)
         "reconcileDeletions: the messages to sweep could not be read"
-      Just rows -> sweep apiURL reconcileGoneLimit rows
+      Just rows -> do
+        startedAt <- getCurrentTime
+        sweep (manager, apiURL, startedAt) reconcileGoneLimit rows
   where
     -- stops the sweep once it has been told that too many messages in a
     -- row are gone. Telegram answering that about message after message is
@@ -415,7 +432,7 @@ reconcileDeletions state lastSweptV token chatId' = do
     -- cannot be undone, so the sweep gives up rather than carry on being
     -- sure
     sweep _ _ [] = return ()
-    sweep apiURL budget (row : rest)
+    sweep conn@(_, _, startedAt) budget (row : rest)
       | budget <= (0 :: Int) = runAppT state $ runLogging $ $(logWarn)
           ( "reconcileDeletions: telegram said " <> tshow reconcileGoneLimit
           <> " messages in a row were gone, which is more like the bot"
@@ -423,19 +440,31 @@ reconcileDeletions state lastSweptV token chatId' = do
           <> " this sweep stopped rather than hide any more"
           )
       | otherwise = do
-          let messageId' = telegramGroupMessageMessageId row
-          presence <- messageStillThere apiURL
-            (BotPath (unTelegramBotToken token)) chatId' messageId'
-          budget' <- case presence of
-            MessageStillThere -> return reconcileGoneLimit -- budget restored
-            -- said without being sure, so nothing is done and the next
-            -- sweep asks again
-            MessagePresenceUnknown _ -> return budget
-            MessageGone -> do
-              hide messageId'
-              return $! budget - 1
-          threadDelay reconcileSpacingMicroseconds
-          sweep apiURL budget' rest
+          spent <- fmap (`diffUTCTime` startedAt) getCurrentTime
+          if realToFrac spent > reconcileDeadlineSeconds
+            then runAppT state $ runLogging $ $(logWarn)
+              ( "reconcileDeletions: this sweep has taken longer than "
+              <> tshow (round reconcileDeadlineSeconds :: Int)
+              <> " seconds, so the rest of it is left to the next one"
+              <> " rather than hold up reading the group any further"
+              )
+            else probeOne conn budget row rest
+
+    -- one message of the sweep, then on to the rest of it
+    probeOne conn@(manager, apiURL, _) budget row rest = do
+      let messageId' = telegramGroupMessageMessageId row
+      presence <- messageStillThere manager apiURL
+        (BotPath (unTelegramBotToken token)) chatId' messageId'
+      budget' <- case presence of
+        MessageStillThere -> return reconcileGoneLimit -- budget restored
+        -- said without being sure, so nothing is done and the next sweep
+        -- asks again
+        MessagePresenceUnknown _ -> return budget
+        MessageGone -> do
+          hide messageId'
+          return $! budget - 1
+      threadDelay reconcileSpacingMicroseconds
+      sweep conn budget' rest
     hide messageId' = do
       -- the DB's clock, not this process's: a stored time has to agree
       -- with what a later read of it returns
@@ -484,7 +513,9 @@ checkStillInGroup state lastCheckedV token chatId' = do
           realToFrac (diffUTCTime now lastChecked) > membershipCheckSeconds
   when due $ do
     writeIORef lastCheckedV (Just now)
-    State{ config = Config{ configTelegramAPIURL = apiURL } } <- return state
+    let State{ telegramManager = manager
+             , config = Config{ configTelegramAPIURL = apiURL }
+             } = state
     -- what the bot's own standing in the group is, rather than whether the
     -- group can be described: getChat still answers for a group, which the
     -- bot has been demoted in, so it cannot tell that moderation has
@@ -493,7 +524,7 @@ checkStillInGroup state lastCheckedV token chatId' = do
       Nothing -> runAppT state $ runLogging $ $(logWarn)
         "checkStillInGroup: the configured token is not shaped like a bot token"
       Just botUserId -> do
-        eresponse <- withTelegram apiURL
+        eresponse <- withTelegram manager apiURL
           $ getChatMember (BotPath (unTelegramBotToken token))
               (ChatMemberRequest chatId' botUserId)
         case eresponse >>= resultOf of

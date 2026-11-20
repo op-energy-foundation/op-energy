@@ -42,6 +42,7 @@ module OpEnergy.Offer.Server.V1.Telegram.Client
   , setMessageReaction
   , MessagePresence(..)
   , messageStillThere
+  , newTelegramManager
   , withTelegram
   ) where
 
@@ -56,7 +57,8 @@ import           Text.Read (readMaybe)
 
 import qualified Control.Exception.Safe as E
 import           Network.HTTP.Client
-                 ( newManager, managerResponseTimeout, responseTimeoutMicro
+                 ( Manager, newManager, managerResponseTimeout
+                 , responseTimeoutMicro
                  )
 import           Network.HTTP.Client.TLS (tlsManagerSettings)
 import           Network.HTTP.Types.Status (statusCode)
@@ -370,14 +372,30 @@ getUpdates
   :<|> setMessageReaction =
   client (Proxy :: Proxy TelegramBotAPI)
 
--- | how long a telegram call may take before it is given up on.
+-- | how long a telegram call may take, given how long a poll asks telegram
+-- to hold the request open for.
 --
--- Above the longest poll this service makes: http-client gives up after 30
--- seconds of its own accord, and a poll asks telegram to wait 25, which is
--- close enough that an ordinary unhurried answer would be read as a failure
--- and the mirror would spin reconnecting instead of waiting.
-telegramResponseTimeoutMicroseconds :: Int
-telegramResponseTimeoutMicroseconds = 35 * 1000000
+-- Derived from the configured poll timeout rather than fixed, because the
+-- two have to stay in that order: http-client gives up after 30 seconds of
+-- its own accord, so a deployment, which asked telegram to wait 40, would
+-- have every poll read as a failure, back off, and try again for ever,
+-- with nothing in the log but telegram being unreachable.
+telegramResponseTimeoutMicrosecondsFor :: Int -> Int
+telegramResponseTimeoutMicrosecondsFor pollTimeoutSecs =
+  (pollTimeoutSecs + 10) * 1000000
+
+-- | the connection manager every telegram call shares.
+--
+-- Built once at startup and kept in 'OpEnergy.Offer.Server.V1.Class.State'.
+-- One per call would mean a fresh TLS handshake every time -- the poll
+-- reconnecting continuously, and fifty handshakes per sweep -- and a
+-- Manager only releases its idle sockets when it is finalised, so the ones
+-- left behind would accumulate against the process's file descriptors.
+newTelegramManager :: Int -> IO Manager
+newTelegramManager pollTimeoutSecs = newManager tlsManagerSettings
+  { managerResponseTimeout = responseTimeoutMicro
+      (telegramResponseTimeoutMicrosecondsFor pollTimeoutSecs)
+  }
 
 -- | runs one call against telegram.
 --
@@ -388,14 +406,13 @@ telegramResponseTimeoutMicroseconds = 35 * 1000000
 -- Example:
 --
 -- > withTelegram apiURL (deleteMessage path request)
-withTelegram :: BaseUrl -> ClientM a -> IO (Either CallstackError a)
-withTelegram url call = do
-  eresult <- E.tryAny $ do
-    manager <- newManager tlsManagerSettings
-      { managerResponseTimeout =
-          responseTimeoutMicro telegramResponseTimeoutMicroseconds
-      }
-    runClientM call (mkClientEnv manager url)
+withTelegram
+  :: Manager
+  -> BaseUrl
+  -> ClientM a
+  -> IO (Either CallstackError a)
+withTelegram manager url call = do
+  eresult <- E.tryAny $ runClientM call (mkClientEnv manager url)
   return $! case eresult of
     -- deliberately not the exception: it carries the request, and the
     -- request carries the token
@@ -439,20 +456,16 @@ data MessagePresence
 -- the sweep erases the entire feed -- which is the only copy of the chat
 -- there will ever be, and which nothing can put back.
 messageStillThere
-  :: BaseUrl
+  :: Manager
+  -> BaseUrl
   -> BotPath
   -> Int64
   -> Int64
   -> IO MessagePresence
-messageStillThere url path chatId' messageId' = do
-  eresult <- E.tryAny $ do
-    manager <- newManager tlsManagerSettings
-      { managerResponseTimeout =
-          responseTimeoutMicro telegramResponseTimeoutMicroseconds
-      }
-    runClientM
-      (setMessageReaction path (ReactionRequest chatId' messageId'))
-      (mkClientEnv manager url)
+messageStillThere manager url path chatId' messageId' = do
+  eresult <- E.tryAny $ runClientM
+    (setMessageReaction path (ReactionRequest chatId' messageId'))
+    (mkClientEnv manager url)
   return $! case eresult of
     -- deliberately not the exception: it carries the request, and the
     -- request carries the token

@@ -29,9 +29,14 @@ import           Control.Exception.Safe (SomeException)
 import qualified Control.Exception.Safe as E
 
 import           Data.OpEnergy.API.V1.Block(BlockHeight)
+import           Data.OpEnergy.API.V1.Positive(fromPositive)
 import           OpEnergy.Offer.Server.V1.Config
 import           OpEnergy.Offer.Server.V1.Metrics
 import           OpEnergy.Offer.Server.V1.LiveEvent (LiveEvent)
+import           OpEnergy.Offer.Server.V1.Telegram.Client
+                 ( newTelegramManager
+                 )
+import           Network.HTTP.Client (Manager)
 
 instance MonadMonitor Handler where
   doIO = liftIO
@@ -66,6 +71,10 @@ data State = State
     -- ^ held by every change of offers, contracts or balances while it is
     -- made and its live events are published, see
     -- 'OpEnergy.Offer.Server.V1.WebSocketService.withLiveEventOrder'
+  , telegramManager :: Manager
+    -- ^ the connection manager every telegram call shares. Built here even
+    -- where no telegram group is configured, as it costs nothing unused
+    -- and saves every call site having to ask whether there is one
   , callStack :: Text
   }
 
@@ -81,6 +90,8 @@ defaultState config metrics logFunc offerDBPool = do
   liveEventsV <- liftIO $ TChan.newBroadcastTChanIO
   liveEventSeqV <- liftIO $ TVar.newTVarIO 0
   liveEventOrderV <- liftIO $ MVar.newMVar ()
+  telegramManagerV <- liftIO $ newTelegramManager
+    (fromPositive (configTelegramPollTimeoutSecs config))
   return $ State
     { config = config
     , offerDBPool = offerDBPool
@@ -92,6 +103,7 @@ defaultState config metrics logFunc offerDBPool = do
     , liveEvents = liveEventsV
     , liveEventSeq = liveEventSeqV
     , liveEventOrder = liveEventOrderV
+    , telegramManager = telegramManagerV
     , callStack = ""
     }
 

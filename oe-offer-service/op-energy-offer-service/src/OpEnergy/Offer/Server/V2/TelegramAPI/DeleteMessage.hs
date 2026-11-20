@@ -70,7 +70,8 @@ deleteMessage messageIdV token =
     let name = "V2.TelegramAPI.DeleteMessage.deleteMessage"
     in profile name $ runExceptPrefixT name $ do
   moderatorUUID <- checkModerator token
-  State{ config = Config
+  State{ telegramManager = manager
+       , config = Config
            { configTelegramAPIURL = apiURL
            , configTelegramBotToken = mBotToken
            , configTelegramChatId = mChatId
@@ -87,7 +88,7 @@ deleteMessage messageIdV token =
   -- copy marked, so the feed never hides what the group still shows
   -- an unreachable telegram, or one answering with a status, is an outage
   -- rather than a refusal and is reported as one
-  response <- ExceptT $ liftIO $ Telegram.withTelegram apiURL
+  response <- ExceptT $ liftIO $ Telegram.withTelegram manager apiURL
     $ Telegram.deleteMessage
         (Telegram.BotPath (unTelegramBotToken botToken))
         (Telegram.ChatMessageRequest chatId' messageId')
