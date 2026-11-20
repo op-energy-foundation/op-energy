@@ -389,7 +389,16 @@ settleInvoice pool personKey paymentHashV = do
             , settledInvoicePaymentHash = paymentHashV
             , settledInvoiceAmountSats = walletPaymentAmountSats payment
             }
-      if walletPaymentStatus payment == Settled
+      if isJust (walletPaymentMadeAtWallet payment)
+        -- the row was written by a wallet, which settles elsewhere, so
+        -- this one must not settle it: the mock takes any pending invoice
+        -- of the caller, and an invoice a real wallet issued would be
+        -- credited here without a payment ever arriving, then withdrawn
+        -- through that wallet as real sats. Only reachable where two
+        -- instances share a database, which the config of one host cannot
+        -- see
+        then return $! Left walletInvoiceNotFound
+        else if walletPaymentStatus payment == Settled
         -- whether this call was the one, which settled the invoice, is not
         -- reported: the caller credits from creditedAt, so a settle, whose
         -- credit was lost after it, still credits when it is retried

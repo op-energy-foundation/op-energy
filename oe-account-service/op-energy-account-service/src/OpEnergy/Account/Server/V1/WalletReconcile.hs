@@ -109,6 +109,22 @@ data UnknownOutgoing
 -- Example:
 --
 -- > decideUnknownOutgoing 3600 now (Just w) w Nothing == NoteUnknown
+-- | whether the wallet being asked is the wallet the payment was made at.
+--
+-- A payment belongs to the wallet, which made it: another wallet has no
+-- record of it, so what that one answers describes nothing. A row without
+-- a wallet recorded is from before this was written down and is not
+-- claimed either way.
+--
+-- Example:
+--
+-- > answeredByOriginatingWallet payment wallet
+answeredByOriginatingWallet :: WalletPayment -> WalletBackend -> Bool
+answeredByOriginatingWallet payment walletV =
+  case walletPaymentMadeAtWallet payment of
+    Nothing -> False
+    Just madeAt -> madeAt == walletIdentity walletV
+
 decideUnknownOutgoing
   :: POSIXTime
      -- ^ how long an unknown payment is left alone
@@ -275,7 +291,7 @@ reconcilePendingPayments =
       -> WalletPayment
       -> AppT m ()
     askTheWallet readPayment key payment = do
-      State{ accountDBPool = pool } <- ask
+      State{ accountDBPool = pool, wallet = walletV } <- ask
       let paymentHashV = walletPaymentPaymentHash payment
       -- asked about by the name the wallet gave this attempt where there
       -- is one, and by the hash otherwise. A hash names the invoice, so
@@ -304,6 +320,28 @@ reconcilePendingPayments =
             <> describeError err
             )
           touchNow pool key payment
+        -- an answer about an outgoing payment is only acted on where it
+        -- came from the wallet the payment was made at. A replacement
+        -- wallet knows nothing of what the one before it paid, so its
+        -- "failed" would give back the sats of a payment, which went, and
+        -- its "settled" would finish one it never made. Only the wallet,
+        -- which has the payment, can say what became of it; anything else
+        -- is parked for a person. Incoming rows are not checked this way:
+        -- an invoice is settled by whoever pays it
+        Right (Right _observed)
+          | walletPaymentDirection payment == Outgoing
+              && not (answeredByOriginatingWallet payment walletV) -> do
+              runLogging $ $(logError)
+                ( "reconcilePendingPayments: the outgoing payment "
+                <> unPaymentHash paymentHashV <> " was made at "
+                <> maybe "a wallet, which was not recorded"
+                     (\madeAt-> "the wallet " <> madeAt)
+                     (walletPaymentMadeAtWallet payment)
+                <> " while this service now runs " <> walletIdentity walletV
+                <> ", so what this wallet answers about it says nothing "
+                <> "and it needs manual reconciliation"
+                )
+              park pool key payment
         -- not finished yet, which is the usual answer: asked again later
         Right (Right ObservedPending) -> parkKnown pool key payment
         Right (Right (ObservedSettled fee)) -> settle pool key payment fee
@@ -586,6 +624,14 @@ reconcilePendingPayments =
           [ WalletPaymentId ==. key
           , WalletPaymentCreatedAt ==. walletPaymentCreatedAt payment
           , WalletPaymentStatus ==. Pending
+          -- and the unknown timer this decision was taken on. Two ticks
+          -- can be asking about one payment at once: where the other saw
+          -- it pending it cleared this, so a tick, which is still holding
+          -- the expired timer it read before that, would give the sats of
+          -- a payment back, which the wallet has since taken up again.
+          -- Matching the value, which was read, is what makes the later
+          -- answer win rather than whichever tick writes last
+          , WalletPaymentUnknownSince ==. walletPaymentUnknownSince payment
           ]
           ( [ WalletPaymentStatus =. status
             , WalletPaymentUpdatedAt =. now
