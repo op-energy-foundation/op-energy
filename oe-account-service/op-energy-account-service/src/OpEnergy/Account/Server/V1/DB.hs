@@ -145,6 +145,18 @@ getConnection config = do
       )
       []
 
+    -- the reconcile pass asks each tick for the payments, which are still
+    -- waiting, oldest first. The index above it is partial on
+    -- credited_at IS NULL, which this does not ask for, so it can not be
+    -- used here and the payments, which have finished, are read and
+    -- sorted along with the few, which have not. For both new and
+    -- existing DBs
+    rawExecute
+      ( "CREATE INDEX IF NOT EXISTS wallet_payment_status_updated_idx"
+     <> " ON wallet_payment (status, updated_at)"
+      )
+      []
+
     -- at this point we start to run our custom migrations, that can't be handled by persisten itself
     migrateAccountDBSchema config
     migrateBlockTimeStrikeDBSchema config
