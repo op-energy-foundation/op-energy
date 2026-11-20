@@ -38,7 +38,7 @@ import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Logger (logError, logInfo)
 import           Control.Monad.Trans.Reader (ask)
 import           Data.Int (Int64)
-import           Data.Maybe (fromMaybe)
+import           Data.Maybe (fromMaybe, isJust)
 import           Data.Text (Text)
 import qualified Data.Text as Text
 import           Data.Text.Show (tshow)
@@ -243,7 +243,14 @@ reconcilePendingPayments =
       -- wrong row debits an account for a payment it never made. Such a
       -- payment is left for a person to resolve rather than guessed at
       eambiguous <- liftIO $ eitherException $ flip runSqlPersistMPool pool
+        -- the hash is only ambiguous where the hash is what the wallet
+        -- will be asked about. An attempt, whose own name was recorded,
+        -- is asked about by that name and answered for on its own, so no
+        -- other payment of the same hash can be mistaken for it -- and
+        -- counting them would leave an internal transfer, whose two rows
+        -- always share a hash, ambiguous for good and its reserve held
         $ if walletPaymentDirection payment == Incoming
+             || isJust (walletPaymentCheckingId payment)
             then return (0 :: Int)
             -- a row, which has settled, counts as well as one, which is
             -- waiting: where one account has already paid the invoice and
@@ -630,8 +637,13 @@ reconcilePendingPayments =
           -- the expired timer it read before that, would give the sats of
           -- a payment back, which the wallet has since taken up again.
           -- Matching the value, which was read, is what makes the later
-          -- answer win rather than whichever tick writes last
+          -- answer win rather than whichever tick writes last.
+          --
+          -- The attempt's own name is matched for the same reason: a tick,
+          -- which asked by hash, is holding an answer about whatever that
+          -- hash names, and a name recorded since makes that answer stale
           , WalletPaymentUnknownSince ==. walletPaymentUnknownSince payment
+          , WalletPaymentCheckingId ==. walletPaymentCheckingId payment
           ]
           ( [ WalletPaymentStatus =. status
             , WalletPaymentUpdatedAt =. now
