@@ -219,6 +219,7 @@ invoiceIsPayableSpec = do
         , walletPaymentCreditedAt = Nothing
         , walletPaymentMadeAtWallet = Just "mock"
         , walletPaymentUnknownSince = Nothing
+        , walletPaymentCheckingId = Nothing
         , walletPaymentCreatedAt = 100
         , walletPaymentUpdatedAt = 100
         }

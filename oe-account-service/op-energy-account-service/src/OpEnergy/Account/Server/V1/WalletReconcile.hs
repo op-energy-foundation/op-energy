@@ -38,6 +38,7 @@ import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Logger (logError, logInfo)
 import           Control.Monad.Trans.Reader (ask)
 import           Data.Int (Int64)
+import           Data.Maybe (fromMaybe)
 import           Data.Text (Text)
 import qualified Data.Text as Text
 import           Data.Text.Show (tshow)
@@ -51,7 +52,7 @@ import           Prometheus (MonadMonitor)
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
 import           Data.OpEnergy.Account.API.V2.LedgerReason (LedgerReason(..))
 import           Data.OpEnergy.Account.API.V2.PaymentHash
-                 ( PaymentHash, unPaymentHash
+                 ( unPaymentHash
                  )
 
 import           OpEnergy.Account.Server.V1.Class
@@ -210,7 +211,7 @@ reconcilePendingPayments =
   where
     askAbout
       :: MonadIO m
-      => (PaymentHash -> IO (Either CallstackError ObservedPayment))
+      => (Text -> IO (Either CallstackError ObservedPayment))
       -> Entity WalletPayment
       -> AppT m ()
     askAbout readPayment (Entity key payment) = do
@@ -269,14 +270,23 @@ reconcilePendingPayments =
     -- asks about one payment, whose wallet answer can be attributed to it
     askTheWallet
       :: MonadIO m
-      => (PaymentHash -> IO (Either CallstackError ObservedPayment))
+      => (Text -> IO (Either CallstackError ObservedPayment))
       -> Key WalletPayment
       -> WalletPayment
       -> AppT m ()
     askTheWallet readPayment key payment = do
       State{ accountDBPool = pool } <- ask
       let paymentHashV = walletPaymentPaymentHash payment
-      eobserved <- liftIO $ eitherException $ readPayment paymentHashV
+      -- asked about by the name the wallet gave this attempt where there
+      -- is one, and by the hash otherwise. A hash names the invoice, so
+      -- an invoice of this service, which somebody else paid, and another
+      -- account's attempt at the same invoice both answer to it; the name
+      -- answers for this attempt alone. A row, which was written before
+      -- this, and one the wallet never answered for have no name, so they
+      -- are asked about as they were
+      eobserved <- liftIO $ eitherException $ readPayment
+        $ fromMaybe (unPaymentHash paymentHashV)
+            (walletPaymentCheckingId payment)
       case eobserved of
         -- a call, which failed, says nothing about the payment: it is
         -- only noted as asked about, never written off. The wallet may
