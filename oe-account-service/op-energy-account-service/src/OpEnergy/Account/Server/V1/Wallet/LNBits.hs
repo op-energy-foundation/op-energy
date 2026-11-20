@@ -633,11 +633,17 @@ recordPendingPaymentTx identity params paymentHashV amount reserve now = do
         -- rather than from the attempt, which failed before it
         , WalletPaymentCreatedAt =. now
         , WalletPaymentUpdatedAt =. now
-        -- and the name of the attempt before it is dropped in the same
-        -- write. Kept, it would name a payment, which failed, while the
-        -- row stands for one, which is going: an answer, which is lost,
-        -- would then have the wallet asked about the old attempt and its
-        -- failure given back against this one
+        -- these describe the attempt, which has just been taken up, so
+        -- they are written as the insert writes them rather than left as
+        -- the attempt before set them. An unknownSince, which is kept, is
+        -- already past its grace, so the first Unknown answer about this
+        -- attempt would give the sats back while the payment is still in
+        -- flight; a wallet identity, which is kept, names the wallet the
+        -- attempt before went to; and a checking id, which is kept, names
+        -- a payment, which failed, so the wallet would be asked about the
+        -- old attempt and its failure given back against this one
+        , WalletPaymentUnknownSince =. Nothing
+        , WalletPaymentMadeAtWallet =. Just identity
         , WalletPaymentCheckingId =. Nothing
         -- the invoice of this attempt, as the hash does not name one: a
         -- retry can carry a second invoice signed with the same hash, for
