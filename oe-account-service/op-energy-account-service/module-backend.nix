@@ -65,12 +65,21 @@ in
         without its _SECRET suffix, so a deployment, which needs another
         credential, adds it here. A value, which is not a secret, belongs in
         extraConfig instead, which lands in the world readable store.
+
+        The LNBits keys are credentials and belong here rather than in
+        extraConfig: LNBITS_ADMIN_KEY spends the wallet, and a wallet, whose
+        spending key every local user can read out of the store, is not the
+        service's to spend any more. They are left out of the default, as a
+        deployment, which runs the mock wallet, has no such files to load.
         '';
       example = {
         DB_PASSWORD_SECRET =  "/etc/nixos/private/OP_ENERGY_ACCOUNT_DB_PASSWORD_SECRET";
         ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY_SECRET = "/etc/nixos/private/OP_ENERGY_ACCOUNT_TOKEN_ENCRYPTION_PRIVATE_KEY_SECRET";
         INTERNAL_SERVICE_SHARED_SECRET_SECRET = "/etc/nixos/private/INTERNAL_SERVICE_SHARED_SECRET";
         SECRET_SALT_SECRET =  "/etc/nixos/private/SECRET_SALT_SECRET";
+        # only where WALLET_BACKEND is lnbits
+        LNBITS_INVOICE_KEY_SECRET = "/etc/nixos/private/OP_ENERGY_ACCOUNT_LNBITS_INVOICE_KEY";
+        LNBITS_ADMIN_KEY_SECRET = "/etc/nixos/private/OP_ENERGY_ACCOUNT_LNBITS_ADMIN_KEY";
       };
     };
     extraConfig = lib.mkOption {
