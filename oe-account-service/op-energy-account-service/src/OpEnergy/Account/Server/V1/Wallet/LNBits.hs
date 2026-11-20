@@ -787,13 +787,16 @@ readPayment url invoiceKey (PaymentHash hashText) = do
   eanswer <- callLNBitsMaybe url $ LNBits.readPaymentState invoiceKey hashText
   return $! fmap (maybe ObservedUnknown observe) eanswer
   where
-    -- "paid" is the explicit answer and is believed on its own; a status,
-    -- which is not one of the words below, is reported as pending, so an
-    -- answer this service does not understand never credits an account
+    -- "paid" is the explicit answer and is what a settlement is read
+    -- from: a status of "success" without it describes the request, which
+    -- was accepted, rather than sats, which arrived, so settling on that
+    -- alone would credit an invoice nobody paid and finish a withdrawal,
+    -- which never went. A status, which is not one of the words below, is
+    -- reported as pending, so an answer this service does not understand
+    -- never credits an account
     observe answer
       | LNBits.paymentStateResponsePaid answer = settled answer
       | otherwise = case LNBits.paymentStateResponseStatus answer of
-          "success" -> settled answer
           "failed" -> ObservedFailed
           _ -> ObservedPending
     settled answer =
