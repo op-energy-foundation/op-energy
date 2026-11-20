@@ -52,7 +52,7 @@ import           Data.Time.Clock.POSIX (POSIXTime)
 import           Database.Persist
 import           Data.Int (Int64)
 import           Data.Text (Text)
-import           Database.Persist.Sql (Single(..), SqlBackend, rawSql)
+import           Database.Persist.Sql (Single, SqlBackend, rawSql)
 import           Database.Persist.TH
 import           GHC.Generics (Generic)
 
@@ -123,18 +123,6 @@ hasInvoiceSlot
   -> Bool
 hasInvoiceSlot limit waiting held = waiting + held < limit
 
--- | the moment, as the database has it.
---
--- clock_timestamp rather than now(): now() answers when the transaction
--- began, which is before the lock was waited for, and it is the time
--- after the lock, which this counts against.
-dbNowTx :: MonadIO m => ReaderT SqlBackend m POSIXTime
-dbNowTx = do
-  rows <- rawSql "SELECT EXTRACT(EPOCH FROM clock_timestamp())" []
-  return $! case rows of
-    (Single secs : _) -> realToFrac (secs :: Double)
-    _ -> 0
-
 -- | the moment a slot counts from, never earlier than the epoch.
 --
 -- A ttl longer than the time, which has passed, would otherwise put the
@@ -166,7 +154,7 @@ cutoffBefore ttl now = max 0 (now - ttl)
 --
 -- Example:
 --
--- > claimInvoiceSlotTx 10 60 personKey
+-- > claimInvoiceSlotTx 10 60 personKey now
 
 claimInvoiceSlotTx
   :: MonadIO m
@@ -175,15 +163,10 @@ claimInvoiceSlotTx
   -> POSIXTime
      -- ^ how long a slot, which is held for a call, counts for
   -> PersonId
+  -> POSIXTime
   -> ReaderT SqlBackend m (Maybe (Key WalletInvoiceReservation))
-claimInvoiceSlotTx limit ttl personKey = do
+claimInvoiceSlotTx limit ttl personKey now = do
   _ <- lockPersonTx personKey
-  -- the moment is read here, from the database, rather than taken by the
-  -- caller before the transaction: it is the lock, which puts the
-  -- requests of one account in order, so a moment read before it belongs
-  -- to a request, which had not got its turn yet. Read from the database
-  -- so every instance counts against one clock rather than its own
-  now <- dbNowTx
   waiting <- count
     [ WalletPaymentPersonId ==. personKey
     , WalletPaymentDirection ==. Incoming

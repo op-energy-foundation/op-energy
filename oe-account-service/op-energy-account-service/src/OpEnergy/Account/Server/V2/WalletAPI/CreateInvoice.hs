@@ -96,6 +96,7 @@ createInvoice token (CreateInvoiceRequest requestAmountSats requestNote) =
       (fromIntegral (configWalletMaxPendingInvoices config))
       (fromIntegral (configWalletInvoiceReservationTtlSecs config))
       key
+      now
   slot <- exceptTMaybeT walletTooManyPendingInvoices $ return mslot
   ecreated <- lift $ liftIO $ walletCreateInvoice walletV $ CreateInvoiceParams
     { createInvoicePersonId = key
