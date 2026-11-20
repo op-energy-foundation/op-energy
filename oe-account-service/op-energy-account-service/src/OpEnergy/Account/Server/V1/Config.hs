@@ -354,6 +354,16 @@ everifyWalletConfig config
       , require (configWalletInvoiceExpirySecs config > 0)
           "WALLET_INVOICE_EXPIRY_SECS must be above 0: an invoice would be \
           \advertised as expired as soon as it is created"
+      , require (configWalletInvoiceReservationTtlSecs config > 0)
+          "WALLET_INVOICE_RESERVATION_TTL_SECS must be above 0: a slot \
+          \would stop counting as soon as it was taken, so the invoices in \
+          \flight would bound nothing and an account could hold more of \
+          \them at once than WALLET_MAX_PENDING_INVOICES allows"
+      , require (configWalletMaxDepositsPerTick config > 0)
+          "WALLET_MAX_DEPOSITS_PER_TICK must be above 0: persistent reads \
+          \a limit of 0 as no limit at all, so one tick would take the \
+          \whole backlog of waiting deposits rather than a bounded part \
+          \of it"
       , require (configSalt config /= "")
           "SECRET_SALT must be set: the identifier of a ledger entry is its \
           \row id hashed with this salt, and the ids of a shared sequence \
