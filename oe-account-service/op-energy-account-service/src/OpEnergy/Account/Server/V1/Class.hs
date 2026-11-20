@@ -30,6 +30,12 @@ import           Data.OpEnergy.API.V1.Block(BlockHeight, BlockHeader)
 import           OpEnergy.Error
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
+import           OpEnergy.Account.Server.V1.Wallet.Class
+                 ( WalletBackend
+                 )
+import           OpEnergy.Account.Server.V1.Wallet.Mock
+                 ( mockWalletBackend
+                 )
 import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.Account.Server.V1.Metrics
 
@@ -51,6 +57,9 @@ data State = State
   -- ^ contains metrics handlers
   , blockTimeState :: BlockTime.State
   -- ^ block time strike state
+  , wallet :: WalletBackend
+  -- ^ the lightning wallet this service talks to, built from config at
+  -- startup: handlers call it without knowing which backend it is
   , callStack :: Text
   -- ^ dot separated labels
   }
@@ -63,6 +72,7 @@ defaultState :: (MonadLoggerIO m ) => Config-> MetricsState-> LogFunc-> Pool Sql
 defaultState config metrics logFunc accountDBPool = do
   logLevelV <- liftIO $ TVar.newTVarIO (configLogLevelMin config)
   blockTimeState <- BlockTime.defaultState config
+  let walletV = mockWalletBackend accountDBPool
   return $ State
     { config = config
     , accountDBPool = accountDBPool
@@ -70,6 +80,7 @@ defaultState config metrics logFunc accountDBPool = do
     , logLevel = logLevelV
     , metrics = metrics
     , blockTimeState = blockTimeState
+    , wallet = walletV
     , callStack = ""
     }
 
