@@ -138,14 +138,29 @@ adjustBalanceTx key direction amountSats reason reference now = runExceptT $ do
       [ PersonBalance -=. amountSats
       , PersonLastUpdated =. now
       ]
+    -- the balance is held as an Int64 too, so a credit, which carries the
+    -- sum past it, reaches the column as a number it cannot hold and the
+    -- database answers with an exception rather than the error this
+    -- returns. Bounded in the statement, beside the balance it adds to, so
+    -- the room is measured against the figure the row has when it is
+    -- written rather than one read a moment earlier
     Credit -> updateWhereCount
-      [ PersonId ==. key ]
+      [ PersonId ==. key
+      , PersonBalance <=. Sats (fromIntegral (maxBound :: Int64)
+                                - unSats amountSats)
+      ]
       [ PersonBalance +=. amountSats
       , PersonLastUpdated =. now
       ]
-  when (changed /= (1 :: Int64)) $ throwE $ case direction of
-    Debit -> insufficientBalance
-    Credit -> accountNotFound
+  when (changed /= (1 :: Int64)) $ case direction of
+    Debit -> throwE insufficientBalance
+    -- a credit matches no row either where the account is gone or where it
+    -- has no room left for the amount, and the two are not the same answer
+    Credit -> do
+      mperson <- lift $ get key
+      throwE $ case mperson of
+        Nothing -> accountNotFound
+        Just _ -> ledgerAmountOutOfRange
   balanceAfter <- exceptTMaybeT accountNotFound $ fmap personBalance <$> get key
   _ <- lift $ insert $ LedgerEntry
     { ledgerEntryPersonId = key
