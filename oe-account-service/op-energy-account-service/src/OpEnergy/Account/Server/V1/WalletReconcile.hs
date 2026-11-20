@@ -236,9 +236,15 @@ reconcilePendingPayments =
             -- made. Counting only the waiting rows would leave that one
             -- unambiguous and debit the second account for the first
             -- account's payment
+            -- direction is not named: the wallet is asked about a hash
+            -- and answers about a payment, without saying which way it
+            -- went, so an invoice of this service, which somebody else
+            -- paid, answers for an outgoing attempt of the same hash as
+            -- readily as that attempt would. Counting the incoming rows
+            -- as well leaves such a hash ambiguous rather than settling
+            -- the attempt on a payment, which was never its own
             else count
               [ WalletPaymentPaymentHash ==. paymentHashV
-              , WalletPaymentDirection ==. Outgoing
               , WalletPaymentStatus <-. [ Pending, Settled ]
               ]
       case eambiguous of
