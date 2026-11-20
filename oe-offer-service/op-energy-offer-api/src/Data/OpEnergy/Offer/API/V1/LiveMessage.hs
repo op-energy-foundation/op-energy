@@ -36,6 +36,10 @@ import           Data.OpEnergy.Account.API.V1.Account
                  )
 import           Data.OpEnergy.Offer.API.V1.OfferInfo (OfferInfo)
 import           Data.OpEnergy.Offer.API.V1.ContractInfo (ContractInfo)
+import           Data.OpEnergy.Offer.API.V1.TelegramMessageInfo
+                 ( TelegramMessageID
+                 , TelegramMessageInfo
+                 )
 
 -- | request from the frontend
 data LiveRequest
@@ -87,6 +91,16 @@ data LiveMessage
     -- ^ new balance, in sats, of the account given in a successful
     -- 'LiveRequestAuth'. Sent to that connection only, right after the
     -- notification of the change that caused it
+  | LiveMessageTelegramMessage TelegramMessageInfo
+    -- ^ a message was said in the telegram group the trade chat is held
+    -- in. Sent to every connection, as the group is one shared room and
+    -- what is said in it is not addressed to anybody here
+  | LiveMessageTelegramEdited TelegramMessageInfo
+    -- ^ a message of the group was edited by whoever wrote it. Carries the
+    -- message as it now reads
+  | LiveMessageTelegramDeleted TelegramMessageID
+    -- ^ a moderator removed a message from the group. Carries only its id,
+    -- as there is nothing left to show
   | LiveMessagePong
     -- ^ answer to 'LiveRequestPing'
   | LiveMessageHello
@@ -134,6 +148,18 @@ liveMessagePairs (LiveMessageBlockNew height mmediantime) =
 liveMessagePairs (LiveMessageMyBalance balance) =
   [ "type" .= ("my.balance" :: Text)
   , "balance" .= balance
+  ]
+liveMessagePairs (LiveMessageTelegramMessage message) =
+  [ "type" .= ("chat.message" :: Text)
+  , "message" .= message
+  ]
+liveMessagePairs (LiveMessageTelegramEdited message) =
+  [ "type" .= ("chat.edited" :: Text)
+  , "message" .= message
+  ]
+liveMessagePairs (LiveMessageTelegramDeleted messageId') =
+  [ "type" .= ("chat.deleted" :: Text)
+  , "messageId" .= messageId'
   ]
 liveMessagePairs LiveMessagePong =
   [ "type" .= ("pong" :: Text)

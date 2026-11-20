@@ -34,12 +34,18 @@ import           Control.Monad.IO.Class (MonadIO)
 import           Control.Monad.Trans.Reader (ReaderT)
 import           Data.Int (Int64)
 import           Data.Text (Text)
+import qualified Data.Text as Text
 import           Data.Time.Clock (UTCTime)
 import           GHC.Generics
 
 import           Database.Persist
 import           Database.Persist.Sql (SqlBackend)
 import           Database.Persist.TH
+
+import           Data.OpEnergy.Offer.API.V1.TelegramMessageInfo
+                 ( TelegramMessageID(..)
+                 , TelegramMessageInfo(..)
+                 )
 
 share [mkPersist sqlSettings, mkMigrate "migrateTelegramMessage"] [persistLowerCase|
 -- | one message of the telegram group, as it was when it was read
@@ -67,6 +73,30 @@ TelegramPollState
   UniqueTelegramPollState chatId
   deriving Eq Show Generic
 |]
+
+-- | the message as the website is given it.
+--
+-- The op energy name is passed in rather than read here, because it comes
+-- from the link table and a feed renders a page of messages against one
+-- read of it rather than one read per row.
+--
+-- Example:
+--
+-- > telegramMessageInfoOf (Just "blur_inject_439") row
+telegramMessageInfoOf
+  :: Maybe Text
+  -> TelegramGroupMessage
+  -> TelegramMessageInfo
+telegramMessageInfoOf mOpEnergyName row = TelegramMessageInfo
+  { messageId = TelegramMessageID $! Text.pack $! show
+      $! telegramGroupMessageMessageId row
+  , senderName = telegramGroupMessageSenderDisplayName row
+  , senderDisplayName = mOpEnergyName
+  , senderId = telegramGroupMessageSenderId row
+  , body = telegramGroupMessageBody row
+  , sentAt = telegramGroupMessageSentAt row
+  , editedAt = telegramGroupMessageEditedAt row
+  }
 
 -- | writes one message of the group, or does nothing if it is already
 -- there.

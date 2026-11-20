@@ -28,6 +28,7 @@ library
                    , Data.OpEnergy.Offer.API.V1.Constants
                    , Data.OpEnergy.Offer.API.V1.OffersAPI
                    , Data.OpEnergy.Offer.API.V1.LiveMessage
+                   , Data.OpEnergy.Offer.API.V1.TelegramMessageInfo
 
     build-depends:    base >=4.15.1.0
                     , aeson

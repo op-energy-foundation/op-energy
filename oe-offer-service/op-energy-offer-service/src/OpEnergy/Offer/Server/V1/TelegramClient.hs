@@ -29,7 +29,7 @@ import           Control.Monad.Logger (logInfo, logWarn)
 import           Control.Monad.Trans.Reader (ask)
 import qualified Control.Exception.Safe as E
 import           Data.Int (Int64)
-import           Data.Maybe (mapMaybe)
+import           Data.Maybe (catMaybes, mapMaybe)
 import           Data.Text (Text)
 import qualified Data.Text as Text
 import           Data.Time.Clock (UTCTime)
@@ -63,7 +63,10 @@ import           OpEnergy.Offer.Server.V1.Telegram.Client
                  , senderDisplayNameOf
                  , withTelegram
                  )
+import           OpEnergy.Offer.Server.V1.LiveEvent (LiveEvent(..))
 import           OpEnergy.Offer.Server.V1.Time (getCurrentTimeDB)
+import           OpEnergy.Offer.Server.V1.WebSocketService (publishLiveEvent)
+import           Data.OpEnergy.Offer.API.V1.LiveMessage (LiveMessage(..))
 import           OpEnergy.Offer.Server.V1.TelegramMessage
 import           Data.OpEnergy.API.V1.Positive (fromPositive)
 import           OpEnergy.Error (CallstackError, describeError, dbQueryError)
@@ -167,21 +170,46 @@ pollOnce token chatId' = do
               -- send them again on every poll, forever
               newOffset = maximum (map updateId updates)
           mwritten <- withDBTransaction "V1.TelegramClient.pollOnce.store" $ do
-            mapM_ store mirrored
+            written <- mapM store mirrored
             advancePollStateTx chatId' newOffset now
+            return $! catMaybes written
           case mwritten of
             Nothing -> return $! Left dbQueryError
-            Just () -> return $! Right (length updates)
+            Just stored -> do
+              -- after the transaction, never inside it: a connection told
+              -- about a message, which the transaction then failed to
+              -- write, would be told about something nobody can read
+              --
+              -- published without withLiveEventOrder, which serialises
+              -- changes of offers, contracts and balances so a connection
+              -- never sees an older one after a newer. The chat is none of
+              -- those and orders itself by the group's own message ids, and
+              -- taking that lock would make a slow poll hold up accepting
+              -- an offer
+              mapM_ announce stored
+              return $! Right (length updates)
   where
+    -- only what was actually written is announced: a redelivery, which the
+    -- unique constraint turned into nothing, must not be announced twice
+    announce (row, wasEdit) = publishLiveEvent $! LiveEvent
+      { liveEventMessage =
+          ( if wasEdit then LiveMessageTelegramEdited else LiveMessageTelegramMessage
+          ) $! telegramMessageInfoOf Nothing row
+      , liveEventBalances = []
+      }
     store message
       | mirroredIsEdit message =
           let row = mirroredRow message
-          in updateTelegramMessageBodyTx
-               (telegramGroupMessageChatId row)
-               (telegramGroupMessageMessageId row)
-               (telegramGroupMessageBody row)
-               (telegramGroupMessageSentAt row)
-      | otherwise = insertTelegramMessageTx (mirroredRow message) >> return ()
+          in do
+            updateTelegramMessageBodyTx
+              (telegramGroupMessageChatId row)
+              (telegramGroupMessageMessageId row)
+              (telegramGroupMessageBody row)
+              (telegramGroupMessageSentAt row)
+            return $! Just (row, True)
+      | otherwise = do
+          wasNew <- insertTelegramMessageTx (mirroredRow message)
+          return $! if wasNew then Just (mirroredRow message, False) else Nothing
 
 -- | the row one update is to be stored as, or Nothing where the update is
 -- not part of the chat.
