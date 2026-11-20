@@ -51,7 +51,7 @@ import           Data.OpEnergy.Account.API.V2.LedgerReason
 import           OpEnergy.Account.Server.V1.Person
 import           OpEnergy.Error
                  ( CallstackError, accountNotFound, insufficientBalance
-                 , ledgerReasonMismatch
+                 , ledgerAmountOutOfRange, ledgerReasonMismatch
                  )
 import           OpEnergy.ExceptMaybe (exceptTMaybeT)
 
@@ -123,6 +123,15 @@ adjustBalanceTx
   -> ReaderT SqlBackend m (Either CallstackError Sats)
 adjustBalanceTx key direction amountSats reason reference now = runExceptT $ do
   unless (reasonDescribes direction reason) $ throwE ledgerReasonMismatch
+  -- Sats counts up to 2^64-1, while the column holding it is an Int64, so
+  -- an amount above that is written as a negative number: a debit of one
+  -- passes the guard, which is meant to refuse it -- every balance is at
+  -- least a negative amount -- and then adds to the balance instead of
+  -- taking from it, while the entry explaining it records the wrapped
+  -- figure. Refused here, before either the balance or the entry is
+  -- written
+  unless (toInteger (unSats amountSats) <= toInteger (maxBound :: Int64))
+    $ throwE ledgerAmountOutOfRange
   changed <- lift $ case direction of
     Debit -> updateWhereCount
       [ PersonId ==. key, PersonBalance >=. amountSats ]

@@ -40,6 +40,7 @@ module OpEnergy.Error
   , walletTooManyPendingInvoices
   , walletTooManyPayAttempts
   , ledgerReasonMismatch
+  , ledgerAmountOutOfRange
   ) where
 
 import           Data.Text(Text)
@@ -79,6 +80,7 @@ data BadRequestError
   | WalletTooManyPendingInvoices
   | WalletTooManyPayAttempts
   | LedgerReasonMismatch
+  | LedgerAmountOutOfRange
 instance Show BadRequestError where
   show CalculatedGuessesCountNotFound = "calculated guesses count not found"
   show SecretNotRecoverable = "account was registered before recoverable secrets; use regenerate"
@@ -104,6 +106,8 @@ instance Show BadRequestError where
   show WalletTooManyPayAttempts =
     "too many payments have been attempted by this account, try again later"
   show LedgerReasonMismatch = "reason does not describe this direction"
+  show LedgerAmountOutOfRange =
+    "amount is larger than a balance can hold"
 
 data InternalError
   = Unspecified Text
@@ -206,6 +210,10 @@ walletTooManyPayAttempts =
   CallstackError "" $! BadRequest WalletTooManyPayAttempts
 ledgerReasonMismatch :: CallstackError
 ledgerReasonMismatch = CallstackError "" $! BadRequest LedgerReasonMismatch
+
+ledgerAmountOutOfRange :: CallstackError
+ledgerAmountOutOfRange =
+  CallstackError "" $! BadRequest LedgerAmountOutOfRange
 
 -- | renders an error for a log line, as its callstack and its reason
 describeError :: CallstackError -> Text
