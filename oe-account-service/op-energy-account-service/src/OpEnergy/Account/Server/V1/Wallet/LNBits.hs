@@ -420,8 +420,18 @@ payOverLightning url invoiceKey adminKey pool params = runExceptT $ do
   -- Only for a payment, which leaves the wallet. An invoice of this
   -- service is settled inside LNBits and is routed nowhere, so it costs
   -- no fee at all: holding it to a routing reserve would refuse a
-  -- transfer between two accounts here for a cost it can never have
-  unless (isJust mours) $ do
+  -- transfer between two accounts here for a cost it can never have.
+  --
+  -- The invoice, which was handed in, has to be the one this service
+  -- issued, not merely carry its hash: the hash is chosen by whoever
+  -- writes the invoice, so a second one can be signed with the same hash
+  -- for another amount or payee. Paying that is a payment, which leaves
+  -- the wallet, and it is what would be sent
+  let isOurOwnInvoice = maybe False
+        (\(Entity _ ourInvoice)->
+           walletPaymentInvoice ourInvoice == payInvoiceBolt11 params)
+        mours
+  unless isOurOwnInvoice $ do
     reserveAnswer <- ExceptT $ callLNBits url $ LNBits.readFeeReserve
       (unBolt11Invoice (payInvoiceBolt11 params))
     when (msatsToSats (LNBits.feeReserveResponseMsats reserveAnswer)
