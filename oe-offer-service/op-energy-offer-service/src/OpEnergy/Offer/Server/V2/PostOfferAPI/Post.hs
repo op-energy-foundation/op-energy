@@ -139,6 +139,23 @@ post token PostOfferRequest{..} =
             ]
             []
         case mexisting of
+          -- the row is there, so the offer was made and it was the answer
+          -- to the insert, which was lost. Answered as the offer it is,
+          -- with the event the normal path publishes, rather than as a
+          -- failure: a maker, which is told its post failed, posts again
+          -- while this offer already holds its stake
+          Right (Just existing) -> do
+            lift $ runLogging $ $(logError)
+              ( "post: the offer row is there although the insert answered "
+              <> "an error, so it is answered as made and the stake of "
+              <> tshow totalStake <> " sats for " <> tshow personUUIDV
+              <> " stays with it: " <> describeError insertErr
+              )
+            let offerInfo = offerInfoFromEntity existing
+            lift $ publishLiveEvent $! LiveEvent
+              (LiveMessageOfferCreated offerInfo)
+              [(personUUIDV, makerBalance)]
+            return $! PostOfferResult { offers = [ offerInfo ] }
           -- only a row, which is known not to be there, is refunded for.
           -- Where this could not be read the stake is left where it is
           -- and written down: a stake, which was not given back, is one
@@ -159,18 +176,14 @@ post token PostOfferRequest{..} =
                      "; stake refund ALSO failed, needs manual reconciliation: "
                      <> describeError creditErr
               )
-          Right (Just _) -> lift $ runLogging $ $(logError)
-            ( "post: the offer row is there although the insert answered "
-            <> "an error, so the stake of " <> tshow totalStake
-            <> " sats for " <> tshow personUUIDV <> " is left with the "
-            <> "offer rather than given back: " <> describeError insertErr
-            )
-          Left readErr -> lift $ runLogging $ $(logError)
-            ( "post: the insert of the offer answered an error and "
-            <> "whether the row is there could not be read, so the stake "
-            <> "of " <> tshow totalStake <> " sats for "
-            <> tshow personUUIDV <> " is left as it is and needs manual "
-            <> "reconciliation: " <> describeError insertErr
-            <> "; and " <> describeError readErr
-            )
-        throwE insertErr
+            throwE insertErr
+          Left readErr -> do
+            lift $ runLogging $ $(logError)
+              ( "post: the insert of the offer answered an error and "
+              <> "whether the row is there could not be read, so the stake "
+              <> "of " <> tshow totalStake <> " sats for "
+              <> tshow personUUIDV <> " is left as it is and needs manual "
+              <> "reconciliation: " <> describeError insertErr
+              <> "; and " <> describeError readErr
+              )
+            throwE insertErr
