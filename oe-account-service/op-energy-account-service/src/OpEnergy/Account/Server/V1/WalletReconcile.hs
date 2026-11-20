@@ -195,8 +195,13 @@ reconcilePendingPayments =
     in profile name $ do
   State{ accountDBPool = pool, config = config, wallet = walletV } <- ask
   now <- liftIO getPOSIXTime
-  let notAskedSince = now
-        - fromIntegral (configWalletReconcileIntervalSecs config)
+  -- never before the epoch: the moment is stored as a Word32, so a
+  -- negative one is written as an enormous one -- a cutoff in the future,
+  -- which every pending payment is older than, and the interval would be
+  -- ignored on every tick. An interval, which outruns the clock, simply
+  -- means nothing has been asked about yet
+  let notAskedSince = max 0
+        ( now - fromIntegral (configWalletReconcileIntervalSecs config) )
   case walletReadPayment walletV of
     -- a backend, which settles its own payments, has nothing to be asked
     Nothing -> return ()
@@ -437,12 +442,24 @@ reconcilePendingPayments =
       -> WalletPayment
       -> AppT m ()
     recordFailure pool key payment = do
+      State{ wallet = walletV } <- ask
       now <- liftIO getPOSIXTime
-      -- nothing left the wallet, so everything, which was taken for it,
-      -- goes back. An incoming payment took nothing and gets nothing back
-      finish pool key payment Failed Nothing
-        (walletPaymentAmountSats payment + reserveOf payment)
-        "a payment, which the wallet did not make" now
+      case walletPaymentDirection payment of
+        -- an invoice, which this wallet did not issue, is not written off
+        -- by what this wallet answers: the answer is about the hash, and
+        -- an outgoing attempt of this wallet, which failed, carries the
+        -- hash of an invoice a wallet used before this one issued. Written
+        -- off here, the invoice would leave reconciliation while it can
+        -- still be paid at its issuer, and that deposit would be credited
+        -- to nobody. It is parked instead, as an unknown one is
+        Incoming
+          | not (answeredByOriginatingWallet payment walletV) ->
+              park pool key payment
+        -- nothing left the wallet, so everything, which was taken for it,
+        -- goes back. An incoming payment took nothing and gets nothing back
+        _ -> finish pool key payment Failed Nothing
+               (walletPaymentAmountSats payment + reserveOf payment)
+               "a payment, which the wallet did not make" now
 
     -- a payment the wallet does not have at all
     forget
