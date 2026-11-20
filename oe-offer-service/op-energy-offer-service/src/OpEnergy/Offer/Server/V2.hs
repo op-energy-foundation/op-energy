@@ -19,12 +19,22 @@ import qualified OpEnergy.Offer.Server.V2.PostOfferAPI as PostOfferAPI
 import qualified OpEnergy.Offer.Server.V2.OffersAPI as OffersAPI
 import qualified OpEnergy.Offer.Server.V2.CancelAPI as CancelAPI
 import qualified OpEnergy.Offer.Server.V2.AcceptAPI as AcceptAPI
+import qualified OpEnergy.Offer.Server.V2.TelegramAPI as TelegramAPI
+import           Data.OpEnergy.Offer.API.V1.TelegramAPI (TelegramAPI)
+import           Data.OpEnergy.Offer.API.V1.OffersAPI (OffersAPI)
 
 -- | V1 offer server wiring. OffersAPI is one combined sub-API:
 -- post :<|> cancel :<|> accept :<|> mine :<|> list :<|> contracts
 -- :<|> getById :<|> getDetails
 offerServer :: ServerT OfferV1API (AppT Handler)
 offerServer
+  = ( offersServer :: ServerT OffersAPI (AppT Handler) )
+  :<|> ( TelegramAPI.handlers :: ServerT TelegramAPI (AppT Handler) )
+
+-- | the offer endpoints, grouped so the chat is a sub-API beside them
+-- rather than another route of theirs
+offersServer :: ServerT OffersAPI (AppT Handler)
+offersServer
   =    PostOfferAPI.postHandler
   :<|> CancelAPI.cancelHandler
   :<|> AcceptAPI.acceptHandler

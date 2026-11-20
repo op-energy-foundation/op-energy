@@ -139,6 +139,27 @@ updateTelegramMessageBodyTx chatId' messageId' body' editedAt' =
     , TelegramGroupMessageEditedAt =. Just editedAt'
     ]
 
+-- | marks a message as removed by a moderator.
+--
+-- The row stays. Telegram never tells a bot that a message was deleted, so
+-- a row deleted outright would be written again by the next redelivery, and
+-- the unique constraint cannot catch that once the row is gone.
+markTelegramMessageDeletedTx
+  :: MonadIO m
+  => Int64
+  -> Int64
+  -> Text
+  -> UTCTime
+  -> ReaderT SqlBackend m ()
+markTelegramMessageDeletedTx chatId' messageId' moderatorUUID now =
+  updateWhere
+    [ TelegramGroupMessageChatId ==. chatId'
+    , TelegramGroupMessageMessageId ==. messageId'
+    ]
+    [ TelegramGroupMessageDeletedAt =. Just now
+    , TelegramGroupMessageDeletedByUUID =. Just moderatorUUID
+    ]
+
 -- | moves the offset of one group to cover everything just written.
 --
 -- Written as an upsert, as the first poll of a group has no row to update
