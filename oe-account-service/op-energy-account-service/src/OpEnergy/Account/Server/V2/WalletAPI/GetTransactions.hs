@@ -22,6 +22,7 @@ import           Data.Maybe (fromMaybe)
 import           Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TE
+import           Data.Word (Word32)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as B16
 import qualified Crypto.Hash.SHA256 as SHA256
@@ -102,7 +103,13 @@ getWalletTransactions token mpage =
     return (totalV, entriesV)
   return $! WalletTransactionsResult
     { results = List.map (renderWalletTransaction (configSalt config)) entries
-    , page = fromIntegral requestedPage
+      -- a page, which does not fit the Word32 this reports it in, answers
+      -- no rows, and taking it across as it is would wrap it round to a
+      -- page, which does hold rows -- 4294967296 reported as 0. Held at
+      -- the largest page, which fits, so what is reported stays a page
+      -- past the end
+    , page = fromIntegral
+        (min requestedPage (fromIntegral (maxBound :: Word32)))
     , pageSize = fromIntegral recordsPerReply
     , totalCount = fromIntegral total
     }
