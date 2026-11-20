@@ -354,11 +354,16 @@ everifyWalletConfig config
       , require (configWalletInvoiceExpirySecs config > 0)
           "WALLET_INVOICE_EXPIRY_SECS must be above 0: an invoice would be \
           \advertised as expired as soon as it is created"
-      , require (configWalletInvoiceReservationTtlSecs config > 0)
-          "WALLET_INVOICE_RESERVATION_TTL_SECS must be above 0: a slot \
-          \would stop counting as soon as it was taken, so the invoices in \
-          \flight would bound nothing and an account could hold more of \
-          \them at once than WALLET_MAX_PENDING_INVOICES allows"
+      , require (configWalletInvoiceReservationTtlSecs config > 1)
+          "WALLET_INVOICE_RESERVATION_TTL_SECS must be above 1: the moment \
+          \a slot was taken is stored in whole seconds, so a ttl of 1 \
+          \covers anything between a second and nothing at all -- a slot \
+          \taken at 100.99 stops counting at 101.01, as both it and the \
+          \cutoff are stored as 100. A slot, which stops counting while \
+          \the invoice is still being made, lets another request take it \
+          \and the account hold more invoices at once than \
+          \WALLET_MAX_PENDING_INVOICES allows. Above 1 a whole second is \
+          \covered whatever the truncation does"
       , require (configWalletInvoiceReservationTtlSecs config
                    <= fromIntegral (maxBound :: Word32))
           "WALLET_INVOICE_RESERVATION_TTL_SECS must fit a Word32: the time \
