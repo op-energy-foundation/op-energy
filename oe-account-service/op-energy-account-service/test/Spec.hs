@@ -352,11 +352,16 @@ everifyWalletConfigSpec = do
   it "accepts a real wallet, which grants nothing at signup" $
     everifyWalletConfig lnbits `shouldBe` Right ()
 
-  it "refuses a real wallet together with a signup grant" $
+  it "leaves a signup grant on a real wallet to the deployment" $
     -- every account is credited with the grant without any sats being paid
-    -- in for it, so it could be withdrawn from the wallet as real sats
-    lnbits { configStartingBalanceSats = 300000 }
-      `shouldSatisfy` complainsAbout "STARTING_BALANCE_SATS"
+    -- in for it, so on a wallet, whose sats are worth something, it could
+    -- be withdrawn as real ones and the account registered again for more.
+    -- On the signet wallet these services run against the sats cost
+    -- nothing and the grant is what lets a tester trade without being paid
+    -- in first, so it is accepted here and a mainnet deployment sets
+    -- STARTING_BALANCE_SATS to 0
+    everifyWalletConfig (lnbits { configStartingBalanceSats = 300000 })
+      `shouldBe` Right ()
 
   it "allows a signup grant on the wallet, which moves no real sats" $
     everifyWalletConfig salted { configStartingBalanceSats = 300000 }
