@@ -106,6 +106,7 @@ WalletPayment
   note Text Maybe
   expiresAt POSIXTime Maybe -- incoming only: when the invoice stops being payable
   creditedAt POSIXTime Maybe -- incoming only: when the balance was credited for it, so that happens exactly once
+  checkingId Text Maybe -- outgoing only: LNBits' own name for this attempt, which names the attempt rather than the invoice, so a payment is asked about as the one it is. Nothing where the wallet never answered, or for a row, which predates this
   createdAt POSIXTime
   updatedAt POSIXTime
   UniqueWalletPaymentHashPersonDirection paymentHash personId direction

@@ -119,6 +119,11 @@ data PaymentResponse = PaymentResponse
   , paymentResponseBolt11 :: Text
   , paymentResponseFeeMsats :: Int64
   , paymentResponseStatus :: Text
+    -- | LNBits' own name for this payment, which names the attempt rather
+    -- than the invoice: two accounts paying one invoice, and a retry of
+    -- an attempt, which failed, are separate payments to LNBits and each
+    -- has its own. Empty where a version does not answer with one
+  , paymentResponseCheckingId :: Text
   }
   deriving (Show, Eq)
 
@@ -139,6 +144,7 @@ instance FromJSON PaymentResponse where
     -- an answer without a status is one, which has not been paid yet:
     -- LNBits leaves the field out until there is something to report
     <*> v .:? "status" .!= "pending"
+    <*> v .:? "checking_id" .!= ""
 
 -- | what LNBits answers about a payment it is given the hash of. 'paid' is
 -- the explicit answer and 'status' describes how it got there

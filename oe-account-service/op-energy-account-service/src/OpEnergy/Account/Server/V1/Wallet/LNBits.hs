@@ -226,6 +226,7 @@ recordInvoice pool params paymentHashV invoiceV expiresAt = do
       , walletPaymentNote = createInvoiceNote params
       , walletPaymentExpiresAt = Just expiresAt
       , walletPaymentCreditedAt = Nothing
+      , walletPaymentCheckingId = Nothing
       , walletPaymentCreatedAt = now
       , walletPaymentUpdatedAt = now
       }
@@ -510,6 +511,7 @@ recordPendingPaymentTx params paymentHashV amount reserve now = do
       , walletPaymentNote = Nothing
       , walletPaymentExpiresAt = Nothing
       , walletPaymentCreditedAt = Nothing
+      , walletPaymentCheckingId = Nothing
       , walletPaymentCreatedAt = now
       , walletPaymentUpdatedAt = now
       }
@@ -591,28 +593,69 @@ sendPayment url adminKey pool params paymentHashV balanceAfterDebit = do
     -- again, and nothing gives the balance back on a payment, which may
     -- still go
     CallUnknown _ -> return inFlight
-    CallAnswered answer -> case LNBits.paymentResponseStatus answer of
-      "success" -> do
-        let fee = msatsToSats (LNBits.paymentResponseFeeMsats answer)
-        mbalance <- recordSettled pool (payInvoicePersonId params) paymentHashV
-          now fee reserve
-          balanceAfterDebit now
-        return $! case mbalance of
-          Nothing -> inFlight
-          Just balanceAfter -> Right $! PaidInvoice
-            { paidInvoicePaymentHash = paymentHashV
-            , paidInvoiceBalanceAfter = balanceAfter
-            , paidInvoiceAmountSats = amount
-            , paidInvoiceFeeSats = fee
-            , paidInvoiceProgress = PaymentSettled
-            , paidInvoiceRecipientPersonId = Nothing
-            }
-      "failed" -> do
-        mbalance <- recordFailed pool (payInvoicePersonId params) paymentHashV
-          now (amount + reserve)
-          balanceAfterDebit now
-        return $! notMade walletPaymentNotMade mbalance
-      _ -> return inFlight
+    CallAnswered answer -> do
+      -- LNBits has named this attempt, so the name is kept on the row
+      -- before anything is made of the answer: asking about a hash
+      -- answers about any payment of that hash -- an invoice of this
+      -- service somebody else paid, or the attempt of another account --
+      -- while asking about this name answers about this attempt alone.
+      -- Written whatever the answer says, as a payment, which is still
+      -- going, is the one the scheduler has to ask about
+      recordCheckingId pool (payInvoicePersonId params) paymentHashV
+        (LNBits.paymentResponseCheckingId answer) now
+      case LNBits.paymentResponseStatus answer of
+        "success" -> do
+          let fee = msatsToSats (LNBits.paymentResponseFeeMsats answer)
+          mbalance <- recordSettled pool (payInvoicePersonId params)
+            paymentHashV now fee reserve
+            balanceAfterDebit now
+          return $! case mbalance of
+            Nothing -> inFlight
+            Just balanceAfter -> Right $! PaidInvoice
+              { paidInvoicePaymentHash = paymentHashV
+              , paidInvoiceBalanceAfter = balanceAfter
+              , paidInvoiceAmountSats = amount
+              , paidInvoiceFeeSats = fee
+              , paidInvoiceProgress = PaymentSettled
+              , paidInvoiceRecipientPersonId = Nothing
+              }
+        "failed" -> do
+          mbalance <- recordFailed pool (payInvoicePersonId params)
+            paymentHashV now (amount + reserve)
+            balanceAfterDebit now
+          return $! notMade walletPaymentNotMade mbalance
+        _ -> return inFlight
+
+-- | writes LNBits' own name for this attempt onto the row, so the payment
+-- can be asked about later as the attempt it is rather than by its hash.
+--
+-- A hash names an invoice, and more than one payment can carry it: an
+-- invoice of this service, which somebody else paid, and the attempt of
+-- another account at the same invoice both answer when the hash is asked
+-- about. This name answers for one attempt.
+--
+-- An answer without one -- a version of LNBits, which does not report it
+-- -- leaves the row as it was, so reconciliation falls back to the hash
+-- as it did before.
+recordCheckingId
+  :: Pool SqlBackend
+  -> PersonId
+  -> PaymentHash
+  -> Text
+  -> POSIXTime
+  -> IO ()
+recordCheckingId pool personKey paymentHashV checkingId now
+  | Text.null checkingId = return ()
+  | otherwise = do
+      _ <- eitherException $ flip runSqlPersistMPool pool $ updateWhereCount
+        [ WalletPaymentPaymentHash ==. paymentHashV
+        , WalletPaymentPersonId ==. personKey
+        , WalletPaymentDirection ==. Outgoing
+        ]
+        [ WalletPaymentCheckingId =. Just checkingId
+        , WalletPaymentUpdatedAt =. now
+        ]
+      return ()
 
 -- | records a payment as made, with the fee it cost. Answers whether this
 -- call is the one, which took the payment out of Pending
