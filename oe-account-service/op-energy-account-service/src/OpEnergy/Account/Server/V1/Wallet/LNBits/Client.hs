@@ -27,11 +27,13 @@ module OpEnergy.Account.Server.V1.Wallet.LNBits.Client
   , readPaymentState
   ) where
 
+import           Control.Applicative ((<|>))
 import           Data.Aeson
                  ( FromJSON(..), ToJSON(..), object, withObject
                  , (.=), (.:), (.:?), (.!=)
                  )
 import           Data.Int (Int64)
+import           Data.Maybe (fromMaybe)
 import           Data.Proxy (Proxy(..))
 import           Data.Text (Text)
 import           Data.Word (Word64)
@@ -119,7 +121,16 @@ data PaymentResponse = PaymentResponse
 instance FromJSON PaymentResponse where
   parseJSON = withObject "PaymentResponse" $ \v-> PaymentResponse
     <$> v .: "payment_hash"
-    <*> v .: "bolt11"
+    -- LNBits names a created invoice payment_request, and names it bolt11
+    -- in the later versions, while an answer about a payment, which was
+    -- made, carries neither: the invoice was the request rather than the
+    -- answer. Read as whichever is there, so one version of LNBits does
+    -- not refuse to be read at all, and left empty for a payment, where
+    -- the caller does not ask for it
+    <*> (do
+          mbolt11 <- v .:? "bolt11"
+          mrequest <- v .:? "payment_request"
+          return $! fromMaybe "" (mbolt11 <|> mrequest))
     <*> v .:? "fee" .!= 0
     -- an answer without a status is one, which has not been paid yet:
     -- LNBits leaves the field out until there is something to report
@@ -135,13 +146,25 @@ data PaymentStateResponse = PaymentStateResponse
   deriving (Show, Eq)
 
 instance FromJSON PaymentStateResponse where
-  parseJSON = withObject "PaymentStateResponse" $ \v-> PaymentStateResponse
-    <$> v .:? "paid" .!= False
-    <*> v .:? "status" .!= "pending"
+  parseJSON = withObject "PaymentStateResponse" $ \v-> do
+    paid <- v .:? "paid" .!= False
+    mdetails <- v .:? "details"
+    -- the details are where LNBits says a payment failed: "paid" is False
+    -- for a payment, which is still going, and for one, which will never
+    -- go, and the status beside it stays the status of the request. Read
+    -- the details first, so a failure is reported as one and the debit and
+    -- its reserve are given back, rather than being left pending for good
+    mdetailsStatus <- maybe (pure Nothing)
+      (withObject "details" $ \d-> d .:? "status") mdetails
+    mtopStatus <- v .:? "status"
     -- the fee is reported inside the payment's own details, and only once
     -- there is a payment to report it for
-    <*> (v .:? "details" >>= maybe (pure 0) (withObject "details"
-          $ \d-> d .:? "fee" .!= 0))
+    fee <- maybe (pure 0)
+      (withObject "details" $ \d-> d .:? "fee" .!= 0) mdetails
+    return $! PaymentStateResponse
+      paid
+      (fromMaybe "pending" (mdetailsStatus <|> mtopStatus))
+      fee
 
 -- | what LNBits says when it refuses a payment. It answers these with a
 -- status of its own, which is not a success code, so the body is read out
