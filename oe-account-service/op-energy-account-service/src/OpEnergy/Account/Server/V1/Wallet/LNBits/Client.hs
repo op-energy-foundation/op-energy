@@ -31,7 +31,7 @@ module OpEnergy.Account.Server.V1.Wallet.LNBits.Client
   , readWalletInfo
   ) where
 
-import           Control.Applicative ((<|>))
+import           Control.Applicative ((<|>), optional)
 import           Data.Aeson
                  ( FromJSON(..), ToJSON(..), object, withObject
                  , (.=), (.:), (.:?), (.!=)
@@ -151,7 +151,13 @@ instance FromJSON PaymentResponse where
     -- LNBits leaves the field out until there is something to report
     <*> v .:? "status" .!= "pending"
     <*> v .:? "checking_id" .!= ""
-    <*> v .:? "expiry"
+    -- read with optional rather than .:?, which only stands in for a key,
+    -- which is absent: LNBits reports this as a local time without a zone
+    -- in some versions, which is no instant and fails to parse, and that
+    -- failure would refuse the whole answer -- an invoice the wallet has
+    -- already created would be reported as never made. The expiry asked
+    -- for is used instead, so nothing here needs it
+    <*> optional (v .: "expiry")
 
 -- | what LNBits answers about a payment it is given the hash of. 'paid' is
 -- the explicit answer and 'status' describes how it got there
