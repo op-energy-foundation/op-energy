@@ -33,6 +33,7 @@ library
                    , OpEnergy.Offer.Server.V1.AccountClient
                    , OpEnergy.Offer.Server.V1.BlockspanClient
                    , OpEnergy.Offer.Server.V1.Telegram.Client
+                   , OpEnergy.Offer.Server.V1.TelegramMessage
                    , OpEnergy.Offer.Server.V1.PlatformStats
                    , OpEnergy.Offer.Server.V1.LiveEvent
                    , OpEnergy.Offer.Server.V1.WebSocketService
