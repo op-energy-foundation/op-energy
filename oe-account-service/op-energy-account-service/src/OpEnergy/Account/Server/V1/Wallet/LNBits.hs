@@ -31,10 +31,12 @@
 {-# LANGUAGE ScopedTypeVariables        #-}
 module OpEnergy.Account.Server.V1.Wallet.LNBits
   ( lnbitsWalletBackend
+  , everifyKeysNameOneWallet
   -- * exported to be tested
   , msatsToSats
   ) where
 
+import           Control.Monad (when)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Except
@@ -79,15 +81,18 @@ import           OpEnergy.Account.Server.V1.Wallet.Class
 import qualified OpEnergy.Account.Server.V1.Wallet.LNBits.Client
                  as LNBits
                  ( CreateInvoiceRequest(..), DecodeRequest(..)
-                 , DecodedInvoice(..), PayInvoiceRequest(..)
+                 , DecodedInvoice(..), FeeReserveResponse(..)
+                 , PayInvoiceRequest(..)
                  , PaymentResponse(..), PaymentStateResponse(..)
-                 , RefusedPayment(..), createInvoice, decodeInvoice
-                 , payInvoice, readPaymentState
+                 , RefusedPayment(..), WalletInfoResponse(..)
+                 , createInvoice, decodeInvoice, payInvoice
+                 , readFeeReserve, readPaymentState, readWalletInfo
                  )
 import           OpEnergy.Account.Server.V1.WalletPayment
 import           OpEnergy.Error
                  ( CallstackError, dbQueryError, eitherException
-                 , walletAPIError, walletInvoiceAlreadyPaid
+                 , walletAPIError, walletFeeAboveReserve, walletInvoiceAlreadyPaid
+                 , walletInvoicePaidByAnother
                  , walletPaymentNotMade
                  , walletSelfPaymentNotAllowed, walletUnreachable
                  )
@@ -98,6 +103,36 @@ import           OpEnergy.Error
 -- The invoice key reads and creates, and is the one every reading path
 -- is given. The admin key spends and is used in one call only, the one
 -- 'sendPayment' makes, so a path, which does not pay, is never given it
+-- | answers a complaint when the two keys are keys of different wallets.
+--
+-- everifyWalletConfig checks both keys are set and differ, which can not
+-- tell whether they address one wallet: that is only known by asking.
+-- With keys of two wallets this service reads its invoices from one and
+-- spends the other, so a withdrawal, which was made, is looked for in a
+-- wallet, which never made it.
+--
+-- Only a definite mismatch is a complaint. A wallet has one name, so two
+-- names, which differ, are two wallets; where either call does not answer
+-- nothing is claimed, so starting this service never waits on LNBits
+everifyKeysNameOneWallet
+  :: BaseUrl
+  -> Text
+  -> Text
+  -> IO (Maybe Text)
+everifyKeysNameOneWallet url invoiceKey adminKey = do
+  einvoice <- callLNBits url $ LNBits.readWalletInfo invoiceKey
+  eadmin <- callLNBits url $ LNBits.readWalletInfo adminKey
+  return $! case (einvoice, eadmin) of
+    (Right invoiceWallet, Right adminWallet)
+      | LNBits.walletInfoResponseName invoiceWallet
+          /= LNBits.walletInfoResponseName adminWallet ->
+          Just
+            "LNBITS_INVOICE_KEY and LNBITS_ADMIN_KEY are keys of different \
+            \wallets: the invoices this service creates would be read from \
+            \one wallet while its payments are made from the other, so a \
+            \payment, which was made, is looked for where it never was"
+    _ -> Nothing
+
 lnbitsWalletBackend
   :: BaseUrl
   -> Text
@@ -344,6 +379,18 @@ payOverLightning url invoiceKey adminKey pool params = runExceptT $ do
       | walletPaymentPersonId ourInvoice == payInvoicePersonId params ->
           throwE walletSelfPaymentNotAllowed
     _ -> return ()
+  -- LNBits takes no fee cap on a payment: what it holds back for routing
+  -- is worked out from its own settings. So it is asked what that would
+  -- be and compared with the reserve, which the account is charged on top
+  -- of the amount. Where LNBits would hold back more, the payment could
+  -- cost more than the account paid for and the difference would come out
+  -- of the wallet every other account is paid from, so it is refused.
+  -- Asked before the balance is taken, so a refusal costs nothing
+  reserveAnswer <- ExceptT $ callLNBits url $ LNBits.readFeeReserve
+    (unBolt11Invoice (payInvoiceBolt11 params))
+  when (msatsToSats (LNBits.feeReserveResponseMsats reserveAnswer)
+        > payInvoiceFeeReserveSats params)
+    $ throwE walletFeeAboveReserve
   balanceAfterDebit <- ExceptT
     $ recordPendingPayment pool params paymentHashV
   paid <- ExceptT
@@ -356,11 +403,18 @@ payOverLightning url invoiceKey adminKey pool params = runExceptT $ do
   case mours of
     Just (Entity ourKey ourInvoice)
       | paidInvoiceProgress paid == PaymentSettled -> do
-          lift $ settleOwnInvoice pool ourKey (payInvoiceNow params)
-          return $! paid
-            { paidInvoiceRecipientPersonId =
-                Just (walletPaymentPersonId ourInvoice)
-            }
+          esettled <- lift $ settleOwnInvoice pool ourKey (payInvoiceNow params)
+          -- the recipient is only named where its invoice was settled:
+          -- the caller credits from a row, which is Settled, so naming
+          -- one, which is still Pending, asks for a credit, which quietly
+          -- does nothing. Left unnamed the reconcile pass settles it and
+          -- the scheduler credits it on a later tick
+          return $! case esettled of
+            Left _ -> paid
+            Right () -> paid
+              { paidInvoiceRecipientPersonId =
+                  Just (walletPaymentPersonId ourInvoice)
+              }
     _ -> return paid
 
 -- | marks an invoice of this service settled, once the wallet has settled
@@ -371,13 +425,17 @@ settleOwnInvoice
   => Pool SqlBackend
   -> Key WalletPayment
   -> POSIXTime
-  -> m ()
+  -> m (Either CallstackError ())
 settleOwnInvoice pool key now = do
-  _ <- liftIO $ eitherException $ flip runSqlPersistMPool pool
+  eupdated <- liftIO $ eitherException $ flip runSqlPersistMPool pool
     $ updateWhereCount
       [ WalletPaymentId ==. key, WalletPaymentStatus ==. Pending ]
       [ WalletPaymentStatus =. Settled, WalletPaymentUpdatedAt =. now ]
-  return ()
+  -- answered rather than dropped: the row stays Pending when this fails,
+  -- so nothing credits the account it was created for, and a caller,
+  -- which was told the payment went, would otherwise report a recipient
+  -- it had not managed to settle for
+  return $! either (const (Left dbQueryError)) (const (Right ())) eupdated
 
 -- | the hash of a decoded invoice, as this service's own type
 readDecodedHash
@@ -425,10 +483,22 @@ recordPendingPaymentTx
   -> POSIXTime
   -> ReaderT SqlBackend m (Either CallstackError ())
 recordPendingPaymentTx params paymentHashV amount reserve now = do
+  -- the hash is unique per account, so two accounts may each hold an
+  -- outgoing row of one hash. The wallet is asked about a hash rather
+  -- than about a row, so its answer about one account's payment could be
+  -- read as the other's and charge an account for a payment it never
+  -- made. The first account to record the hash claims it wallet wide;
+  -- the second is refused here, before the sats it was charged are kept
+  claimedElsewhere <- count
+    [ WalletPaymentPaymentHash ==. paymentHashV
+    , WalletPaymentDirection ==. Outgoing
+    , WalletPaymentStatus <-. [ Pending, Settled ]
+    , WalletPaymentPersonId !=. payInvoicePersonId params
+    ]
   -- insertUnique, as the uniqueness of the hash and of the account's own
   -- payment of this invoice is what refuses a second attempt, which
   -- arrives while the first is still in flight
-  recorded <- do
+  recorded <- if claimedElsewhere > (0 :: Int) then return False else do
     minserted <- insertUnique $ WalletPayment
       { walletPaymentPersonId = payInvoicePersonId params
       , walletPaymentDirection = Outgoing
@@ -472,7 +542,10 @@ recordPendingPaymentTx params paymentHashV amount reserve now = do
     -- taken for this attempt, is given back by undoing the transaction
     else do
       transactionUndo
-      return $! Left walletInvoiceAlreadyPaid
+      return $! Left
+        $! if claimedElsewhere > (0 :: Int)
+             then walletInvoicePaidByAnother
+             else walletInvoiceAlreadyPaid
 
 -- | asks the wallet to pay, and records what it answered
 sendPayment

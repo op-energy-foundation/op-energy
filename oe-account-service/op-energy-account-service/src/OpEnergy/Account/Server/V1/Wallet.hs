@@ -11,7 +11,7 @@ module OpEnergy.Account.Server.V1.Wallet
   , module OpEnergy.Account.Server.V1.Wallet.Class
   ) where
 
-import           Control.Monad.IO.Class (MonadIO)
+import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Data.Pool (Pool)
 import           Database.Persist.Sql (SqlBackend)
 
@@ -21,7 +21,10 @@ import           OpEnergy.Account.Server.V1.Config
 import           Data.OpEnergy.Account.API.V2.WalletMode (WalletMode(..))
 
 import           OpEnergy.Account.Server.V1.Wallet.Class
-import           OpEnergy.Account.Server.V1.Wallet.LNBits (lnbitsWalletBackend)
+import qualified Data.Text as Text
+import           OpEnergy.Account.Server.V1.Wallet.LNBits
+                 ( everifyKeysNameOneWallet, lnbitsWalletBackend
+                 )
 import           OpEnergy.Account.Server.V1.Wallet.Mock (mockWalletBackend)
 
 -- | builds the wallet backend named by WALLET_BACKEND.
@@ -36,8 +39,20 @@ newWalletBackend
   -> m WalletBackend
 newWalletBackend config pool = case configWalletBackend config of
   WalletModeMock -> return $! mockWalletBackend pool
-  WalletModeLNBits -> return $! lnbitsWalletBackend
-    (configLNBitsURL config)
-    (configLNBitsInvoiceKey config)
-    (configLNBitsAdminKey config)
-    pool
+  WalletModeLNBits -> do
+    -- asked here rather than by everifyWalletConfig: whether two keys
+    -- address one wallet is only known by asking LNBits, and this is
+    -- where this service first has somewhere to ask. A mismatch is
+    -- refused the way a config, which can not work, is refused
+    mproblem <- liftIO $ everifyKeysNameOneWallet
+      (configLNBitsURL config)
+      (configLNBitsInvoiceKey config)
+      (configLNBitsAdminKey config)
+    case mproblem of
+      Just problem -> error (Text.unpack problem)
+      Nothing -> return ()
+    return $! lnbitsWalletBackend
+      (configLNBitsURL config)
+      (configLNBitsInvoiceKey config)
+      (configLNBitsAdminKey config)
+      pool

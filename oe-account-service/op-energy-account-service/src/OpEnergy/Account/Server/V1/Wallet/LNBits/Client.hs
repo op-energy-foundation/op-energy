@@ -20,11 +20,15 @@ module OpEnergy.Account.Server.V1.Wallet.LNBits.Client
   , DecodedInvoice(..)
   , PaymentResponse(..)
   , PaymentStateResponse(..)
+  , FeeReserveResponse(..)
+  , WalletInfoResponse(..)
   , RefusedPayment(..)
   , createInvoice
   , payInvoice
   , decodeInvoice
   , readPaymentState
+  , readFeeReserve
+  , readWalletInfo
   ) where
 
 import           Control.Applicative ((<|>))
@@ -166,6 +170,28 @@ instance FromJSON PaymentStateResponse where
       (fromMaybe "pending" (mdetailsStatus <|> mtopStatus))
       fee
 
+-- | what LNBits will hold back for routing a given invoice.
+newtype FeeReserveResponse = FeeReserveResponse
+  { feeReserveResponseMsats :: Int64
+  }
+  deriving (Show, Eq)
+
+instance FromJSON FeeReserveResponse where
+  parseJSON = withObject "FeeReserveResponse" $ \v-> FeeReserveResponse
+    <$> v .: "fee_reserve"
+
+-- | the wallet a key addresses, as LNBits names it. Only the name is
+-- read: LNBits answers the wallet's id to an admin key alone, so it is
+-- not something both keys can be compared by, while a wallet has one name
+newtype WalletInfoResponse = WalletInfoResponse
+  { walletInfoResponseName :: Text
+  }
+  deriving (Show, Eq)
+
+instance FromJSON WalletInfoResponse where
+  parseJSON = withObject "WalletInfoResponse" $ \v-> WalletInfoResponse
+    <$> v .: "name"
+
 -- | what LNBits says when it refuses a payment. It answers these with a
 -- status of its own, which is not a success code, so the body is read out
 -- of the failure rather than returned as one
@@ -198,6 +224,18 @@ type DecodeInvoiceAPI
     :> ReqBody '[JSON] DecodeRequest
     :> Post '[JSON] DecodedInvoice
 
+-- | the fee reserve route carries no key: it decodes the invoice and
+-- works the reserve out from LNBits' own settings, so it names no wallet
+type FeeReserveAPI
+  = "api" :> "v1" :> "payments" :> "fee-reserve"
+    :> QueryParam' '[Required, Strict] "invoice" Text
+    :> Get '[JSON] FeeReserveResponse
+
+type WalletInfoAPI
+  = "api" :> "v1" :> "wallet"
+    :> Header' '[Required, Strict] "X-Api-Key" Text
+    :> Get '[JSON] WalletInfoResponse
+
 type ReadPaymentStateAPI
   = "api" :> "v1" :> "payments"
     :> Header' '[Required, Strict] "X-Api-Key" Text
@@ -221,3 +259,11 @@ decodeInvoice = client (Proxy :: Proxy DecodeInvoiceAPI)
 -- | asks LNBits what has become of the payment with the given hash
 readPaymentState :: Text -> Text -> ClientM PaymentStateResponse
 readPaymentState = client (Proxy :: Proxy ReadPaymentStateAPI)
+
+-- | asks LNBits what it would hold back to route the given invoice
+readFeeReserve :: Text -> ClientM FeeReserveResponse
+readFeeReserve = client (Proxy :: Proxy FeeReserveAPI)
+
+-- | asks LNBits which wallet the given key addresses
+readWalletInfo :: Text -> ClientM WalletInfoResponse
+readWalletInfo = client (Proxy :: Proxy WalletInfoAPI)
