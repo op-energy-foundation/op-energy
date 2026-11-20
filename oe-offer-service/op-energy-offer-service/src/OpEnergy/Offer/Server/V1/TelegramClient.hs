@@ -62,6 +62,8 @@ import           OpEnergy.Offer.Server.V1.Telegram.Client
                  , defaultGetUpdatesRequest
                  , getUpdates
                  , getChat
+                 , MessagePresence(..)
+                 , messageStillThere
                  , isGroupMessage
                  , isPrivateMessage
                  , sendMessage
@@ -73,6 +75,9 @@ import           OpEnergy.Offer.Server.V1.LiveEvent (LiveEvent(..))
 import           OpEnergy.Offer.Server.V1.Time (getCurrentTimeDB)
 import           OpEnergy.Offer.Server.V1.WebSocketService (publishLiveEvent)
 import           Data.OpEnergy.Offer.API.V1.LiveMessage (LiveMessage(..))
+import           Data.OpEnergy.Offer.API.V1.TelegramMessageInfo
+                 ( TelegramMessageID(..)
+                 )
 import           OpEnergy.Offer.Server.V1.TelegramLink (redeemLinkCodeTx)
 import           OpEnergy.Offer.Server.V1.TelegramMessage
 import           Data.OpEnergy.API.V1.Positive (fromPositive)
@@ -96,6 +101,35 @@ retryDelayMicroseconds = 15 * 1000000
 -- asked rather than waited for.
 membershipCheckSeconds :: Double
 membershipCheckSeconds = 300
+
+-- | how often to ask telegram which of the recent messages are still there.
+--
+-- A message removed in the telegram app is removed silently -- there is no
+-- deletion update of any kind -- so a mirror, which is to match the group,
+-- has to ask. Until it does, the feed goes on showing something the group
+-- no longer has, which is the one way this chat can mislead a reader.
+--
+-- Two minutes is a compromise. Sooner costs requests for a thing, which
+-- happens rarely; later leaves a removed message on the site long enough to
+-- be read by somebody it was removed from.
+reconcileSeconds :: Double
+reconcileSeconds = 120
+
+-- | how many of the newest messages one sweep asks about.
+--
+-- The feed shows the recent end of the group, so the recent end is what has
+-- to be right. Sweeping the whole history would grow without limit and
+-- would spend every sweep on messages nobody is looking at.
+reconcileBatch :: Int
+reconcileBatch = 50
+
+-- | how long to leave between the probes of one sweep.
+--
+-- Telegram rate limits a bot on everything it asks, and a sweep is not
+-- urgent: spreading 50 probes over ten seconds keeps this well inside any
+-- limit and well inside its own interval.
+reconcileSpacingMicroseconds :: Int
+reconcileSpacingMicroseconds = 200000
 
 -- | one message of the group, as it is about to be stored
 data MirroredMessage = MirroredMessage
@@ -123,8 +157,10 @@ runTelegramMirror token chatId' = do
     runAppT state $ runLogging $ $(logInfo)
       ( "runTelegramMirror: following telegram group " <> tshow chatId' )
     lastCheckedV <- newIORef Nothing
+    lastSweptV <- newIORef Nothing
     forever $ do
       checkStillInGroup state lastCheckedV token chatId'
+      reconcileDeletions state lastSweptV token chatId'
       -- the inner call contains every telegram and DB failure already, so
       -- this catches only what nothing else expected. It is still here
       -- because the process ends when this thread does
@@ -293,6 +329,79 @@ mirroredOf chatId' now update = case (updateMessage update, updateEditedMessage 
         , telegramGroupMessageDeletedByUUID = Nothing
         , telegramGroupMessageCreatedAt = now
         }
+
+-- | asks telegram, now and then, which of the recent messages are still
+-- in the group, and hides the ones, which are not.
+--
+-- Telegram sends a bot nothing at all when a message is deleted, so without
+-- this the feed shows a removed message for ever. A moderator, who removes
+-- something from our site, takes it out of both at once -- this is for
+-- everything removed in the telegram app instead, which is where a group's
+-- own moderators will do it.
+--
+-- Nothing is hidden on anything but a definite answer. An unreachable
+-- telegram, or a refusal this does not recognise, leaves every message
+-- exactly as it is: showing a message, which has been removed, is a
+-- mistake, which the next sweep corrects, while hiding one, which is
+-- really there, is a mistake nothing corrects.
+--
+-- A failure here is logged and nothing else, for the same reason as in
+-- 'checkStillInGroup': the mirror has to go on polling either way.
+reconcileDeletions
+  :: State
+  -> IORef (Maybe UTCTime)
+  -> TelegramBotToken
+  -> Int64
+  -> IO ()
+reconcileDeletions state lastSweptV token chatId' = do
+  now <- getCurrentTime
+  mlastSwept <- readIORef lastSweptV
+  let due = case mlastSwept of
+        Nothing -> True
+        Just lastSwept ->
+          realToFrac (diffUTCTime now lastSwept) > reconcileSeconds
+  when due $ do
+    writeIORef lastSweptV (Just now)
+    State{ config = Config{ configTelegramAPIURL = apiURL } } <- return state
+    mrows <- runAppT state
+      $ withDBTransaction "V1.TelegramClient.reconcileDeletions"
+      $ messagesToReconcileTx chatId' reconcileBatch
+    case mrows of
+      Nothing -> runAppT state $ runLogging $ $(logWarn)
+        "reconcileDeletions: the messages to sweep could not be read"
+      Just rows -> mapM_ (probe apiURL) rows
+  where
+    probe apiURL row = do
+      let messageId' = telegramGroupMessageMessageId row
+      presence <- messageStillThere apiURL
+        (BotPath (unTelegramBotToken token)) chatId' messageId'
+      case presence of
+        MessageStillThere -> return ()
+        -- said without being sure, so nothing is done and the next sweep
+        -- asks again
+        MessagePresenceUnknown _ -> return ()
+        MessageGone -> hide messageId'
+      threadDelay reconcileSpacingMicroseconds
+    hide messageId' = do
+      goneAt <- getCurrentTime
+      mdone <- runAppT state
+        $ withDBTransaction "V1.TelegramClient.reconcileDeletions.hide"
+        $ markTelegramMessageGoneTx chatId' messageId' goneAt
+      case mdone of
+        Nothing -> runAppT state $ runLogging $ $(logWarn)
+          ( "reconcileDeletions: message " <> tshow messageId'
+          <> " has gone from the group but could not be marked as removed"
+          )
+        Just () -> do
+          runAppT state $ publishLiveEvent $! LiveEvent
+            { liveEventMessage =
+                LiveMessageTelegramDeleted (TelegramMessageID (tshow messageId'))
+            , liveEventBalances = []
+            }
+          runAppT state $ runLogging $ $(logInfo)
+            ( "reconcileDeletions: message " <> tshow messageId'
+            <> " was removed in telegram and is no longer shown"
+            )
 
 -- | asks telegram, now and then, whether the bot is still in the group.
 --

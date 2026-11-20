@@ -39,6 +39,10 @@ module OpEnergy.Offer.Server.V1.Telegram.Client
   , getChatMember
   , getChat
   , sendMessage
+  , ReactionRequest(..)
+  , setMessageReaction
+  , MessagePresence(..)
+  , messageStillThere
   , withTelegram
   ) where
 
@@ -61,7 +65,7 @@ import           Servant.Client
                  ( BaseUrl, ClientError(..), ClientM, client, mkClientEnv
                  , runClientM
                  )
-import           Servant.Client.Core (responseStatusCode)
+import           Servant.Client.Core (responseBody, responseStatusCode)
 
 import           OpEnergy.Error (CallstackError, telegramRequestFailed)
 
@@ -292,6 +296,21 @@ data SendMessageRequest = SendMessageRequest
   , sendMessageText :: Text
   }
   deriving (Show, Eq)
+-- | names one message, for the presence probe. The reaction list is always
+-- empty and is not a field: this call is never meant to succeed, only to be
+-- refused in one of two ways. See 'messageStillThere'.
+data ReactionRequest = ReactionRequest
+  { reactionChatId :: Int64
+  , reactionMessageId :: Int64
+  }
+  deriving (Show, Eq)
+instance ToJSON ReactionRequest where
+  toJSON request = object
+    [ "chat_id" .= reactionChatId request
+    , "message_id" .= reactionMessageId request
+    , "reaction" .= ([] :: [Value])
+    ]
+
 instance ToJSON SendMessageRequest where
   toJSON request = object
     [ "chat_id" .= sendMessageChatId request
@@ -331,18 +350,25 @@ type TelegramBotAPI
     :> ReqBody '[JSON] SendMessageRequest
     :> Post '[JSON] (TelegramResponse Message)
 
+  :<|> Capture "token" BotPath
+    :> "setMessageReaction"
+    :> ReqBody '[JSON] ReactionRequest
+    :> Post '[JSON] (TelegramResponse Bool)
+
 getUpdates :: BotPath -> GetUpdatesRequest -> ClientM (TelegramResponse [Update])
 deleteMessage :: BotPath -> ChatMessageRequest -> ClientM (TelegramResponse Bool)
 banChatMember :: BotPath -> ChatMemberRequest -> ClientM (TelegramResponse Bool)
 getChatMember :: BotPath -> ChatMemberRequest -> ClientM (TelegramResponse ChatMember)
 getChat :: BotPath -> ChatRequest -> ClientM (TelegramResponse TelegramChat)
 sendMessage :: BotPath -> SendMessageRequest -> ClientM (TelegramResponse Message)
+setMessageReaction :: BotPath -> ReactionRequest -> ClientM (TelegramResponse Bool)
 getUpdates
   :<|> deleteMessage
   :<|> banChatMember
   :<|> getChatMember
   :<|> getChat
-  :<|> sendMessage =
+  :<|> sendMessage
+  :<|> setMessageReaction =
   client (Proxy :: Proxy TelegramBotAPI)
 
 -- | how long a telegram call may take before it is given up on.
@@ -378,6 +404,79 @@ withTelegram url call = do
     Right (Left clientError) ->
       Left $! telegramRequestFailed (describeClientError clientError)
     Right (Right result) -> Right result
+
+-- | whether one message is still in the group.
+data MessagePresence
+  = MessageStillThere
+  | MessageGone
+  | MessagePresenceUnknown Text -- ^ telegram could not be asked, or said
+                                -- something this does not recognise. The
+                                -- caller must do nothing: a message is only
+                                -- ever hidden on a definite answer
+  deriving (Show, Eq)
+
+-- | asks telegram whether one message is still in the group.
+--
+-- Telegram has no deletion update of any kind: a message removed in the
+-- telegram app is removed silently, and a bot is never told. So a mirror,
+-- which is to match the group, has to ask about messages one by one.
+--
+-- The call used for it is setMessageReaction with an empty reaction list,
+-- which telegram refuses either way and which therefore changes nothing and
+-- shows nothing to anybody. It refuses it differently, though, and that is
+-- the answer: a message, which is still there, gets REACTION_EMPTY, because
+-- the empty list is what is wrong with the request; a message, which is
+-- gone, gets "message to react not found", because telegram looks the
+-- message up first and never reaches the list.
+--
+-- This leans on the order telegram validates a request in, which is not
+-- documented. It is checked by 'messageStillThere' answering
+-- 'MessagePresenceUnknown' for anything it does not recognise, and an
+-- unknown answer hides nothing -- so if that order ever changes, the mirror
+-- stops noticing deletions again, which is where it started, rather than
+-- hiding messages, which are really there.
+messageStillThere
+  :: BaseUrl
+  -> BotPath
+  -> Int64
+  -> Int64
+  -> IO MessagePresence
+messageStillThere url path chatId' messageId' = do
+  eresult <- E.tryAny $ do
+    manager <- newManager tlsManagerSettings
+      { managerResponseTimeout =
+          responseTimeoutMicro telegramResponseTimeoutMicroseconds
+      }
+    runClientM
+      (setMessageReaction path (ReactionRequest chatId' messageId'))
+      (mkClientEnv manager url)
+  return $! case eresult of
+    -- deliberately not the exception: it carries the request, and the
+    -- request carries the token
+    Left _ -> MessagePresenceUnknown "could not reach telegram"
+    -- telegram is not expected to accept this call at all, but a message,
+    -- which answered anything at all, is a message, which is there
+    Right (Right _) -> MessageStillThere
+    Right (Left clientError) -> presenceOfRefusal clientError
+
+-- | reads one of telegram's refusals of the presence probe.
+--
+-- The refusal's body is telegram's own JSON and carries no request, so
+-- unlike a ClientError it can be read without printing the token.
+presenceOfRefusal :: ClientError -> MessagePresence
+presenceOfRefusal (FailureResponse _ response) =
+  case decode (responseBody response) :: Maybe (TelegramResponse Bool) of
+    Nothing -> MessagePresenceUnknown "telegram's refusal could not be read"
+    Just body -> case fmap Text.toUpper (telegramDescription body) of
+      Nothing -> MessagePresenceUnknown "telegram refused without saying why"
+      Just description
+        | "REACTION_EMPTY" `Text.isInfixOf` description -> MessageStillThere
+        | "NOT FOUND" `Text.isInfixOf` description -> MessageGone
+        | "MESSAGE_ID_INVALID" `Text.isInfixOf` description -> MessageGone
+        | otherwise -> MessagePresenceUnknown
+            ("telegram refused the probe: " <> description)
+presenceOfRefusal clientError =
+  MessagePresenceUnknown (describeClientError clientError)
 
 -- | describes a client error by its status alone.
 --

@@ -139,6 +139,52 @@ updateTelegramMessageBodyTx chatId' messageId' body' editedAt' =
     , TelegramGroupMessageEditedAt =. Just editedAt'
     ]
 
+-- | the newest messages of a group, which this service still believes are
+-- there, newest first.
+--
+-- What the presence sweep asks telegram about. Only the newest are worth
+-- asking about: the feed shows the recent end of the group, a sweep of the
+-- whole history would grow without limit, and telegram rate limits a bot
+-- whatever it is asking.
+--
+-- Example:
+--
+-- > toReconcile <- messagesToReconcileTx chatId 50
+messagesToReconcileTx
+  :: MonadIO m
+  => Int64
+  -> Int
+  -> ReaderT SqlBackend m [TelegramGroupMessage]
+messagesToReconcileTx chatId' howMany =
+  fmap (map entityVal) $ selectList
+    [ TelegramGroupMessageChatId ==. chatId'
+    , TelegramGroupMessageDeletedAt ==. Nothing
+    ]
+    [ Desc TelegramGroupMessageMessageId
+    , LimitTo howMany
+    ]
+
+-- | marks a message, which has gone from the group, as removed.
+--
+-- Separate from 'markTelegramMessageDeletedTx' because no moderator did
+-- this: somebody removed it in telegram itself, and the row is left with no
+-- moderator against it to say so. The row stays for the same reason as any
+-- other removal -- telegram can redeliver an update, and a row deleted
+-- outright would simply be written again.
+markTelegramMessageGoneTx
+  :: MonadIO m
+  => Int64
+  -> Int64
+  -> UTCTime
+  -> ReaderT SqlBackend m ()
+markTelegramMessageGoneTx chatId' messageId' now =
+  updateWhere
+    [ TelegramGroupMessageChatId ==. chatId'
+    , TelegramGroupMessageMessageId ==. messageId'
+    , TelegramGroupMessageDeletedAt ==. Nothing
+    ]
+    [ TelegramGroupMessageDeletedAt =. Just now ]
+
 -- | marks a message as removed by a moderator.
 --
 -- The row stays. Telegram never tells a bot that a message was deleted, so
