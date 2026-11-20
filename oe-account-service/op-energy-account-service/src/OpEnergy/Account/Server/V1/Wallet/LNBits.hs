@@ -334,11 +334,20 @@ resolveInvoice url invoiceKey pool asker invoiceV = do
         [ Desc WalletPaymentId ]
       return $! Just $! case mbyHash of
         -- an invoice of this service under a string it was not issued as.
-        -- It is answered from its own row, so the amount is the one it was
-        -- created for and the account, which is owed it, is named -- which
-        -- is what refuses an account paying its own invoice
+        -- The account, which is owed it, is named -- which is what refuses
+        -- an account paying its own invoice.
+        --
+        -- The amount is the one the invoice at hand carries, not the one
+        -- the row was created for: the hash is chosen by whoever writes an
+        -- invoice, so a second invoice can be signed with this hash for
+        -- another amount, and it is the invoice at hand, which would be
+        -- sent. Answering the stored amount for it would check the limit
+        -- against one figure and debit it, while the wallet paid another
         Just (Entity _ payment) -> ResolvedInvoice
-          { resolvedInvoiceAmountSats = walletPaymentAmountSats payment
+          { resolvedInvoiceAmountSats =
+              if walletPaymentInvoice payment == invoiceV
+                then walletPaymentAmountSats payment
+                else msatsToSats (LNBits.decodedInvoiceAmountMsats decoded)
           , resolvedInvoicePersonId = Just (walletPaymentPersonId payment)
           , resolvedInvoicePayable = walletPaymentStatus payment == Pending
           , resolvedInvoicePaidByAsker = paidByAsker
@@ -446,9 +455,15 @@ payOverLightning url invoiceKey adminKey pool params = runExceptT $ do
   -- caller credits the account it was created for. Left to the scheduler
   -- the credit would wait for a reconcile pass, while the payer has
   -- already been told the payment went
+  -- isOurOwnInvoice as well as the row: mours was found by hash alone, so
+  -- a different invoice, which carries the same hash, reaches this with a
+  -- row, which stands for an invoice nobody paid. That payment left the
+  -- wallet, and settling the row for it would credit its owner a deposit,
+  -- which never arrived
   case mours of
     Just (Entity ourKey ourInvoice)
-      | paidInvoiceProgress paid == PaymentSettled -> do
+      | isOurOwnInvoice
+        && paidInvoiceProgress paid == PaymentSettled -> do
           esettled <- lift $ settleOwnInvoice pool ourKey (payInvoiceNow params)
           -- the recipient is only named where its invoice was settled:
           -- the caller credits from a row, which is Settled, so naming
