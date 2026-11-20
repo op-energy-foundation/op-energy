@@ -359,6 +359,13 @@ everifyWalletConfig config
           \would stop counting as soon as it was taken, so the invoices in \
           \flight would bound nothing and an account could hold more of \
           \them at once than WALLET_MAX_PENDING_INVOICES allows"
+      , require (configWalletInvoiceReservationTtlSecs config
+                   <= fromIntegral (maxBound :: Word32))
+          "WALLET_INVOICE_RESERVATION_TTL_SECS must fit a Word32: the time \
+          \a reservation is counted from is stored as one, so a ttl above \
+          \it wraps the moment the stale slots are measured against back \
+          \to the present, and every slot, which is held, is dropped as \
+          \though it had expired"
       , require (configWalletMaxDepositsPerTick config > 0)
           "WALLET_MAX_DEPOSITS_PER_TICK must be above 0: persistent reads \
           \a limit of 0 as no limit at all, so one tick would take the \
