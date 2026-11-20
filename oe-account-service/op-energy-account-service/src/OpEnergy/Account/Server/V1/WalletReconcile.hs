@@ -520,11 +520,18 @@ reconcilePendingPayments =
       -> [Update WalletPayment]
       -> AppT m ()
     parkWith pool key payment extra = do
-      State{ config = config } <- ask
+      State{ config = config, wallet = walletV } <- ask
       now <- liftIO getPOSIXTime
       let grace =
             fromIntegral (configWalletUnknownPaymentGraceSecs config)
+      -- an invoice is only written off where the wallet, which issued it,
+      -- is the wallet being asked. Who paid it does not matter -- anybody
+      -- may -- but which wallet would have the record of it does: an
+      -- invoice of a wallet used before this one reads as unknown here
+      -- however it was paid, and writing it off as never paid loses a
+      -- deposit, which arrived. Such an invoice is left for a person
       if walletPaymentDirection payment == Incoming
+         && answeredByOriginatingWallet payment walletV
          && invoiceIsWrittenOff grace now (walletPaymentExpiresAt payment)
         then do
           runLogging $ $(logInfo)
