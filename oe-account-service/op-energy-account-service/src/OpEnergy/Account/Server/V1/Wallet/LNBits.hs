@@ -36,7 +36,7 @@ module OpEnergy.Account.Server.V1.Wallet.LNBits
   , msatsToSats
   ) where
 
-import           Control.Monad (when)
+import           Control.Monad (unless, when)
 import           System.Timeout (timeout)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Trans (lift)
@@ -415,12 +415,18 @@ payOverLightning url invoiceKey adminKey pool params = runExceptT $ do
   -- of the amount. Where LNBits would hold back more, the payment could
   -- cost more than the account paid for and the difference would come out
   -- of the wallet every other account is paid from, so it is refused.
-  -- Asked before the balance is taken, so a refusal costs nothing
-  reserveAnswer <- ExceptT $ callLNBits url $ LNBits.readFeeReserve
-    (unBolt11Invoice (payInvoiceBolt11 params))
-  when (msatsToSats (LNBits.feeReserveResponseMsats reserveAnswer)
-        > payInvoiceFeeReserveSats params)
-    $ throwE walletFeeAboveReserve
+  -- Asked before the balance is taken, so a refusal costs nothing.
+  --
+  -- Only for a payment, which leaves the wallet. An invoice of this
+  -- service is settled inside LNBits and is routed nowhere, so it costs
+  -- no fee at all: holding it to a routing reserve would refuse a
+  -- transfer between two accounts here for a cost it can never have
+  unless (isJust mours) $ do
+    reserveAnswer <- ExceptT $ callLNBits url $ LNBits.readFeeReserve
+      (unBolt11Invoice (payInvoiceBolt11 params))
+    when (msatsToSats (LNBits.feeReserveResponseMsats reserveAnswer)
+          > payInvoiceFeeReserveSats params)
+      $ throwE walletFeeAboveReserve
   balanceAfterDebit <- ExceptT
     $ recordPendingPayment pool params paymentHashV
   paid <- ExceptT
@@ -565,6 +571,12 @@ recordPendingPaymentTx params paymentHashV amount reserve now = do
         -- rather than from the attempt, which failed before it
         , WalletPaymentCreatedAt =. now
         , WalletPaymentUpdatedAt =. now
+        -- and the name of the attempt before it is dropped in the same
+        -- write. Kept, it would name a payment, which failed, while the
+        -- row stands for one, which is going: an answer, which is lost,
+        -- would then have the wallet asked about the old attempt and its
+        -- failure given back against this one
+        , WalletPaymentCheckingId =. Nothing
         ]
   if recorded
     then return $! Right ()
@@ -631,7 +643,7 @@ sendPayment url adminKey pool params paymentHashV balanceAfterDebit = do
       -- Written whatever the answer says, as a payment, which is still
       -- going, is the one the scheduler has to ask about
       recordCheckingId pool (payInvoicePersonId params) paymentHashV
-        (LNBits.paymentResponseCheckingId answer) now
+        (payInvoiceNow params) (LNBits.paymentResponseCheckingId answer) now
       case LNBits.paymentResponseStatus answer of
         "success" -> do
           let fee = msatsToSats (LNBits.paymentResponseFeeMsats answer)
@@ -670,16 +682,24 @@ recordCheckingId
   :: Pool SqlBackend
   -> PersonId
   -> PaymentHash
+  -> POSIXTime
+     -- ^ when the attempt this answer belongs to started
   -> Text
   -> POSIXTime
   -> IO ()
-recordCheckingId pool personKey paymentHashV checkingId now
+recordCheckingId pool personKey paymentHashV startedAt checkingId now
   | Text.null checkingId = return ()
   | otherwise = do
       _ <- eitherException $ flip runSqlPersistMPool pool $ updateWhereCount
         [ WalletPaymentPaymentHash ==. paymentHashV
         , WalletPaymentPersonId ==. personKey
         , WalletPaymentDirection ==. Outgoing
+        -- the attempt this answer belongs to, not merely the row: an
+        -- answer, which arrives late, would otherwise write its name onto
+        -- a retry, which has since taken the row up, and that retry would
+        -- then be asked about as the attempt before it
+        , WalletPaymentCreatedAt ==. startedAt
+        , WalletPaymentStatus ==. Pending
         ]
         [ WalletPaymentCheckingId =. Just checkingId
         , WalletPaymentUpdatedAt =. now
