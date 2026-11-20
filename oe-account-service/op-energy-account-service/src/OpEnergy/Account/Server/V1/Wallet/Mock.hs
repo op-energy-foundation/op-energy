@@ -176,20 +176,23 @@ resolveInvoice pool asker invoiceV = do
 
 -- | pays an invoice: one this service issued for another account becomes a
 -- transfer inside the service, anything else is recorded as having left.
--- The caller moves the balances; this only records the payment
+-- The balance is this backend's to move: it takes the amount in the
+-- transaction, which records the payment, so a 'Left' leaves the balance
+-- as it was and the caller has nothing to give back
 payInvoice
   :: Pool SqlBackend
   -> PayInvoiceParams
   -> IO (Either CallstackError PaidInvoice)
 payInvoice pool params =
   -- every way this can fail is reported as an error value, including one,
-  -- which would otherwise leave as an exception. The caller has already
-  -- taken the balance by the time it calls this, and it gives it back on a
-  -- Left: an exception instead skips that, so the balance is gone, no
-  -- payment was recorded and nothing is written down. This backend can say
-  -- so honestly, as a payment of its own, which did not reach its database,
-  -- did not happen -- a backend with a node can not assume that and brings
-  -- its own answer.
+  -- which would otherwise leave as an exception. The balance moves in the
+  -- same transaction as the payment it belongs to, so a failure takes the
+  -- two back together and a Left means the balance stands as it did, with
+  -- nothing for the caller to give back. An exception instead leaves the
+  -- caller with no answer at all. This backend can answer honestly, as a
+  -- payment of its own, which did not reach its database, did not happen
+  -- -- a backend with a node can not assume that and brings its own
+  -- answer.
   --
   -- The exception's own text is deliberately not carried into the error: it
   -- is a SqlError naming tables and constraints, and the caller is answered
