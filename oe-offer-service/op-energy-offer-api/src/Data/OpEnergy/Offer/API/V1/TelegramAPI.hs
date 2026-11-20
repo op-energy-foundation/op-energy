@@ -19,6 +19,7 @@ import           Data.OpEnergy.API.V1.Positive (Positive)
 import           Data.OpEnergy.Account.API.V1.Account (AccountToken)
 import           Data.OpEnergy.Offer.API.V1.TelegramMessageInfo
                  ( TelegramFeed
+                 , TelegramLinkStart
                  , TelegramMessageID
                  )
 
@@ -66,6 +67,35 @@ type TelegramAPI
                    \about two days old: the message is still in the group, \
                    \and the feed goes on showing it for that reason. \
                    \Refused with 403 unless the caller is a moderator."
+    :> Post '[JSON] NoContent
+
+  :<|> "link"
+    :> Header'
+       '[ Required
+        , Strict
+        , Description "Account token of the account to connect"
+        ]
+       "Authorization"
+       AccountToken
+    :> Description "Hands out a one time code, which connects this \
+                   \account's telegram. Put it in a link to the bot -- \
+                   \https://t.me/<bot>?start=<code> -- and pressing Start \
+                   \there connects the telegram account, which pressed \
+                   \it. The code is single use and short lived."
+    :> Post '[JSON] TelegramLinkStart
+
+  :<|> "link"
+    :> "remove"
+    :> Header'
+       '[ Required
+        , Strict
+        , Description "Account token of the account to disconnect"
+        ]
+       "Authorization"
+       AccountToken
+    :> Description "Disconnects this account from whatever telegram \
+                   \account it was connected to. Its messages in the feed \
+                   \go back to showing the telegram name alone."
     :> Post '[JSON] NoContent
 
   :<|> "senders"

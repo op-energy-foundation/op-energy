@@ -15,6 +15,7 @@ import           Data.OpEnergy.API.V1.Positive (Positive)
 import           Data.OpEnergy.Offer.API.V1.TelegramAPI (TelegramAPI)
 import           Data.OpEnergy.Offer.API.V1.TelegramMessageInfo
                  ( TelegramFeed
+                 , TelegramLinkStart
                  , TelegramMessageID
                  )
 
@@ -23,6 +24,7 @@ import           OpEnergy.Offer.Server.V1.Class (AppM, AppT)
 import qualified OpEnergy.Offer.Server.V2.TelegramAPI.BanSender as BanSender
 import qualified OpEnergy.Offer.Server.V2.TelegramAPI.DeleteMessage as DeleteMessage
 import qualified OpEnergy.Offer.Server.V2.TelegramAPI.GetMessages as GetMessages
+import qualified OpEnergy.Offer.Server.V2.TelegramAPI.StartLink as StartLink
 
 -- | see Data.OpEnergy.Offer.API.V1.TelegramAPI for the API definition
 handlers :: ServerT TelegramAPI (AppT Handler)
@@ -33,6 +35,14 @@ handlers
 
   :<|> ( DeleteMessage.deleteMessageHandler
          :: TelegramMessageID -> AccountAPI.AccountToken -> AppM NoContent
+       )
+
+  :<|> ( StartLink.startLinkHandler
+         :: AccountAPI.AccountToken -> AppM TelegramLinkStart
+       )
+
+  :<|> ( StartLink.unlinkHandler
+         :: AccountAPI.AccountToken -> AppM NoContent
        )
 
   :<|> ( BanSender.banSenderHandler

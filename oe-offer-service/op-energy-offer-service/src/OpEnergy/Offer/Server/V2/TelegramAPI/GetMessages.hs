@@ -13,6 +13,8 @@ import           Control.Monad.Logger (logError)
 import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Reader (ask)
 import           Data.Int (Int64)
+import qualified Data.Map.Strict as Map
+import           Data.Maybe (mapMaybe)
 import qualified Data.Text as Text
 import           Text.Read (readMaybe)
 
@@ -28,6 +30,7 @@ import           Data.OpEnergy.Offer.API.V1.TelegramMessageInfo
 import           OpEnergy.Offer.Server.V1.Class
                  ( AppM, State(..), runLogging, profile)
 import           OpEnergy.Offer.Server.V1.Config (Config(..))
+import           OpEnergy.Offer.Server.V1.TelegramLink (opEnergyNamesTx)
 import           OpEnergy.Offer.Server.V1.TelegramMessage
 import           OpEnergy.Error
                  ( CallstackError, eitherThrowJSON, runExceptPrefixT
@@ -84,14 +87,22 @@ getMessages mBefore mLimit =
           ] ++ olderThan mBefore
         )
         [ Desc TelegramGroupMessageMessageId, LimitTo (limit' + 1) ]
-      let page = take limit' rows
+      let page = map entityVal (take limit' rows)
+      -- read once for the whole page rather than once per message: a page
+      -- is twenty messages and they are mostly from the same few people
+      names <- opEnergyNamesTx
+        $! mapMaybe telegramGroupMessageSenderId page
       return $! TelegramFeed
-        { messages =
-            map (telegramMessageInfoOf Nothing . entityVal) page
+        { messages = map (nameFor names) page
         , limit = fromIntegral limit'
         , hasMore = length rows > limit'
         }
   where
+    -- the op energy name, where this sender connected their telegram.
+    -- Most will not have, and a feed row reads properly without it
+    nameFor names row = telegramMessageInfoOf
+      ( telegramGroupMessageSenderId row >>= flip Map.lookup names )
+      row
     -- a cursor, which is not a number, matches nothing rather than
     -- everything: it was not an id this service ever handed out
     olderThan Nothing = []

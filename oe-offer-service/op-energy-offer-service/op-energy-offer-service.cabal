@@ -34,12 +34,14 @@ library
                    , OpEnergy.Offer.Server.V1.BlockspanClient
                    , OpEnergy.Offer.Server.V1.Telegram.Client
                    , OpEnergy.Offer.Server.V1.TelegramMessage
+                   , OpEnergy.Offer.Server.V1.TelegramLink
                    , OpEnergy.Offer.Server.V1.TelegramClient
                    , OpEnergy.Offer.Server.V2.TelegramAPI
                    , OpEnergy.Offer.Server.V2.TelegramAPI.CheckModerator
                    , OpEnergy.Offer.Server.V2.TelegramAPI.GetMessages
                    , OpEnergy.Offer.Server.V2.TelegramAPI.DeleteMessage
                    , OpEnergy.Offer.Server.V2.TelegramAPI.BanSender
+                   , OpEnergy.Offer.Server.V2.TelegramAPI.StartLink
                    , OpEnergy.Offer.Server.V1.PlatformStats
                    , OpEnergy.Offer.Server.V1.LiveEvent
                    , OpEnergy.Offer.Server.V1.WebSocketService
@@ -72,6 +74,7 @@ library
                     , servant
                     , servant-server, servant-client, servant-client-core
                     , http-client, http-client-tls, http-types
+                    , random
                     , servant-swagger
                     , swagger2
                     , time

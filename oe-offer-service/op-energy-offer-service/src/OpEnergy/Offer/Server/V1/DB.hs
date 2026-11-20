@@ -37,6 +37,7 @@ import           OpEnergy.Offer.Server.V1.Config
 import           OpEnergy.Offer.Server.V1.DB.Migrations
 import           OpEnergy.Offer.Server.V1.Offer
 import           OpEnergy.Offer.Server.V1.PlatformStats(migratePlatformStats)
+import           OpEnergy.Offer.Server.V1.TelegramLink(migrateTelegramLink)
 import           OpEnergy.Offer.Server.V1.TelegramMessage(migrateTelegramMessage)
 
 -- | connect to DB. Returns connection pool
@@ -72,6 +73,11 @@ getConnection config = do
     -- on (chat_id, message_id) scanned backwards
     printMigration migrateTelegramMessage
     runMigration migrateTelegramMessage
+
+    -- creates the table, which ties a telegram account to an op energy
+    -- one, for both new and existing DBs
+    printMigration migrateTelegramLink
+    runMigration migrateTelegramLink
 
   return pool
   where
