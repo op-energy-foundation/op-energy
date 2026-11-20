@@ -123,6 +123,21 @@ hasInvoiceSlot
   -> Bool
 hasInvoiceSlot limit waiting held = waiting + held < limit
 
+-- | the moment a slot counts from, never earlier than the epoch.
+--
+-- A ttl longer than the time, which has passed, would otherwise put the
+-- cutoff before 1970. POSIXTime is stored as a Word32, so a negative one
+-- is written as an enormous positive one: every slot, which is held,
+-- would then look older than the cutoff and be dropped, and the limit on
+-- the invoices an account has at once would stop holding.
+--
+-- Example:
+--
+-- > cutoffBefore 60 1000 == 940
+-- > cutoffBefore 2000 1000 == 0
+cutoffBefore :: POSIXTime -> POSIXTime -> POSIXTime
+cutoffBefore ttl now = max 0 (now - ttl)
+
 -- | takes a slot for an invoice, which is about to be made, and answers
 -- its reservation -- or 'Nothing' when the account has no slot left.
 --
@@ -140,21 +155,6 @@ hasInvoiceSlot limit waiting held = waiting + held < limit
 -- Example:
 --
 -- > claimInvoiceSlotTx 10 60 personKey now
-
--- | the moment a slot counts from, never earlier than the epoch.
---
--- A ttl longer than the time, which has passed, would otherwise put the
--- cutoff before 1970. POSIXTime is stored as a Word32, so a negative one
--- is written as an enormous positive one: every slot, which is held,
--- would then look older than the cutoff and be dropped, and the limit on
--- the invoices an account has at once would stop holding.
---
--- Example:
---
--- > cutoffBefore 60 1000 == 940
--- > cutoffBefore 2000 1000 == 0
-cutoffBefore :: POSIXTime -> POSIXTime -> POSIXTime
-cutoffBefore ttl now = max 0 (now - ttl)
 
 claimInvoiceSlotTx
   :: MonadIO m
