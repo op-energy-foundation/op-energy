@@ -62,6 +62,7 @@ library
                    , OpEnergy.Account.Server.V1.WalletDeposits
                    , OpEnergy.Account.Server.V1.Wallet.Class
                    , OpEnergy.Account.Server.V1.Wallet.Mock
+                   , OpEnergy.Account.Server.V1.WalletRateLimit
                    , OpEnergy.Account.Server.V1.DB.Migrations.BackfillLedgerOpeningBalance.Migration
                    , OpEnergy.Account.Server.V1.DB.Migrations.DropOversizedWalletPaymentInvoices.Migration
                    , OpEnergy.Account.Server.V2
