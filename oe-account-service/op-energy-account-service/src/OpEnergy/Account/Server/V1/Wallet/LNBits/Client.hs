@@ -43,6 +43,8 @@ import           Data.Proxy (Proxy(..))
 import           Data.Text (Text)
 import           Data.Word (Word64)
 import           Servant.API
+
+import           Data.OpEnergy.Account.API.V1.Sats (Sats)
 import           Servant.Client (ClientM, client)
 
 -- | an invoice, which LNBits is asked to issue. The amount is in satoshi,
@@ -53,7 +55,7 @@ import           Servant.Client (ClientM, client)
 -- be paid to this wallet, so "out" is fixed to False below and a payment
 -- can not be made by filling this in differently
 data CreateInvoiceRequest = CreateInvoiceRequest
-  { createInvoiceRequestAmountSats :: Word64
+  { createInvoiceRequestAmountSats :: Sats
   , createInvoiceRequestMemo :: Maybe Text
   , createInvoiceRequestExpirySecs :: Word64
   }

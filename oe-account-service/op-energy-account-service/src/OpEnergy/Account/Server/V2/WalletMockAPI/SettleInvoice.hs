@@ -22,7 +22,6 @@ import           Control.Monad.Trans.Except (ExceptT(..), throwE)
 import           Control.Monad.Trans.Reader (ask)
 import           Data.Time.Clock.POSIX (getPOSIXTime)
 import           Database.Persist (Entity(..), get)
-import           Database.Persist.Postgresql (runSqlPersistMPool)
 
 import qualified Data.OpEnergy.Account.API.V1.Account as API
 import           Data.OpEnergy.Account.API.V2.SettleInvoiceRequest
@@ -36,16 +35,17 @@ import           OpEnergy.Account.Server.V1.AccountService
                  ( mgetPersonByAccountToken
                  )
 import           OpEnergy.Account.Server.V1.Class
-                 ( AppM, State(..), profile, runLogging
+                 ( AppM, State(..), profile, runLogging, withDBTransaction
                  )
 import           OpEnergy.Account.Server.V1.WalletDeposits
-                 ( creditDepositOnce
+                 ( creditDepositOnceTx
                  )
 import           OpEnergy.Account.Server.V1.Person
 import           OpEnergy.Account.Server.V1.Wallet.Class
 import           OpEnergy.Error
                  ( eitherThrowJSON, runExceptPrefixT
-                 , CallstackError, accountNotFound, walletInvoiceNotFound
+                 , CallstackError, accountNotFound, dbQueryError
+                 , walletInvoiceNotFound
                  , walletSimulationNotSupported
                  )
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
@@ -73,7 +73,7 @@ settleInvoice token (SettleInvoiceRequest requestPaymentHash) =
     in profile name $ runExceptPrefixT name $ do
   (Entity key _) <- exceptTMaybeT accountNotFound
     $ mgetPersonByAccountToken token
-  State{ accountDBPool = pool, wallet = walletV } <- lift ask
+  State{ wallet = walletV } <- lift ask
   settleV <- exceptTMaybeT walletSimulationNotSupported
     $ return (walletSettleInvoice walletV)
   -- the account is given to the wallet rather than checked afterwards, so an
@@ -90,15 +90,17 @@ settleInvoice token (SettleInvoiceRequest requestPaymentHash) =
   -- than reporting a balance, which never included it. Whichever caller
   -- claims it first is the one, which credits
   now <- liftIO getPOSIXTime
-  mbalance <- ExceptT $ liftIO $ flip runSqlPersistMPool pool
-    $ creditDepositOnce (settledInvoicePersonId settled)
+  ecredited <- exceptTMaybeT dbQueryError $ withDBTransaction ""
+    $ creditDepositOnceTx (settledInvoicePersonId settled)
         (settledInvoicePaymentHash settled) now
+  mbalance <- ExceptT $ return ecredited
   balance <- case mbalance of
     Just credited -> return credited
     -- somebody else had credited it, so the balance is read as it now is
-    Nothing -> exceptTMaybeT accountNotFound
-      $ liftIO $ flip runSqlPersistMPool pool
-      $ fmap (fmap personBalance) $ get key
+    Nothing -> do
+      mread <- exceptTMaybeT dbQueryError $ withDBTransaction ""
+        $ fmap (fmap personBalance) $ get key
+      exceptTMaybeT accountNotFound $ return mread
   -- positional, as several wallet types share these field names
   return $! SettleInvoiceResult
     (settledInvoicePaymentHash settled)

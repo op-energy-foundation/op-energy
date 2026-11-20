@@ -75,11 +75,14 @@ library
                    , Data.OpEnergy.Account.API.V2.WhoAmIResult
                    , Data.OpEnergy.Account.API.V2.WhoAmIAPI
                    , Data.OpEnergy.Account.API.V2.LedgerReason
+                   , Data.OpEnergy.Account.API.V2.LedgerReference
+                   , Data.OpEnergy.Account.API.V2.Note
                    , Data.OpEnergy.Account.API.V2.PaymentHash
                    , Data.OpEnergy.Account.API.V2.Bolt11Invoice
                    , Data.OpEnergy.Account.API.V2.WalletMode
                    , Data.OpEnergy.Account.API.V2.WalletInfo
                    , Data.OpEnergy.Account.API.V2.WalletTransaction
+                   , Data.OpEnergy.Account.API.V2.WalletTransactionId
                    , Data.OpEnergy.Account.API.V2.WalletTransactionsResult
                    , Data.OpEnergy.Account.API.V2.CreateInvoiceRequest
                    , Data.OpEnergy.Account.API.V2.CreateInvoiceResult

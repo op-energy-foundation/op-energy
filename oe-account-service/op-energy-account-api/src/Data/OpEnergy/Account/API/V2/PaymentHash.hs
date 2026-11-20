@@ -8,7 +8,6 @@
 module Data.OpEnergy.Account.API.V2.PaymentHash
   ( PaymentHash(..)
   , defaultPaymentHash
-  , verifyPaymentHash
   , everifyPaymentHash
   ) where
 
@@ -31,9 +30,12 @@ defaultPaymentHash :: PaymentHash
 defaultPaymentHash = PaymentHash
   "9d1a1f0f4e1b47ef8b7a8e5c1f7d3a21b9c84f06d2e3a5178c0b4d9e6f2a1c35"
 
--- | checks the shape of a payment hash. 'FromJSON' and 'FromHttpApiData'
--- both go through it, so an unchecked value can not enter the service
--- through the API
+-- | checks the shape of a payment hash. 'FromJSON' goes through it, so an
+-- unchecked value can not enter the service through the API.
+--
+-- A caller, which has a hash it made itself, decides what an unexpected
+-- shape means to it: there is no verifier here, which calls 'error' on its
+-- behalf
 everifyPaymentHash :: Text -> Either Text PaymentHash
 everifyPaymentHash raw
   | Text.length lowered /= 64 =
@@ -43,10 +45,6 @@ everifyPaymentHash raw
   | otherwise = Right (PaymentHash lowered)
   where
     lowered = Text.map toLower (Text.strip raw)
-
--- | 'everifyPaymentHash', which fails instead of returning an error
-verifyPaymentHash :: Text -> PaymentHash
-verifyPaymentHash raw = either (error . Text.unpack) id (everifyPaymentHash raw)
 
 instance ToJSON PaymentHash where
   toJSON = toJSON . unPaymentHash

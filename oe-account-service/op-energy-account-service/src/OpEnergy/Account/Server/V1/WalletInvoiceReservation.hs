@@ -22,7 +22,7 @@
  -
  - A reservation, which is never given back -- the process stopped between
  - taking it and the wallet answering -- stops counting once it is older
- - than 'invoiceReservationTtl', rather than counting for good. A slot held
+ - than the configured reservation ttl, rather than counting for good. A slot held
  - by nothing would otherwise leave the account unable to ask to be paid,
  - and no answer from the wallet is waited on for longer than that anyway.
  - The scheduler deletes them once they have stopped counting.
@@ -51,6 +51,7 @@ import           Control.Monad.Trans.Reader (ReaderT)
 import           Data.Time.Clock.POSIX (POSIXTime)
 import           Database.Persist
 import           Data.Int (Int64)
+import           Data.Text (Text)
 import           Database.Persist.Sql (Single, SqlBackend, rawSql)
 import           Database.Persist.TH
 import           GHC.Generics (Generic)
@@ -69,29 +70,37 @@ WalletInvoiceReservation
   deriving Eq Show Generic
 |]
 
--- | how long a reservation counts against the limit.
---
--- It stands for a call to the wallet, which is in flight, so it only has
--- to outlast that call. Past it the reservation is taken to belong to a
--- call, which will never finish, and stops counting
-invoiceReservationTtl :: POSIXTime
-invoiceReservationTtl = 60
-
 -- | locks the account's row for the rest of the transaction, and answers
 -- how many rows that was (one, for an account, which exists).
 --
 -- Taken before anything is counted, so the requests of one account are
 -- accounted for one after another: without it two of them read the same
--- count and each take the last slot. Read with rawSql rather than
--- rawExecute, as the statement answers a row and execute refuses a
--- statement, which does
+-- count and each take the last slot
 lockPersonTx
   :: MonadIO m
   => PersonId
   -> ReaderT SqlBackend m Int
-lockPersonTx personKey = do
-  rows <- rawSql "SELECT id FROM person WHERE id = ? FOR UPDATE"
-    [ toPersistValue personKey ]
+lockPersonTx personKey = getForUpdate "person" (toPersistValue personKey)
+
+-- | locks the row of a table for the rest of the transaction, and answers
+-- how many rows that was (one, for a row, which exists).
+--
+-- Read with rawSql rather than rawExecute, as the statement answers a row
+-- and execute refuses a statement, which does.
+--
+-- Example:
+--
+-- > getForUpdate "person" (toPersistValue personKey)
+getForUpdate
+  :: MonadIO m
+  => Text
+     -- ^ the table, whose row is locked
+  -> PersistValue
+     -- ^ the key of the row
+  -> ReaderT SqlBackend m Int
+getForUpdate table key = do
+  rows <- rawSql ("SELECT id FROM " <> table <> " WHERE id = ? FOR UPDATE")
+    [ key ]
   return $! length (rows :: [Single Int64])
 
 -- | whether an account has room for another invoice: the invoices, which
@@ -114,6 +123,21 @@ hasInvoiceSlot
   -> Bool
 hasInvoiceSlot limit waiting held = waiting + held < limit
 
+-- | the moment a slot counts from, never earlier than the epoch.
+--
+-- A ttl longer than the time, which has passed, would otherwise put the
+-- cutoff before 1970. POSIXTime is stored as a Word32, so a negative one
+-- is written as an enormous positive one: every slot, which is held,
+-- would then look older than the cutoff and be dropped, and the limit on
+-- the invoices an account has at once would stop holding.
+--
+-- Example:
+--
+-- > cutoffBefore 60 1000 == 940
+-- > cutoffBefore 2000 1000 == 0
+cutoffBefore :: POSIXTime -> POSIXTime -> POSIXTime
+cutoffBefore ttl now = max 0 (now - ttl)
+
 -- | takes a slot for an invoice, which is about to be made, and answers
 -- its reservation -- or 'Nothing' when the account has no slot left.
 --
@@ -130,21 +154,7 @@ hasInvoiceSlot limit waiting held = waiting + held < limit
 --
 -- Example:
 --
--- > claimInvoiceSlotTx 10 invoiceReservationTtl personKey now
--- | the moment a slot counts from, never earlier than the epoch.
---
--- A ttl longer than the time, which has passed, would otherwise put the
--- cutoff before 1970. POSIXTime is stored as a Word32, so a negative one
--- is written as an enormous positive one: every slot, which is held,
--- would then look older than the cutoff and be dropped, and the limit on
--- the invoices an account has at once would stop holding.
---
--- Example:
---
--- > cutoffBefore 60 1000 == 940
--- > cutoffBefore 2000 1000 == 0
-cutoffBefore :: POSIXTime -> POSIXTime -> POSIXTime
-cutoffBefore ttl now = max 0 (now - ttl)
+-- > claimInvoiceSlotTx 10 60 personKey now
 
 claimInvoiceSlotTx
   :: MonadIO m
@@ -177,7 +187,7 @@ claimInvoiceSlotTx limit ttl personKey now = do
 -- | gives a slot back, once the call it was held for is over. Called
 -- whether the wallet answered or not: a slot, which is given back, is one
 -- the account can use again at once, while one, which is not, has to wait
--- out 'invoiceReservationTtl' first
+-- out the configured reservation ttl first
 releaseInvoiceSlotTx
   :: MonadIO m
   => Key WalletInvoiceReservation

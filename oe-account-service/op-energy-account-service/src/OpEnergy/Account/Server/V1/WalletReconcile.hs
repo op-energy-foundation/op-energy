@@ -44,9 +44,7 @@ import qualified Data.Text as Text
 import           Data.Text.Show (tshow)
 import           Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
 import           Database.Persist
-import           Database.Persist.Postgresql (runSqlPersistMPool)
-import           Database.Persist.Sql (SqlBackend, updateWhereCount)
-import           Data.Pool (Pool)
+import           Database.Persist.Sql (updateWhereCount)
 import           Prometheus (MonadMonitor)
 
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
@@ -56,7 +54,7 @@ import           Data.OpEnergy.Account.API.V2.PaymentHash
                  )
 
 import           OpEnergy.Account.Server.V1.Class
-                 ( AppT, State(..), profile, runLogging
+                 ( AppT, State(..), profile, runLogging, withDBTransaction
                  )
 import           OpEnergy.Account.Server.V1.Config (Config(..))
 import           OpEnergy.Account.Server.V1.LedgerEntry
@@ -193,7 +191,7 @@ reconcilePendingPayments :: (MonadIO m, MonadMonitor m) => AppT m ()
 reconcilePendingPayments =
     let name = "V1.reconcilePendingPayments"
     in profile name $ do
-  State{ accountDBPool = pool, config = config, wallet = walletV } <- ask
+  State{ config = config, wallet = walletV } <- ask
   now <- liftIO getPOSIXTime
   -- never before the epoch: the moment is stored as a Word32, so a
   -- negative one is written as an enormous one -- a cutoff in the future,
@@ -206,10 +204,11 @@ reconcilePendingPayments =
     -- a backend, which settles its own payments, has nothing to be asked
     Nothing -> return ()
     Just readPayment -> do
-      -- guarded, as this runs on the scheduler thread and the process
-      -- waits on any of its threads ending: an exception here would take
-      -- the API down with it rather than skipping a tick
-      ewaiting <- liftIO $ eitherException $ flip runSqlPersistMPool pool
+      -- withDBTransaction, as this runs on the scheduler thread and the
+      -- process waits on any of its threads ending: an exception here
+      -- would take the API down with it rather than skipping a tick. It
+      -- logs the one it catches and answers Nothing
+      mwaiting <- withDBTransaction ""
         -- oldest asked-about first, rather than lowest id first: a payment
         -- the wallet keeps answering the same way about is asked about
         -- again at the back of the queue, so it can not hold a place in
@@ -223,12 +222,9 @@ reconcilePendingPayments =
           , WalletPaymentUpdatedAt <=. notAskedSince
           ]
           [ Asc WalletPaymentUpdatedAt, LimitTo maxPaymentsPerTick ]
-      case ewaiting of
-        Left err -> runLogging $ $(logError)
-          ( "reconcilePendingPayments: could not read the payments waiting "
-          <> "to be asked about: " <> err
-          )
-        Right waiting -> mapM_ (askAbout readPayment) waiting
+      case mwaiting of
+        Nothing -> return ()
+        Just waiting -> mapM_ (askAbout readPayment) waiting
   where
     -- takes the payment before the wallet is called, so only one tick
     -- asks about it.
@@ -249,17 +245,15 @@ reconcilePendingPayments =
       -> Entity WalletPayment
       -> AppT m ()
     askAbout readPayment ent@(Entity key payment) = do
-      State{ accountDBPool = pool } <- ask
       now <- liftIO getPOSIXTime
-      eclaimed <- liftIO $ eitherException $ flip runSqlPersistMPool pool
-        $ updateWhereCount
-          [ WalletPaymentId ==. key
-          , WalletPaymentUpdatedAt ==. walletPaymentUpdatedAt payment
-          ]
-          [ WalletPaymentUpdatedAt =. now ]
-      case eclaimed of
+      mclaimed <- withDBTransaction "" $ updateWhereCount
+        [ WalletPaymentId ==. key
+        , WalletPaymentUpdatedAt ==. walletPaymentUpdatedAt payment
+        ]
+        [ WalletPaymentUpdatedAt =. now ]
+      case mclaimed of
         -- taken by this tick
-        Right (1 :: Int64) -> askClaimed readPayment ent
+        Just (1 :: Int64) -> askClaimed readPayment ent
         -- another tick has it, or the row moved on since it was read.
         -- A read, which failed, is left alone as well: the tick, which
         -- could not claim it, is not the tick to call the wallet for it
@@ -271,7 +265,6 @@ reconcilePendingPayments =
       -> Entity WalletPayment
       -> AppT m ()
     askClaimed readPayment (Entity key payment) = do
-      State{ accountDBPool = pool } <- ask
       let paymentHashV = walletPaymentPaymentHash payment
       -- guarded per payment, so one the wallet can not answer for is
       -- skipped and the rest of the tick still runs
@@ -282,13 +275,13 @@ reconcilePendingPayments =
       -- answer names a payment without saying whose, and settling the
       -- wrong row debits an account for a payment it never made. Such a
       -- payment is left for a person to resolve rather than guessed at
-      eambiguous <- liftIO $ eitherException $ flip runSqlPersistMPool pool
-        -- the hash is only ambiguous where the hash is what the wallet
-        -- will be asked about. An attempt, whose own name was recorded,
-        -- is asked about by that name and answered for on its own, so no
-        -- other payment of the same hash can be mistaken for it -- and
-        -- counting them would leave an internal transfer, whose two rows
-        -- always share a hash, ambiguous for good and its reserve held
+      -- the hash is only ambiguous where the hash is what the wallet
+      -- will be asked about. An attempt, whose own name was recorded, is
+      -- asked about by that name and answered for on its own, so no other
+      -- payment of the same hash can be mistaken for it -- and counting
+      -- them would leave an internal transfer, whose two rows always
+      -- share a hash, ambiguous for good and its reserve held
+      mambiguous <- withDBTransaction ""
         $ if walletPaymentDirection payment == Incoming
              || isJust (walletPaymentCheckingId payment)
             then return (0 :: Int)
@@ -311,15 +304,16 @@ reconcilePendingPayments =
               [ WalletPaymentPaymentHash ==. paymentHashV
               , WalletPaymentStatus <-. [ Pending, Settled ]
               ]
-      case eambiguous of
-        Left err -> do
+      case mambiguous of
+        -- withDBTransaction has logged what went wrong
+        Nothing -> do
           runLogging $ $(logError)
             ( "reconcilePendingPayments: could not count the accounts, "
             <> "which are waiting on the payment "
-            <> unPaymentHash paymentHashV <> ": " <> err
+            <> unPaymentHash paymentHashV
             )
-          touchNow pool key payment
-        Right waitingOnHash | waitingOnHash > 1 -> do
+          touchNow key payment
+        Just waitingOnHash | waitingOnHash > 1 -> do
           runLogging $ $(logError)
             ( "reconcilePendingPayments: " <> tshow waitingOnHash
             <> " accounts are waiting on the payment "
@@ -327,18 +321,18 @@ reconcilePendingPayments =
             <> "about it does not say whose it is and the payment needs "
             <> "manual reconciliation"
             )
-          touchNow pool key payment
-        Right _ -> askTheWallet readPayment key payment
+          touchNow key payment
+        Just _ -> askTheWallet readPayment key payment
 
     -- asks about one payment, whose wallet answer can be attributed to it
     askTheWallet
-      :: MonadIO m
+      :: (MonadIO m, MonadMonitor m)
       => (Text -> IO (Either CallstackError ObservedPayment))
       -> Key WalletPayment
       -> WalletPayment
       -> AppT m ()
     askTheWallet readPayment key payment = do
-      State{ accountDBPool = pool, wallet = walletV } <- ask
+      State{ wallet = walletV } <- ask
       let paymentHashV = walletPaymentPaymentHash payment
       -- asked about by the name the wallet gave this attempt where there
       -- is one, and by the hash otherwise. A hash names the invoice, so
@@ -359,14 +353,14 @@ reconcilePendingPayments =
             ( "reconcilePendingPayments: asking about the payment "
             <> unPaymentHash paymentHashV <> " failed: " <> err
             )
-          touchNow pool key payment
+          touchNow key payment
         Right (Left err) -> do
           runLogging $ $(logError)
             ( "reconcilePendingPayments: the wallet could not answer about "
             <> "the payment " <> unPaymentHash paymentHashV <> ": "
             <> describeError err
             )
-          touchNow pool key payment
+          touchNow key payment
         -- an answer about an outgoing payment is only acted on where it
         -- came from the wallet the payment was made at. A replacement
         -- wallet knows nothing of what the one before it paid, so its
@@ -388,22 +382,21 @@ reconcilePendingPayments =
                 <> ", so what this wallet answers about it says nothing "
                 <> "and it needs manual reconciliation"
                 )
-              park pool key payment
+              park key payment
         -- not finished yet, which is the usual answer: asked again later
-        Right (Right ObservedPending) -> parkKnown pool key payment
-        Right (Right (ObservedSettled fee)) -> settle pool key payment fee
-        Right (Right ObservedFailed) -> recordFailure pool key payment
-        Right (Right ObservedUnknown) -> forget pool key payment
+        Right (Right ObservedPending) -> parkKnown key payment
+        Right (Right (ObservedSettled fee)) -> settle key payment fee
+        Right (Right ObservedFailed) -> recordFailure key payment
+        Right (Right ObservedUnknown) -> forget key payment
 
     -- a payment, which has moved its sats
     settle
-      :: MonadIO m
-      => Pool SqlBackend
-      -> Key WalletPayment
+      :: (MonadIO m, MonadMonitor m)
+      => Key WalletPayment
       -> WalletPayment
       -> Sats
       -> AppT m ()
-    settle pool key payment fee = do
+    settle key payment fee = do
       now <- liftIO getPOSIXTime
       let reserve = reserveOf payment
       -- a fee above the reserve is recorded rather than taken: the sats
@@ -426,7 +419,7 @@ reconcilePendingPayments =
       -- of its invoice, so a fee reported against it is not recorded: the
       -- column holds what a payment cost this service to send, and
       -- nothing was sent for one, which arrived
-      finish pool key payment Settled
+      finish key payment Settled
         (case walletPaymentDirection payment of
            Outgoing -> Just fee
            Incoming -> Nothing
@@ -436,12 +429,11 @@ reconcilePendingPayments =
 
     -- a payment the wallet says it did not make
     recordFailure
-      :: MonadIO m
-      => Pool SqlBackend
-      -> Key WalletPayment
+      :: (MonadIO m, MonadMonitor m)
+      => Key WalletPayment
       -> WalletPayment
       -> AppT m ()
-    recordFailure pool key payment = do
+    recordFailure key payment = do
       State{ wallet = walletV } <- ask
       now <- liftIO getPOSIXTime
       case walletPaymentDirection payment of
@@ -454,27 +446,26 @@ reconcilePendingPayments =
         -- to nobody. It is parked instead, as an unknown one is
         Incoming
           | not (answeredByOriginatingWallet payment walletV) ->
-              park pool key payment
+              park key payment
         -- nothing left the wallet, so everything, which was taken for it,
         -- goes back. An incoming payment took nothing and gets nothing back
-        _ -> finish pool key payment Failed Nothing
+        _ -> finish key payment Failed Nothing
                (walletPaymentAmountSats payment + reserveOf payment)
                "a payment, which the wallet did not make" now
 
     -- a payment the wallet does not have at all
     forget
-      :: MonadIO m
-      => Pool SqlBackend
-      -> Key WalletPayment
+      :: (MonadIO m, MonadMonitor m)
+      => Key WalletPayment
       -> WalletPayment
       -> AppT m ()
-    forget pool key payment = case walletPaymentDirection payment of
+    forget key payment = case walletPaymentDirection payment of
       -- an invoice of another wallet -- every invoice of a backend used
       -- before this one reads this way. It is written off once it can no
       -- longer be paid, and until then it is asked about again, as a
       -- wallet, which answers this way about an invoice it does have,
       -- would otherwise have it abandoned
-      Incoming -> park pool key payment
+      Incoming -> park key payment
       -- the balance was taken for this payment, so it is not given back
       -- at once: a wallet, which has just been asked to pay and does not
       -- say so yet, may be paying, and refunding it then pays it twice.
@@ -500,7 +491,7 @@ reconcilePendingPayments =
               <> ", which can no longer be in flight, so what was taken "
               <> "for it is given back"
               )
-            recordFailure pool key payment
+            recordFailure key payment
           NoteUnknown -> do
             runLogging $ $(logError)
               ( "reconcilePendingPayments: the wallet does not have the "
@@ -509,7 +500,7 @@ reconcilePendingPayments =
               <> " yet, whose balance is taken, so the wait before it is "
               <> "given back starts now"
               )
-            touchWith pool key payment
+            touchWith key payment
               [ WalletPaymentUnknownSince =. Just now ] now
           WaitLonger -> do
             runLogging $ $(logError)
@@ -518,7 +509,7 @@ reconcilePendingPayments =
               <> unPaymentHash (walletPaymentPaymentHash payment)
               <> " yet, whose balance is taken"
               )
-            park pool key payment
+            park key payment
           -- not this wallet's payment to answer for, so nothing it says
           -- is evidence either way and no later answer will be: giving
           -- the sats back would return ones, which really did leave the
@@ -536,28 +527,26 @@ reconcilePendingPayments =
               <> ", so what that wallet does not have says nothing about "
               <> "it and the payment needs manual reconciliation"
               )
-            park pool key payment
+            park key payment
 
     -- a payment the wallet is not finished with
     park
-      :: MonadIO m
-      => Pool SqlBackend
-      -> Key WalletPayment
+      :: (MonadIO m, MonadMonitor m)
+      => Key WalletPayment
       -> WalletPayment
       -> AppT m ()
-    park pool key payment = parkWith pool key payment []
+    park key payment = parkWith key payment []
 
     -- 'park' for an answer, which did have the payment: an answer from
     -- before, which did not, is no longer the state the payment is in, so
     -- a later one starts its own wait rather than carrying that one on
     parkKnown
-      :: MonadIO m
-      => Pool SqlBackend
-      -> Key WalletPayment
+      :: (MonadIO m, MonadMonitor m)
+      => Key WalletPayment
       -> WalletPayment
       -> AppT m ()
-    parkKnown pool key payment =
-      parkWith pool key payment [ WalletPaymentUnknownSince =. Nothing ]
+    parkKnown key payment =
+      parkWith key payment [ WalletPaymentUnknownSince =. Nothing ]
 
     -- An invoice, whose expiry and the grace after it have passed, is
     -- written off here: the wallet goes on answering that nobody paid it,
@@ -565,13 +554,12 @@ reconcilePendingPayments =
     -- only noted as asked about, which sends it to the back of the queue
     -- the next tick reads
     parkWith
-      :: MonadIO m
-      => Pool SqlBackend
-      -> Key WalletPayment
+      :: (MonadIO m, MonadMonitor m)
+      => Key WalletPayment
       -> WalletPayment
       -> [Update WalletPayment]
       -> AppT m ()
-    parkWith pool key payment extra = do
+    parkWith key payment extra = do
       State{ config = config, wallet = walletV } <- ask
       now <- liftIO getPOSIXTime
       let grace =
@@ -592,42 +580,39 @@ reconcilePendingPayments =
             <> " expired without being paid and has not been paid since, "
             <> "so it is recorded as one, which was never paid"
             )
-          finish pool key payment Expired Nothing (Sats 0) "" now
-        else touchWith pool key payment extra now
+          finish key payment Expired Nothing (Sats 0) "" now
+        else touchWith key payment extra now
 
     -- 'touch' for a caller, which has not read the clock
     touchNow
-      :: MonadIO m
-      => Pool SqlBackend
-      -> Key WalletPayment
+      :: (MonadIO m, MonadMonitor m)
+      => Key WalletPayment
       -> WalletPayment
       -> AppT m ()
-    touchNow pool key payment =
-      liftIO getPOSIXTime >>= touch pool key payment
+    touchNow key payment =
+      liftIO getPOSIXTime >>= touch key payment
 
     -- records that the payment was asked about, without changing what it
     -- is. Only the order the next tick reads the payments in depends on it
     touch
-      :: MonadIO m
-      => Pool SqlBackend
-      -> Key WalletPayment
+      :: (MonadIO m, MonadMonitor m)
+      => Key WalletPayment
       -> WalletPayment
       -> POSIXTime
       -> AppT m ()
-    touch pool key payment now = touchWith pool key payment [] now
+    touch key payment now = touchWith key payment [] now
 
     -- 'touch', which also records something about the payment in the same
     -- statement, so the note and the place in the queue move together
     touchWith
-      :: MonadIO m
-      => Pool SqlBackend
-      -> Key WalletPayment
+      :: (MonadIO m, MonadMonitor m)
+      => Key WalletPayment
       -> WalletPayment
       -> [Update WalletPayment]
       -> POSIXTime
       -> AppT m ()
-    touchWith pool key payment extra now = do
-      etouched <- liftIO $ eitherException $ flip runSqlPersistMPool pool
+    touchWith key payment extra now = do
+      mtouched <- withDBTransaction ""
         -- the row itself, not its hash: two accounts may each hold a
         -- payment of one hash, and this is the one, which was read.
         -- Matched on when it started as well, as a row, which is taken up
@@ -638,12 +623,13 @@ reconcilePendingPayments =
           , WalletPaymentStatus ==. Pending
           ]
           ([ WalletPaymentUpdatedAt =. now ] ++ extra)
-      case etouched of
-        Right (_ :: Int64) -> return ()
-        Left err -> runLogging $ $(logError)
+      case mtouched of
+        Just (_ :: Int64) -> return ()
+        -- withDBTransaction has logged what went wrong
+        Nothing -> runLogging $ $(logError)
           ( "reconcilePendingPayments: could not record that the payment "
           <> unPaymentHash (walletPaymentPaymentHash payment)
-          <> " was asked about: " <> err
+          <> " was asked about"
           )
 
     -- the sats, which were taken on top of the amount, to cover a fee
@@ -662,9 +648,8 @@ reconcilePendingPayments =
     -- no balance, and creditWaitingDeposits credits it from the status
     -- written here
     finish
-      :: MonadIO m
-      => Pool SqlBackend
-      -> Key WalletPayment
+      :: (MonadIO m, MonadMonitor m)
+      => Key WalletPayment
       -> WalletPayment
       -> WalletPaymentStatus
       -> Maybe Sats
@@ -672,11 +657,11 @@ reconcilePendingPayments =
       -> Text
       -> POSIXTime
       -> AppT m ()
-    finish pool key payment status mfee back reason now = do
+    finish key payment status mfee back reason now = do
       let paymentHashV = walletPaymentPaymentHash payment
           givesBack = walletPaymentDirection payment == Outgoing
                    && back > Sats 0
-      edone <- liftIO $ eitherException $ flip runSqlPersistMPool pool $ do
+      mdone <- withDBTransaction "" $ do
         -- the row itself: a hash names a row each way round, and an
         -- outgoing one of it per account, so only its id finishes the
         -- payment, which was read.
@@ -720,12 +705,13 @@ reconcilePendingPayments =
             (liftIO . throwIO . userError . Text.unpack . describeError)
             (const (return ()))
             egiven
-      case edone of
-        Right () -> return ()
-        Left err -> runLogging $ $(logError)
+      case mdone of
+        Just () -> return ()
+        -- withDBTransaction has logged what went wrong
+        Nothing -> runLogging $ $(logError)
           ( "reconcilePendingPayments: the payment "
           <> unPaymentHash paymentHashV <> " is "
           <> walletPaymentStatusToText status
           <> " at the wallet and could not be recorded as such, so it is "
-          <> "left pending to be tried again: " <> err
+          <> "left pending to be tried again"
           )

@@ -4,6 +4,7 @@ module OpEnergy.Account.Server.V1.Config where
 import           Data.Int (Int64)
 import qualified Data.List as List
 import           Data.Text (Text)
+import qualified Data.Text as T
 import           Data.Word (Word32, Word64)
 import qualified Data.Text.Encoding as Text
 import           Data.Maybe
@@ -138,6 +139,13 @@ data Config = Config
     -- left before its sats are given back. A wallet, which was unreachable
     -- when the payment was sent, never had it, so it would otherwise be
     -- held for good
+  , configWalletInvoiceReservationTtlSecs :: Word64
+    -- ^ how long a slot, which is held for a call to the wallet, counts
+    -- against the invoices an account may have at once. It stands for a
+    -- call, which is in flight, so it only has to outlast that call
+  , configWalletMaxDepositsPerTick :: Int
+    -- ^ how many waiting deposits one tick credits, so the work a tick
+    -- does is bounded whatever has accumulated
   }
   deriving Show
 instance FromJSON Config where
@@ -185,6 +193,8 @@ instance FromJSON Config where
     <*> ( v .:? "WALLET_MAX_PAY_ATTEMPT_ACCOUNTS" .!= (configWalletMaxPayAttemptAccounts defaultConfig))
     <*> ( v .:? "WALLET_RECONCILE_INTERVAL_SECS" .!= (configWalletReconcileIntervalSecs defaultConfig))
     <*> ( v .:? "WALLET_UNKNOWN_PAYMENT_GRACE_SECS" .!= (configWalletUnknownPaymentGraceSecs defaultConfig))
+    <*> ( v .:? "WALLET_INVOICE_RESERVATION_TTL_SECS" .!= (configWalletInvoiceReservationTtlSecs defaultConfig))
+    <*> ( v .:? "WALLET_MAX_DEPOSITS_PER_TICK" .!= (configWalletMaxDepositsPerTick defaultConfig))
 
 -- need to get Key from json, which represented as base64-encoded string
 instance FromJSON Key where
@@ -248,6 +258,12 @@ defaultConfig = Config
   -- The day is there so a wallet, which is briefly confused about one, is
   -- not taken at its word
   , configWalletUnknownPaymentGraceSecs = 86400
+  -- a call to a wallet is answered in seconds, so a minute outlasts one
+  -- and a slot, which is held by nothing, stops counting a minute later
+  , configWalletInvoiceReservationTtlSecs = 60
+  -- a hundred is more than a tick is expected to find, and few enough
+  -- that crediting them does not hold the pool for the whole of a tick
+  , configWalletMaxDepositsPerTick = 100
   }
 
 -- | the largest amount, which survives a round trip through the DB:
@@ -272,10 +288,10 @@ maxWalletRecordsPerPage = 1000
 -- Example:
 --
 -- > everifyWalletConfig defaultConfig { configSalt = "a secret" } == Right ()
-everifyWalletConfig :: Config -> Either String ()
+everifyWalletConfig :: Config -> Either Text ()
 everifyWalletConfig config
   | List.null problems = Right ()
-  | otherwise = Left (List.intercalate "; " problems)
+  | otherwise = Left (T.intercalate "; " problems)
   where
     problems = catMaybes
       [ require (configWalletRecordsPerPage config > 0)
@@ -283,7 +299,7 @@ everifyWalletConfig config
           \queried without a limit, which answers with the whole history"
       , require (configWalletRecordsPerPage config <= maxWalletRecordsPerPage)
           ( "WALLET_RECORDS_PER_PAGE must not be above "
-         <> show maxWalletRecordsPerPage
+         <> T.pack (show maxWalletRecordsPerPage)
          <> ": a page of more rows than that answers with as much of the \
             \history as a single reply can carry, which is what bounding \
             \it at all is for"
@@ -338,6 +354,28 @@ everifyWalletConfig config
       , require (configWalletInvoiceExpirySecs config > 0)
           "WALLET_INVOICE_EXPIRY_SECS must be above 0: an invoice would be \
           \advertised as expired as soon as it is created"
+      , require (configWalletInvoiceReservationTtlSecs config > 1)
+          "WALLET_INVOICE_RESERVATION_TTL_SECS must be above 1: the moment \
+          \a slot was taken is stored in whole seconds, so a ttl of 1 \
+          \covers anything between a second and nothing at all -- a slot \
+          \taken at 100.99 stops counting at 101.01, as both it and the \
+          \cutoff are stored as 100. A slot, which stops counting while \
+          \the invoice is still being made, lets another request take it \
+          \and the account hold more invoices at once than \
+          \WALLET_MAX_PENDING_INVOICES allows. Above 1 a whole second is \
+          \covered whatever the truncation does"
+      , require (configWalletInvoiceReservationTtlSecs config
+                   <= fromIntegral (maxBound :: Word32))
+          "WALLET_INVOICE_RESERVATION_TTL_SECS must fit a Word32: the time \
+          \a reservation is counted from is stored as one, so a ttl above \
+          \it wraps the moment the stale slots are measured against back \
+          \to the present, and every slot, which is held, is dropped as \
+          \though it had expired"
+      , require (configWalletMaxDepositsPerTick config > 0)
+          "WALLET_MAX_DEPOSITS_PER_TICK must be above 0: persistent reads \
+          \a limit of 0 as no limit at all, so one tick would take the \
+          \whole backlog of waiting deposits rather than a bounded part \
+          \of it"
       , require (configSalt config /= "")
           "SECRET_SALT must be set: the identifier of a ledger entry is its \
           \row id hashed with this salt, and the ids of a shared sequence \
@@ -401,5 +439,6 @@ getConfigFromEnvironment = do
     Left some -> error $ configFilePath ++ " is not a valid config: " ++ some
     Right config -> case everifyWalletConfig config of
       Left problem ->
-        error $ configFilePath ++ " is not a usable config: " ++ problem
+        error $ configFilePath ++ " is not a usable config: "
+          ++ T.unpack problem
       Right () -> return config
