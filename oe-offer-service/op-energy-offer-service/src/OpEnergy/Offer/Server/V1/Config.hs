@@ -1,7 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 module OpEnergy.Offer.Server.V1.Config where
 
+import           Data.Char (isDigit)
 import           Data.Text (Text)
+import qualified Data.Text as Text
 import           Data.Maybe
 import           Data.Int (Int64)
 import           Data.Word (Word64)
@@ -42,8 +44,32 @@ newtype TelegramBotToken = TelegramBotToken
   deriving Eq
 instance Show TelegramBotToken where
   show _ = "TelegramBotToken <redacted>"
+-- | refuses a token, which is not shaped like one, where the config is
+-- read rather than on the first call to telegram.
+--
+-- A blank or truncated value otherwise starts the service perfectly well
+-- and then fails every poll with "telegram answered 401", which says
+-- nothing about the token being wrong -- and the token may not be printed,
+-- so nothing else can say it either.
 instance FromJSON TelegramBotToken where
-  parseJSON = withText "TelegramBotToken" $ pure . TelegramBotToken
+  parseJSON = withText "TelegramBotToken" $ \raw ->
+    if looksLikeBotToken raw
+      then pure $! TelegramBotToken raw
+      else fail "TELEGRAM_BOT_TOKEN: expected the <bot id>:<secret> that\
+                \ BotFather gives out"
+
+-- | whether a value is shaped like the token BotFather hands out: an id of
+-- digits, a colon, and a secret.
+--
+-- Shape only. Whether telegram still accepts it is telegram's to say, and
+-- this cannot ask without making a request at config time.
+looksLikeBotToken :: Text -> Bool
+looksLikeBotToken raw = case Text.splitOn ":" raw of
+  [botId, secret] ->
+    not (Text.null botId)
+      && Text.all isDigit botId
+      && Text.length secret >= 20
+  _ -> False
 
 -- | Describes configurable options
 data Config = Config

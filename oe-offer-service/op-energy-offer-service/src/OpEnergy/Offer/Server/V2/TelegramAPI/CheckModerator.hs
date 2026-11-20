@@ -14,7 +14,6 @@ module OpEnergy.Offer.Server.V2.TelegramAPI.CheckModerator
 import           Control.Monad (unless)
 import           Control.Monad.IO.Class (MonadIO)
 import           Control.Monad.Trans.Except (ExceptT(..), throwE)
-import           Data.Text (Text)
 import           Prometheus (MonadMonitor)
 
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountAPI
@@ -22,10 +21,6 @@ import qualified Data.OpEnergy.Account.API.V1.UUID as AccountAPI
 import           Data.OpEnergy.Account.API.V2.PersonRole (isModerator)
 import qualified Data.OpEnergy.Account.API.V2.WhoAmIResult as AccountV2
 
-import qualified Data.ByteString.Short as ShortBS
-import qualified Data.Text.Encoding as Text
-
-import           Servant.API (toQueryParam)
 
 import           OpEnergy.Offer.Server.V1.Class (AppT)
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
@@ -46,12 +41,12 @@ checkModerator
      , MonadMonitor m
      )
   => AccountAPI.AccountToken
-  -> ExceptT CallstackError (AppT m) Text
+  -> ExceptT CallstackError (AppT m) (AccountAPI.UUID AccountAPI.Person)
 checkModerator token = do
   (AccountV2.WhoAmIResult personUUIDV _displayName _balance _freeSats role') <-
     ExceptT $ AccountClient.verifyAccountToken token
   unless (isModerator role') $ throwE notAModerator
-  return $! Text.decodeUtf8 $! ShortBS.fromShort $! AccountAPI.unUUID personUUIDV
+  return $! personUUIDV
 
 -- | the caller's account and the name it currently goes by.
 --
@@ -66,11 +61,9 @@ whoIsCalling
      , MonadMonitor m
      )
   => AccountAPI.AccountToken
-  -> ExceptT CallstackError (AppT m) (Text, Text)
+  -> ExceptT CallstackError (AppT m)
+       (AccountAPI.UUID AccountAPI.Person, AccountAPI.DisplayName)
 whoIsCalling token = do
   (AccountV2.WhoAmIResult personUUIDV displayNameV _balance _freeSats _role) <-
     ExceptT $ AccountClient.verifyAccountToken token
-  return
-    ( Text.decodeUtf8 $! ShortBS.fromShort $! AccountAPI.unUUID personUUIDV
-    , toQueryParam displayNameV
-    )
+  return (personUUIDV, displayNameV)

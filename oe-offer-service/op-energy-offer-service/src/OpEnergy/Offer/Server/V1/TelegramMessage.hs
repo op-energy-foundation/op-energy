@@ -38,9 +38,14 @@ import qualified Data.Text as Text
 import           Data.Time.Clock (UTCTime)
 import           GHC.Generics
 
+import           Data.Maybe (isJust)
 import           Database.Persist
 import           Database.Persist.Sql (SqlBackend, updateWhereCount)
 import           Database.Persist.TH
+
+import qualified Data.OpEnergy.Account.API.V1.Account as AccountAPI
+import qualified Data.OpEnergy.Account.API.V1.UUID as AccountAPI
+import           Servant.API (toQueryParam)
 
 import           Data.OpEnergy.Offer.API.V1.TelegramMessageID
                  ( TelegramMessageID(..)
@@ -62,7 +67,7 @@ TelegramGroupMessage
   sentAt UTCTime
   editedAt UTCTime Maybe -- when they last edited it, where they did
   deletedAt UTCTime Maybe -- when a moderator removed it. The row stays: telegram never tells a bot that a message was deleted, so a row deleted outright would be written again by the next redelivery, which the unique index cannot catch once the row is gone
-  deletedByUUID Text Maybe -- the account of the moderator, who removed it
+  deletedByUUID (AccountAPI.UUID AccountAPI.Person) Maybe -- the account of the moderator, who removed it
   createdAt UTCTime -- when this service read it, which is not when it was said
   UniqueTelegramGroupMessage chatId messageId
   deriving Eq Show Generic
@@ -86,14 +91,14 @@ TelegramPollState
 --
 -- > telegramMessageInfoOf (Just "blur_inject_439") row
 telegramMessageInfoOf
-  :: Maybe Text
+  :: Maybe AccountAPI.DisplayName
   -> TelegramGroupMessage
   -> TelegramMessageInfo
 telegramMessageInfoOf mOpEnergyName row = TelegramMessageInfo
   { messageId = TelegramMessageID $! Text.pack $! show
       $! telegramGroupMessageMessageId row
   , senderName = telegramGroupMessageSenderDisplayName row
-  , senderDisplayName = mOpEnergyName
+  , senderDisplayName = fmap toQueryParam mOpEnergyName
   , senderId = telegramGroupMessageSenderId row
   , body = telegramGroupMessageBody row
   , sentAt = telegramGroupMessageSentAt row
@@ -118,7 +123,7 @@ insertTelegramMessageTx
   -> ReaderT SqlBackend m Bool
 insertTelegramMessageTx message = do
   mkey <- insertUnique message
-  return $! maybe False (const True) mkey
+  return $! isJust mkey
 
 -- | records an edit of a message already mirrored, leaving everything else
 -- about the row alone.
@@ -212,7 +217,7 @@ markTelegramMessageDeletedTx
   :: MonadIO m
   => Int64
   -> Int64
-  -> Text
+  -> AccountAPI.UUID AccountAPI.Person
   -> UTCTime
   -> ReaderT SqlBackend m ()
 markTelegramMessageDeletedTx chatId' messageId' moderatorUUID now =

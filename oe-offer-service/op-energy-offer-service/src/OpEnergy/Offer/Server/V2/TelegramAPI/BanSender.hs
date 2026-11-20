@@ -82,7 +82,7 @@ banSender telegramUserId token =
   -- there is nothing of this in the group's own record afterwards, so the
   -- log line is the only place it is written down
   lift $ runLogging $ $(logInfo)
-    ( "banSender: moderator " <> moderatorUUID
+    ( "banSender: moderator " <> tshow moderatorUUID
     <> " banned telegram account " <> tshow telegramUserId
     <> " from group " <> tshow chatId'
     )

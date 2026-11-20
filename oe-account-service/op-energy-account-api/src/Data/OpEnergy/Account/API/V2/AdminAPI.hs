@@ -7,7 +7,6 @@
  -}
 {-# LANGUAGE DataKinds                  #-}
 {-# LANGUAGE TypeOperators              #-}
-{-# LANGUAGE DuplicateRecordFields      #-}
 module Data.OpEnergy.Account.API.V2.AdminAPI
   ( AdminAPI
   ) where

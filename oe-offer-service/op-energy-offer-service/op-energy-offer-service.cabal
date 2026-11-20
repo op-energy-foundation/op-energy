@@ -35,7 +35,7 @@ library
                    , OpEnergy.Offer.Server.V1.Telegram.Client
                    , OpEnergy.Offer.Server.V1.TelegramMessage
                    , OpEnergy.Offer.Server.V1.TelegramLink
-                   , OpEnergy.Offer.Server.V1.TelegramClient
+                   , OpEnergy.Offer.Server.V1.TelegramMirror
                    , OpEnergy.Offer.Server.V2.TelegramAPI
                    , OpEnergy.Offer.Server.V2.TelegramAPI.CheckModerator
                    , OpEnergy.Offer.Server.V2.TelegramAPI.GetMessages

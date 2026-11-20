@@ -18,12 +18,12 @@
  -}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TemplateHaskell            #-}
-module OpEnergy.Offer.Server.V1.TelegramClient
+module OpEnergy.Offer.Server.V1.TelegramMirror
   ( runTelegramMirror
   ) where
 
 import           Control.Concurrent (threadDelay)
-import           Control.Monad (forever, when)
+import           Control.Monad (forever, guard, when)
 import           Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.Logger (logInfo, logWarn)
@@ -93,7 +93,16 @@ import           OpEnergy.Offer.Server.V1.TelegramMessage
                  , updateTelegramMessageBodyTx
                  )
 import           Data.OpEnergy.API.V1.Positive (fromPositive)
-import           OpEnergy.Error (CallstackError, describeError, dbQueryError)
+import           Control.Monad.Trans (lift)
+import           Control.Monad.Trans.Except (ExceptT(..))
+
+import           OpEnergy.Error
+                 ( CallstackError
+                 , dbQueryError
+                 , describeError
+                 , exceptTMaybeT
+                 , runExceptPrefixT
+                 )
 
 -- | how long to wait before polling again after a failure.
 --
@@ -169,6 +178,26 @@ reconcileGoneLimit = 10
 reconcileDeadlineSeconds :: Double
 reconcileDeadlineSeconds = 45
 
+-- | runs something only where it has not run for that many seconds.
+--
+-- Both of the mirror's periodic jobs want this and neither wants a thread
+-- of its own: they run in the poll loop so that a slow one delays reading
+-- the group rather than racing it.
+--
+-- Example:
+--
+-- > dueEvery 300 lastCheckedV (checkStillInGroup state token chatId)
+dueEvery :: Double -> IORef (Maybe UTCTime) -> IO () -> IO ()
+dueEvery everySeconds lastRunV action = do
+  now <- getCurrentTime
+  mlastRun <- readIORef lastRunV
+  let due = maybe True
+        (\lastRun -> realToFrac (diffUTCTime now lastRun) > everySeconds)
+        mlastRun
+  when due $ do
+    writeIORef lastRunV (Just now)
+    action
+
 -- | one message of the group, as it is about to be stored
 data MirroredMessage = MirroredMessage
   { mirroredRow :: TelegramGroupMessage
@@ -202,8 +231,10 @@ runTelegramMirror token chatId' = do
       -- service with it. The calls inside contain their own failures
       -- already, which leaves this for what nothing else expected
       eresult <- E.tryAny $ do
-        checkStillInGroup state lastCheckedV token chatId'
-        reconcileDeletions state lastSweptV token chatId'
+        dueEvery membershipCheckSeconds lastCheckedV
+          $ checkStillInGroup state token chatId'
+        dueEvery reconcileSeconds lastSweptV
+          $ reconcileDeletions state token chatId'
         runAppT state $ pollOnce token chatId'
       case eresult of
         -- nothing to do either way: telegram either had updates, or held
@@ -237,66 +268,65 @@ pollOnce
   => TelegramBotToken
   -> Int64
   -> AppT m (Either CallstackError Int)
-pollOnce token chatId' = do
+pollOnce token chatId' =
+    let name = "V1.TelegramMirror.pollOnce"
+    in runExceptPrefixT name $ do
   State{ telegramManager = manager
        , config = Config
            { configTelegramAPIURL = apiURL
            , configTelegramPollTimeoutSecs = timeoutSecs
            }
-       } <- ask
-  mstored <- withDBTransaction "V1.TelegramClient.pollOnce.offset"
+       } <- lift ask
+  mlastUpdateId <- exceptTMaybeT dbQueryError
+    $ withDBTransaction "V1.TelegramMirror.pollOnce.offset"
     $ getPollOffsetTx chatId'
-  case mstored of
-    Nothing -> return $! Left dbQueryError
-    Just mlastUpdateId -> do
-      let request = defaultGetUpdatesRequest
-            { getUpdatesOffset = fmap (+ 1) mlastUpdateId
-            , getUpdatesTimeout = fromPositive timeoutSecs
-            }
-      eresponse <- liftIO $ withTelegram manager apiURL
-        $ getUpdates (BotPath (unTelegramBotToken token)) request
-      case eresponse >>= resultOf of
-        Left err -> return $! Left err
-        -- telegram held the poll open and had nothing. The offset does
-        -- not move, but the answer is recorded, so a mirror, which has
-        -- stopped, does not look like a quiet group
-        Right [] -> do
-          now <- getCurrentTimeDB
-          _ <- withDBTransaction "V1.TelegramClient.pollOnce.touch"
-            $ touchPollStateTx chatId' now
-          return $! Right 0
-        Right updates -> do
-          now <- getCurrentTimeDB
-          let mirrored = mapMaybe (mirroredOf chatId' now) updates
-              -- somebody pressing Start on the link the website gave them.
-              -- These arrive in a one to one conversation with the bot, not
-              -- in the group, so they are never part of the feed
-              connectAttempts = mapMaybe connectAttemptOf updates
-              -- every update read is covered, including the ones this
-              -- service does not follow: leaving a gap would have telegram
-              -- send them again on every poll, forever
-              newOffset = maximum (map updateId updates)
-          mwritten <- withDBTransaction "V1.TelegramClient.pollOnce.store" $ do
+  let request = defaultGetUpdatesRequest
+        { getUpdatesOffset = fmap (+ 1) mlastUpdateId
+        , getUpdatesTimeout = fromPositive timeoutSecs
+        }
+  updates <- ExceptT $ fmap (>>= resultOf) $ liftIO
+    $ withTelegram manager apiURL
+    $ getUpdates (BotPath (unTelegramBotToken token)) request
+  case updates of
+    -- telegram held the poll open and had nothing. The offset does
+    -- not move, but the answer is recorded, so a mirror, which has
+    -- stopped, does not look like a quiet group
+    [] -> do
+      now <- lift getCurrentTimeDB
+      _ <- lift $ withDBTransaction "V1.TelegramMirror.pollOnce.touch"
+        $ touchPollStateTx chatId' now
+      return 0
+    _ -> do
+      now <- lift getCurrentTimeDB
+      let mirrored = mapMaybe (mirroredOf chatId' now) updates
+          -- somebody pressing Start on the link the website gave them.
+          -- These arrive in a one to one conversation with the bot, not
+          -- in the group, so they are never part of the feed
+          connectAttempts = mapMaybe connectAttemptOf updates
+          -- every update read is covered, including the ones this
+          -- service does not follow: leaving a gap would have telegram
+          -- send them again on every poll, forever
+          newOffset = maximum (map updateId updates)
+      (stored, connected) <- exceptTMaybeT dbQueryError
+        $ withDBTransaction "V1.TelegramMirror.pollOnce.store" $ do
             written <- mapM store mirrored
-            connected <- mapM (redeem now) connectAttempts
+            redeemed <- mapM (redeem now) connectAttempts
             advancePollStateTx chatId' newOffset now
-            return $! (catMaybes written, connected)
-          case mwritten of
-            Nothing -> return $! Left dbQueryError
-            Just (stored, connected) -> do
-              mapM_ (tell token (manager, apiURL)) connected
-              -- after the transaction, never inside it: a connection told
-              -- about a message, which the transaction then failed to
-              -- write, would be told about something nobody can read
-              --
-              -- published without withLiveEventOrder, which serialises
-              -- changes of offers, contracts and balances so a connection
-              -- never sees an older one after a newer. The chat is none of
-              -- those and orders itself by the group's own message ids, and
-              -- taking that lock would make a slow poll hold up accepting
-              -- an offer
-              mapM_ announce stored
-              return $! Right (length updates)
+            return $! (catMaybes written, redeemed)
+      lift $ do
+          mapM_ (tell token (manager, apiURL)) connected
+          -- after the transaction, never inside it: a connection told
+          -- about a message, which the transaction then failed to
+          -- write, would be told about something nobody can read
+          --
+          -- published without withLiveEventOrder, which serialises
+          -- changes of offers, contracts and balances so a connection
+          -- never sees an older one after a newer. The chat is none of
+          -- those and orders itself by the group's own message ids, and
+          -- taking that lock would make a slow poll hold up accepting
+          -- an offer
+          mapM_ announce stored
+      return $! length updates
   where
     redeem now (privateChatId, senderId', code) = do
       ok <- redeemLinkCodeTx code senderId' now
@@ -360,8 +390,8 @@ mirroredOf chatId' now update = case (updateMessage update, updateEditedMessage 
   where
     rowOf message = do
       body <- messageText message
-      _ <- if isGroupMessage message then Just () else Nothing
-      _ <- if chatId (messageChat message) == chatId' then Just () else Nothing
+      guard (isGroupMessage message)
+      guard (chatId (messageChat message) == chatId')
       return $! TelegramGroupMessage
         { telegramGroupMessageChatId = chatId (messageChat message)
         , telegramGroupMessageMessageId = messageId message
@@ -399,31 +429,22 @@ mirroredOf chatId' now update = case (updateMessage update, updateEditedMessage 
 -- 'checkStillInGroup': the mirror has to go on polling either way.
 reconcileDeletions
   :: State
-  -> IORef (Maybe UTCTime)
   -> TelegramBotToken
   -> Int64
   -> IO ()
-reconcileDeletions state lastSweptV token chatId' = do
-  now <- getCurrentTime
-  mlastSwept <- readIORef lastSweptV
-  let due = case mlastSwept of
-        Nothing -> True
-        Just lastSwept ->
-          realToFrac (diffUTCTime now lastSwept) > reconcileSeconds
-  when due $ do
-    writeIORef lastSweptV (Just now)
-    let State{ telegramManager = manager
-             , config = Config{ configTelegramAPIURL = apiURL }
-             } = state
-    mrows <- runAppT state
-      $ withDBTransaction "V1.TelegramClient.reconcileDeletions"
-      $ messagesToReconcileTx chatId' reconcileBatch
-    case mrows of
-      Nothing -> runAppT state $ runLogging $ $(logWarn)
-        "reconcileDeletions: the messages to sweep could not be read"
-      Just rows -> do
-        startedAt <- getCurrentTime
-        sweep (manager, apiURL, startedAt) reconcileGoneLimit rows
+reconcileDeletions state token chatId' = do
+  let State{ telegramManager = manager
+           , config = Config{ configTelegramAPIURL = apiURL }
+           } = state
+  mrows <- runAppT state
+    $ withDBTransaction "V1.TelegramMirror.reconcileDeletions"
+    $ messagesToReconcileTx chatId' reconcileBatch
+  case mrows of
+    Nothing -> runAppT state $ runLogging $ $(logWarn)
+      "reconcileDeletions: the messages to sweep could not be read"
+    Just rows -> do
+      startedAt <- getCurrentTime
+      sweep (manager, apiURL, startedAt) reconcileGoneLimit rows
   where
     -- stops the sweep once it has been told that too many messages in a
     -- row are gone. Telegram answering that about message after message is
@@ -470,7 +491,7 @@ reconcileDeletions state lastSweptV token chatId' = do
       -- with what a later read of it returns
       goneAt <- runAppT state getCurrentTimeDB
       mdone <- runAppT state
-        $ withDBTransaction "V1.TelegramClient.reconcileDeletions.hide"
+        $ withDBTransaction "V1.TelegramMirror.reconcileDeletions.hide"
         $ markTelegramMessageGoneTx chatId' messageId' goneAt
       case mdone of
         Nothing -> runAppT state $ runLogging $ $(logWarn)
@@ -500,41 +521,32 @@ reconcileDeletions state lastSweptV token chatId' = do
 -- having been thrown out, and this check cannot tell the two apart.
 checkStillInGroup
   :: State
-  -> IORef (Maybe UTCTime)
   -> TelegramBotToken
   -> Int64
   -> IO ()
-checkStillInGroup state lastCheckedV token chatId' = do
-  now <- getCurrentTime
-  mlastChecked <- readIORef lastCheckedV
-  let due = case mlastChecked of
-        Nothing -> True
-        Just lastChecked ->
-          realToFrac (diffUTCTime now lastChecked) > membershipCheckSeconds
-  when due $ do
-    writeIORef lastCheckedV (Just now)
-    let State{ telegramManager = manager
-             , config = Config{ configTelegramAPIURL = apiURL }
-             } = state
-    -- what the bot's own standing in the group is, rather than whether the
-    -- group can be described: getChat still answers for a group, which the
-    -- bot has been demoted in, so it cannot tell that moderation has
-    -- stopped working
-    case botUserIdOf (unTelegramBotToken token) of
-      Nothing -> runAppT state $ runLogging $ $(logWarn)
-        "checkStillInGroup: the configured token is not shaped like a bot token"
-      Just botUserId -> do
-        eresponse <- withTelegram manager apiURL
-          $ getChatMember (BotPath (unTelegramBotToken token))
-              (ChatMemberRequest chatId' botUserId)
-        case eresponse >>= resultOf of
-          Left err -> runAppT state $ runLogging $ $(logWarn)
-            ( "checkStillInGroup: telegram will not say what this bot is in"
-            <> " group " <> tshow chatId' <> " (" <> describeError err
-            <> "). It may have been removed from the group, in which case the"
-            <> " trade chat has stopped filling and nothing else will say so"
-            )
-          Right member -> reportStanding member
+checkStillInGroup state token chatId' = do
+  let State{ telegramManager = manager
+           , config = Config{ configTelegramAPIURL = apiURL }
+           } = state
+  -- what the bot's own standing in the group is, rather than whether the
+  -- group can be described: getChat still answers for a group, which the
+  -- bot has been demoted in, so it cannot tell that moderation has
+  -- stopped working
+  case botUserIdOf (unTelegramBotToken token) of
+    Nothing -> runAppT state $ runLogging $ $(logWarn)
+      "checkStillInGroup: the configured token is not shaped like a bot token"
+    Just botUserId -> do
+      eresponse <- withTelegram manager apiURL
+        $ getChatMember (BotPath (unTelegramBotToken token))
+            (ChatMemberRequest chatId' botUserId)
+      case eresponse >>= resultOf of
+        Left err -> runAppT state $ runLogging $ $(logWarn)
+          ( "checkStillInGroup: telegram will not say what this bot is in"
+          <> " group " <> tshow chatId' <> " (" <> describeError err
+          <> "). It may have been removed from the group, in which case the"
+          <> " trade chat has stopped filling and nothing else will say so"
+          )
+        Right member -> reportStanding member
 
   where
     -- being in the group is not enough: a bot, which is no longer an
@@ -570,7 +582,7 @@ checkStillInGroup state lastCheckedV token chatId' = do
 connectAttemptOf :: Update -> Maybe (Int64, Int64, Text)
 connectAttemptOf update = do
   message <- updateMessage update
-  _ <- if isPrivateMessage message then Just () else Nothing
+  guard (isPrivateMessage message)
   sender <- messageFrom message
   body <- messageText message
   code <- Text.stripPrefix "/start " (Text.strip body)

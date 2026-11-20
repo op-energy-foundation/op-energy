@@ -42,16 +42,20 @@ import           Data.Text (Text)
 import           Data.Time.Clock (UTCTime)
 import           GHC.Generics
 
+import           Data.Maybe (isJust)
 import           Database.Persist
 import           Database.Persist.Sql (SqlBackend)
 import           Database.Persist.TH
+
+import qualified Data.OpEnergy.Account.API.V1.Account as AccountAPI
+import qualified Data.OpEnergy.Account.API.V1.UUID as AccountAPI
 
 share [mkPersist sqlSettings, mkMigrate "migrateTelegramLink"] [persistLowerCase|
 -- | one telegram account, which belongs to one op energy account
 TelegramLink
   telegramUserId Int64
-  personUUID Text -- the op energy account, as the cross service UUID rather than a local key: this service has no accounts table of its own
-  opEnergyDisplayName Text -- their op energy name as it was when they connected. Not refreshed: this service is never told about a rename, so an account, which renames itself, keeps the old name in the chat until it disconnects and connects again
+  personUUID (AccountAPI.UUID AccountAPI.Person) -- the op energy account, as the cross service UUID rather than a local key: this service has no accounts table of its own
+  opEnergyDisplayName AccountAPI.DisplayName -- their op energy name as it was when they connected. Not refreshed: this service is never told about a rename, so an account, which renames itself, keeps the old name in the chat until it disconnects and connects again
   linkedAt UTCTime
   UniqueTelegramLinkTelegram telegramUserId -- one telegram account cannot be claimed by two op energy accounts
   UniqueTelegramLinkPerson personUUID -- and one op energy account cannot claim two telegram accounts
@@ -60,8 +64,8 @@ TelegramLink
 -- | a code handed out by the website and spent by pressing Start in telegram
 TelegramLinkCode
   code Text
-  personUUID Text
-  opEnergyDisplayName Text -- taken when the code was made, so spending it needs no second lookup
+  personUUID (AccountAPI.UUID AccountAPI.Person)
+  opEnergyDisplayName AccountAPI.DisplayName -- taken when the code was made, so spending it needs no second lookup
   expiresAt UTCTime
   usedAt UTCTime Maybe -- single use: a code, which somebody else got hold of before it was spent, would connect their telegram to this account
   UniqueTelegramLinkCode code
@@ -79,7 +83,7 @@ TelegramLinkCode
 opEnergyNamesTx
   :: MonadIO m
   => [Int64]
-  -> ReaderT SqlBackend m (Map.Map Int64 Text)
+  -> ReaderT SqlBackend m (Map.Map Int64 AccountAPI.DisplayName)
 opEnergyNamesTx [] = return Map.empty
 opEnergyNamesTx telegramUserIds = do
   links <- selectList [ TelegramLinkTelegramUserId <-. telegramUserIds ] []
@@ -95,8 +99,8 @@ opEnergyNamesTx telegramUserIds = do
 putLinkCodeTx
   :: MonadIO m
   => Text
-  -> Text
-  -> Text
+  -> AccountAPI.UUID AccountAPI.Person
+  -> AccountAPI.DisplayName
   -> UTCTime
   -> ReaderT SqlBackend m ()
 putLinkCodeTx code' personUUID' displayName expiresAt' = do
@@ -145,14 +149,14 @@ redeemLinkCodeTx code' telegramUserId' now = do
                 }
               -- Nothing here means this op energy account already has a
               -- telegram connected, which the unique on personUUID refuses
-              return $! maybe False (const True) mlink
+              return $! isJust mlink
 
 -- | disconnects an op energy account from whatever telegram account it had.
 --
 -- Connecting was the owner's choice, so undoing it has to be as well.
 unlinkPersonTx
   :: MonadIO m
-  => Text
+  => AccountAPI.UUID AccountAPI.Person
   -> ReaderT SqlBackend m ()
 unlinkPersonTx personUUID' = do
   deleteWhere [ TelegramLinkPersonUUID ==. personUUID' ]

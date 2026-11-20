@@ -12,7 +12,7 @@ import           OpEnergy.Offer.Server
 import           OpEnergy.Offer.Server.V1.Config
 import           OpEnergy.Offer.Server.V1.Class (runAppT, runLogging)
 import qualified OpEnergy.Offer.Server.V1.BlockspanClient as BlockspanClient
-import qualified OpEnergy.Offer.Server.V1.TelegramClient as TelegramClient
+import qualified OpEnergy.Offer.Server.V1.TelegramMirror as TelegramMirror
 
 -- | entry point
 main :: IO ()
@@ -38,7 +38,7 @@ main = runStdoutLoggingT $ do
     (Just token, Just chatId) -> do
       telegramA <- liftIO $ asyncBound $ runAppT state $ do
         runLogging $ $(logInfo) "telegram mirror thread"
-        TelegramClient.runTelegramMirror token chatId
+        TelegramMirror.runTelegramMirror token chatId
       return [ telegramA ]
     _ -> do
       runAppT state $ runLogging $ $(logInfo)

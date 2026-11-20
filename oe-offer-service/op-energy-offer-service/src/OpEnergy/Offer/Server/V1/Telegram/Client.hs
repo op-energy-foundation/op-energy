@@ -358,12 +358,30 @@ type TelegramBotAPI
     :> ReqBody '[JSON] ReactionRequest
     :> Post '[JSON] (TelegramResponse Bool)
 
-getUpdates :: BotPath -> GetUpdatesRequest -> ClientM (TelegramResponse [Update])
-deleteMessage :: BotPath -> ChatMessageRequest -> ClientM (TelegramResponse Bool)
-banChatMember :: BotPath -> ChatMemberRequest -> ClientM (TelegramResponse Bool)
-getChatMember :: BotPath -> ChatMemberRequest -> ClientM (TelegramResponse ChatMember)
-sendMessage :: BotPath -> SendMessageRequest -> ClientM (TelegramResponse Message)
-setMessageReaction :: BotPath -> ReactionRequest -> ClientM (TelegramResponse Bool)
+getUpdates
+  :: BotPath
+  -> GetUpdatesRequest
+  -> ClientM (TelegramResponse [Update])
+deleteMessage
+  :: BotPath
+  -> ChatMessageRequest
+  -> ClientM (TelegramResponse Bool)
+banChatMember
+  :: BotPath
+  -> ChatMemberRequest
+  -> ClientM (TelegramResponse Bool)
+getChatMember
+  :: BotPath
+  -> ChatMemberRequest
+  -> ClientM (TelegramResponse ChatMember)
+sendMessage
+  :: BotPath
+  -> SendMessageRequest
+  -> ClientM (TelegramResponse Message)
+setMessageReaction
+  :: BotPath
+  -> ReactionRequest
+  -> ClientM (TelegramResponse Bool)
 getUpdates
   :<|> deleteMessage
   :<|> banChatMember
