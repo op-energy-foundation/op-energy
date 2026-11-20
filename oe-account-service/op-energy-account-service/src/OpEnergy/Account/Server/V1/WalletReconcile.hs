@@ -225,12 +225,47 @@ reconcilePendingPayments =
           )
         Right waiting -> mapM_ (askAbout readPayment) waiting
   where
+    -- takes the payment before the wallet is called, so only one tick
+    -- asks about it.
+    --
+    -- Reading the payments, which are due, and asking about them are not
+    -- one step: two instances sharing this database read the same rows in
+    -- between and would both call the wallet about every one of them,
+    -- asking twice as often as the interval allows. The moment a payment
+    -- was last asked about is advanced here, and only where it is still
+    -- the moment, which was read -- so of two ticks, which read the same
+    -- row, one takes it and the other finds it already taken.
+    --
+    -- The call to the wallet is made after this transaction has closed,
+    -- so nothing is held open while the wallet answers.
     askAbout
-      :: MonadIO m
+      :: (MonadIO m, MonadMonitor m)
       => (Text -> IO (Either CallstackError ObservedPayment))
       -> Entity WalletPayment
       -> AppT m ()
-    askAbout readPayment (Entity key payment) = do
+    askAbout readPayment ent@(Entity key payment) = do
+      State{ accountDBPool = pool } <- ask
+      now <- liftIO getPOSIXTime
+      eclaimed <- liftIO $ eitherException $ flip runSqlPersistMPool pool
+        $ updateWhereCount
+          [ WalletPaymentId ==. key
+          , WalletPaymentUpdatedAt ==. walletPaymentUpdatedAt payment
+          ]
+          [ WalletPaymentUpdatedAt =. now ]
+      case eclaimed of
+        -- taken by this tick
+        Right (1 :: Int64) -> askClaimed readPayment ent
+        -- another tick has it, or the row moved on since it was read.
+        -- A read, which failed, is left alone as well: the tick, which
+        -- could not claim it, is not the tick to call the wallet for it
+        _ -> return ()
+
+    askClaimed
+      :: (MonadIO m, MonadMonitor m)
+      => (Text -> IO (Either CallstackError ObservedPayment))
+      -> Entity WalletPayment
+      -> AppT m ()
+    askClaimed readPayment (Entity key payment) = do
       State{ accountDBPool = pool } <- ask
       let paymentHashV = walletPaymentPaymentHash payment
       -- guarded per payment, so one the wallet can not answer for is
