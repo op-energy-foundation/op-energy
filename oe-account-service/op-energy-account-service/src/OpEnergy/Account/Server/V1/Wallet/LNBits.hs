@@ -824,10 +824,14 @@ refusalSaysNotPaid _ = False
 readPayment
   :: BaseUrl
   -> Text
-  -> PaymentHash
+  -> Text
+     -- ^ what names the payment: the name LNBits gave the attempt where
+     -- this service has one, and the payment hash otherwise. The route
+     -- answers to either
   -> IO (Either CallstackError ObservedPayment)
-readPayment url invoiceKey (PaymentHash hashText) = do
-  eanswer <- callLNBitsMaybe url $ LNBits.readPaymentState invoiceKey hashText
+readPayment url invoiceKey namesPayment = do
+  eanswer <- callLNBitsMaybe url
+    $ LNBits.readPaymentState invoiceKey namesPayment
   return $! fmap (maybe ObservedUnknown observe) eanswer
   where
     -- "paid" is the explicit answer and is what a settlement is read

@@ -105,6 +105,7 @@ createInvoice pool params = do
     , walletPaymentNote = createInvoiceNote params
     , walletPaymentExpiresAt = Just expiresAt
     , walletPaymentCreditedAt = Nothing
+    , walletPaymentCheckingId = Nothing
     , walletPaymentCreatedAt = now
     , walletPaymentUpdatedAt = now
     }
