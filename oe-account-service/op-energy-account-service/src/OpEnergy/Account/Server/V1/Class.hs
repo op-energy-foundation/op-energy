@@ -30,11 +30,8 @@ import           Data.OpEnergy.API.V1.Block(BlockHeight, BlockHeader)
 import           OpEnergy.Error
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 import qualified OpEnergy.BlockTimeStrike.Server.V1.Class as BlockTime
-import           OpEnergy.Account.Server.V1.Wallet.Class
-                 ( WalletBackend
-                 )
-import           OpEnergy.Account.Server.V1.Wallet.Mock
-                 ( mockWalletBackend
+import           OpEnergy.Account.Server.V1.Wallet
+                 ( WalletBackend, newWalletBackend
                  )
 import           OpEnergy.Account.Server.V1.WalletRateLimit
                  ( WalletAttempts, newWalletAttempts
@@ -79,7 +76,7 @@ defaultState :: (MonadLoggerIO m ) => Config-> MetricsState-> LogFunc-> Pool Sql
 defaultState config metrics logFunc accountDBPool = do
   logLevelV <- liftIO $ TVar.newTVarIO (configLogLevelMin config)
   blockTimeState <- BlockTime.defaultState config
-  let walletV = mockWalletBackend accountDBPool
+  walletV <- newWalletBackend config accountDBPool
   walletAttemptsV <- newWalletAttempts
   return $ State
     { config = config

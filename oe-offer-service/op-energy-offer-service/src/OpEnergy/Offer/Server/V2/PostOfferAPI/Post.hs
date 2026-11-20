@@ -33,7 +33,9 @@ import           OpEnergy.Offer.Server.V1.Class
 import           OpEnergy.Offer.Server.V1.Config(Config(..))
 import qualified OpEnergy.Offer.Server.V1.AccountClient as AccountClient
 import           Data.OpEnergy.Account.API.V1.Sats(Sats(..))
-import           OpEnergy.Offer.Server.V1.Offer(Offer(..), offerInfoFromEntity)
+import           OpEnergy.Offer.Server.V1.Offer
+                 ( Offer(..), EntityField(..), offerInfoFromEntity
+                 )
 import           Data.OpEnergy.Account.API.V2.LedgerReason (LedgerReason(..))
 import           OpEnergy.Offer.Server.V1.LiveEvent(LiveEvent(..))
 import           OpEnergy.Offer.Server.V1.WebSocketService
@@ -123,18 +125,65 @@ post token PostOfferRequest{..} =
         return $! PostOfferResult
           { offers = [ offerInfo ] }
       Left insertErr -> do
-        ecredited <- lift
-          $ AccountClient.creditBalance personUUIDV (Sats totalStake) Refund
-              Nothing
-        lift $ runLogging $ $(logError)
-          ( "post: failed to persist offer row after staking "
-          <> tshow totalStake
-          <> " sats for " <> tshow personUUIDV <> ": "
-          <> describeError insertErr
-          <> case ecredited of
-               Right _ -> "; stake was refunded"
-               Left creditErr ->
-                 "; stake refund ALSO failed, needs manual reconciliation: "
-                 <> describeError creditErr
-          )
-        throwE insertErr
+        -- an insert, which answers an error, has not always failed: a
+        -- connection, which drops after the COMMIT, loses the answer
+        -- while the row is there. That offer is open and staked for, so
+        -- giving the stake back here would hand it over a second time
+        -- when the offer is later cancelled or expires. The row is
+        -- looked for by the account and the second it was created in,
+        -- which together name the row of this request
+        mexisting <- lift
+          $ withDBTransaction "findOfferAfterFailedInsert" $ selectFirst
+            [ OfferPersonUUID ==. personUUIDV
+            , OfferCreated ==. now
+            ]
+            []
+        case mexisting of
+          -- the row is there, so the offer was made and it was the answer
+          -- to the insert, which was lost. Answered as the offer it is,
+          -- with the event the normal path publishes, rather than as a
+          -- failure: a maker, which is told its post failed, posts again
+          -- while this offer already holds its stake
+          Right (Just existing) -> do
+            lift $ runLogging $ $(logError)
+              ( "post: the offer row is there although the insert answered "
+              <> "an error, so it is answered as made and the stake of "
+              <> tshow totalStake <> " sats for " <> tshow personUUIDV
+              <> " stays with it: " <> describeError insertErr
+              )
+            let offerInfo = offerInfoFromEntity existing
+            lift $ publishLiveEvent $! LiveEvent
+              (LiveMessageOfferCreated offerInfo)
+              [(personUUIDV, makerBalance)]
+            return $! PostOfferResult { offers = [ offerInfo ] }
+          -- only a row, which is known not to be there, is refunded for.
+          -- Where this could not be read the stake is left where it is
+          -- and written down: a stake, which was not given back, is one
+          -- a person can put right, while one given back twice is sats
+          -- this service invented
+          Right Nothing -> do
+            ecredited <- lift
+              $ AccountClient.creditBalance personUUIDV (Sats totalStake)
+                  Refund Nothing
+            lift $ runLogging $ $(logError)
+              ( "post: failed to persist offer row after staking "
+              <> tshow totalStake
+              <> " sats for " <> tshow personUUIDV <> ": "
+              <> describeError insertErr
+              <> case ecredited of
+                   Right _ -> "; stake was refunded"
+                   Left creditErr ->
+                     "; stake refund ALSO failed, needs manual reconciliation: "
+                     <> describeError creditErr
+              )
+            throwE insertErr
+          Left readErr -> do
+            lift $ runLogging $ $(logError)
+              ( "post: the insert of the offer answered an error and "
+              <> "whether the row is there could not be read, so the stake "
+              <> "of " <> tshow totalStake <> " sats for "
+              <> tshow personUUIDV <> " is left as it is and needs manual "
+              <> "reconciliation: " <> describeError insertErr
+              <> "; and " <> describeError readErr
+              )
+            throwE insertErr

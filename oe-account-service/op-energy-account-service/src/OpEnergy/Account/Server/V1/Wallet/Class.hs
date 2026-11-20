@@ -179,14 +179,18 @@ data WalletBackend = WalletBackend
     -- that. So a 'Left' means the balance stands as it did, and the
     -- caller has nothing to give back
   , walletReadPayment
-      :: Maybe (PaymentHash -> IO (Either CallstackError ObservedPayment))
+      :: Maybe (Text -> IO (Either CallstackError ObservedPayment))
     -- ^ 'Just' for a wallet, which settles payments elsewhere: this service
     -- is not told when an invoice is paid, so it has to ask, and the
     -- scheduler does. 'Nothing' for a backend, which settles payments
     -- itself and so already knows -- there is nothing to ask it.
     --
-    -- The hash alone identifies the payment, as this service only ever
-    -- asks about payments it recorded
+    -- What is asked about is whatever names the payment best: the name
+    -- the wallet gave the attempt where there is one, and the payment
+    -- hash otherwise. A hash names an invoice rather than an attempt, so
+    -- more than one payment can carry it -- an invoice of this service,
+    -- which somebody else paid, and another account's attempt at the same
+    -- invoice both answer to it
   , walletSettleInvoice
       :: Maybe
          (PersonId -> PaymentHash -> IO (Either CallstackError SettledInvoice))
