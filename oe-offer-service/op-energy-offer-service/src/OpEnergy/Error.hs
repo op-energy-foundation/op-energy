@@ -20,6 +20,7 @@ module OpEnergy.Error
   , isAccountUnknown
   , blockspanRequestFailed
   , chainTipUnknown
+  , telegramRequestFailed
 
   , authenticationFailure
   , invalidRequest
@@ -32,6 +33,9 @@ module OpEnergy.Error
   , offerChanged
   , cannotAcceptOwnOffer
   , catchBadRequest
+  , notAModerator
+  , telegramMessageNotDeletable
+  , telegramNotConfigured
   ) where
 
 import           Data.Text(Text)
@@ -59,6 +63,8 @@ data BadRequestError
   | OfferExpired
   | OfferChanged
   | CannotAcceptOwnOffer
+  | NotAModerator
+  | TelegramMessageNotDeletable
 instance Show BadRequestError where
   show AuthenticationFailure = "authentication failure"
   show (InvalidRequest reason) = Text.unpack reason
@@ -70,6 +76,10 @@ instance Show BadRequestError where
   show OfferExpired = "offer has expired at the current chain tip"
   show OfferChanged = "offer has changed meanwhile, try again"
   show CannotAcceptOwnOffer = "cannot accept your own offer"
+  show NotAModerator = "this account is not a moderator"
+  show TelegramMessageNotDeletable =
+    "telegram will not delete this message any more, which is why it is\
+    \ still shown here: it has to be removed in telegram itself"
 
 data InternalError
   = Unspecified Text
@@ -99,6 +109,12 @@ data Error
     -- so it has carried nothing out and no later attempt of the same
     -- request can succeed either
   | BlockspanRequestFailed Text
+  | TelegramRequestFailed Text
+    -- ^ described by its status alone, never by the request: the bot's
+    -- token is a path segment of every telegram URL, so a reason built
+    -- from the request would put the token in the logs
+  | TelegramNotConfigured
+    -- ^ no bot token or no group id, so nothing is mirrored
   | ChainTipUnknown
     -- ^ the service has not received the chain tip yet
 
@@ -144,6 +160,12 @@ isAccountUnknown (CallstackError _ (AccountUnknown _)) = True
 isAccountUnknown _ = False
 blockspanRequestFailed :: Text -> CallstackError
 blockspanRequestFailed = CallstackError "" . BlockspanRequestFailed
+-- | the reason has to describe the failure without describing the request,
+-- as the bot's token is in the request's path
+telegramRequestFailed :: Text -> CallstackError
+telegramRequestFailed = CallstackError "" . TelegramRequestFailed
+telegramNotConfigured :: CallstackError
+telegramNotConfigured = CallstackError "" $! TelegramNotConfigured
 chainTipUnknown :: CallstackError
 chainTipUnknown = CallstackError "" $! ChainTipUnknown
 
@@ -157,6 +179,10 @@ offerNotFound :: CallstackError
 offerNotFound = CallstackError "" $! BadRequest OfferNotFound
 notOfferOwner :: CallstackError
 notOfferOwner = CallstackError "" $! BadRequest NotOfferOwner
+notAModerator :: CallstackError
+notAModerator = CallstackError "" $! BadRequest NotAModerator
+telegramMessageNotDeletable :: CallstackError
+telegramMessageNotDeletable = CallstackError "" $! BadRequest TelegramMessageNotDeletable
 offerNotOpen :: CallstackError
 offerNotOpen = CallstackError "" $! BadRequest OfferNotOpen
 offerFilled :: CallstackError
@@ -178,12 +204,22 @@ errorToServerError (BadRequest OfferFilled) = (err409, tshow OfferFilled)
 errorToServerError (BadRequest OfferExpired) = (err409, tshow OfferExpired)
 errorToServerError (BadRequest OfferChanged) = (err409, tshow OfferChanged)
 errorToServerError (BadRequest CannotAcceptOwnOffer) = (err403, tshow CannotAcceptOwnOffer)
+-- the request is well formed and the token is good: what is refused is this
+-- account doing it
+errorToServerError (BadRequest NotAModerator) = (err403, tshow NotAModerator)
+-- a refusal by telegram, not a fault in the request: the message is still in
+-- the group, and the feed still shows it for that reason
+errorToServerError (BadRequest TelegramMessageNotDeletable) =
+  (err409, tshow TelegramMessageNotDeletable)
 errorToServerError (BadRequest specificError) = (err400, tshow specificError)
 errorToServerError (Internal specificError) = (err500, tshow specificError)
 errorToServerError (AccountServiceUnavailable reason) = (err502, "account service unavailable: " <> reason)
 errorToServerError (AccountServiceRefused reason) = (err502, "account service refused the request: " <> reason)
 errorToServerError (AccountUnknown reason) = (err502, "account service does not have the account: " <> reason)
 errorToServerError (BlockspanRequestFailed reason) = (err502, "blockspan request failed: " <> reason)
+errorToServerError (TelegramRequestFailed reason) = (err502, "telegram request failed: " <> reason)
+errorToServerError TelegramNotConfigured =
+  (err503, "the trade chat is not configured on this deployment")
 errorToServerError ChainTipUnknown =
   (err503, "the chain tip is not known yet, try again shortly")
 

@@ -22,19 +22,28 @@ import           Data.OpEnergy.Account.API.V1.UUID
 import           Data.OpEnergy.Account.API.V1.Sats
                  ( Sats(..)
                  )
+import           Data.OpEnergy.Account.API.V2.PersonRole
+                 ( PersonRole
+                 , defaultPersonRole
+                 )
 
 -- | resolves an account token to the account's stable cross-service
--- identity (personUUID), current display name, and current sandbox
--- wallet balance
+-- identity (personUUID), current display name, current sandbox wallet
+-- balance, and what the account is allowed to do
 data WhoAmIResult = WhoAmIResult
   { personUUID   :: UUID Person
   , displayName  :: DisplayName
   , balance      :: Sats
+  , role         :: PersonRole
+    -- ^ what this account may do beyond acting for itself. Carried here so
+    -- a service, which already resolves a token, learns it without a
+    -- second call
   }
   deriving (Show, Generic, Typeable)
 
 defaultWhoAmIResult :: WhoAmIResult
-defaultWhoAmIResult = WhoAmIResult defaultUUID defaultDisplayName (Sats 300000)
+defaultWhoAmIResult =
+  WhoAmIResult defaultUUID defaultDisplayName (Sats 300000) defaultPersonRole
 
 instance ToJSON WhoAmIResult
 instance FromJSON WhoAmIResult
