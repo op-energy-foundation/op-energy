@@ -22,10 +22,15 @@ import           Data.OpEnergy.Account.API.V1.UUID
 import           Data.OpEnergy.Account.API.V1.Sats
                  ( Sats(..)
                  )
+import           Data.OpEnergy.Account.API.V2.PersonRole
+                 ( PersonRole
+                 , defaultPersonRole
+                 )
 
 -- | resolves an account token to the account's stable cross-service
 -- identity (personUUID), current display name, current sandbox wallet
--- balance and how much of that balance is free sats
+-- balance, how much of that balance is free sats, and what the account is
+-- allowed to do
 data WhoAmIResult = WhoAmIResult
   { personUUID   :: UUID Person
   , displayName  :: DisplayName
@@ -33,12 +38,17 @@ data WhoAmIResult = WhoAmIResult
   , freeSats     :: Sats
     -- ^ how much of 'balance' was given rather than paid in: it can be
     -- staked, and can be won and lost, but can never be withdrawn
+  , role         :: PersonRole
+    -- ^ what this account may do beyond acting for itself. Carried here so
+    -- a service, which already resolves a token, learns it without a
+    -- second call
   }
   deriving (Show, Generic, Typeable)
 
 defaultWhoAmIResult :: WhoAmIResult
 defaultWhoAmIResult =
   WhoAmIResult defaultUUID defaultDisplayName (Sats 300000) (Sats 300000)
+    defaultPersonRole
 
 instance ToJSON WhoAmIResult
 instance FromJSON WhoAmIResult

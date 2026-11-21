@@ -34,7 +34,8 @@ getMine :: AccountAPI.AccountToken -> AppM (Either CallstackError MyOffersResult
 getMine token =
   let name = "V2.OffersAPI.GetMine.getMine"
   in profile name $ runExceptPrefixT name $ do
-  (AccountV2.WhoAmIResult personUUIDV _displayName _balance _freeSats) <-
+  (AccountV2.WhoAmIResult personUUIDV _displayName _balance _freeSats
+    _role) <-
     ExceptT $ AccountClient.verifyAccountToken token
   State{ offerDBPool = pool, currentTip = currentTipV } <- lift ask
   mTip <- liftIO $ TVar.readTVarIO currentTipV

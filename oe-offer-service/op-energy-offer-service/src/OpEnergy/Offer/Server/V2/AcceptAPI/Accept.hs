@@ -73,7 +73,7 @@ accept idText token =
     $ return (offerKeyFromIDText idText)
 
   (AccountV2.WhoAmIResult takerUUIDV takerDisplayNameV _balance
-    takerFreeBalance) <-
+    takerFreeBalance _role) <-
     ExceptT $ AccountClient.verifyAccountToken token
 
   State{ offerDBPool = pool, currentTip = currentTipV } <- lift ask

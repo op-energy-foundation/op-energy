@@ -56,3 +56,4 @@ whoami token =
     (personDisplayName person)
     (personBalance person)
     (personFreeSats person)
+    (personRole person)
