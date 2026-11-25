@@ -36,6 +36,9 @@ import           OpEnergy.Account.Server.V1.Wallet.Class
 import           OpEnergy.Account.Server.V1.Wallet.Mock
                  ( mockWalletBackend
                  )
+import           OpEnergy.Account.Server.V1.WalletRateLimit
+                 ( WalletAttempts, newWalletAttempts
+                 )
 import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.Account.Server.V1.Metrics
 
@@ -60,6 +63,10 @@ data State = State
   , wallet :: WalletBackend
   -- ^ the lightning wallet this service talks to, built from config at
   -- startup: handlers call it without knowing which backend it is
+  , walletAttempts :: WalletAttempts
+  -- ^ how many payments each account has attempted in the window, which
+  -- counts them, so one account can not decide how often this service
+  -- calls the wallet
   , callStack :: Text
   -- ^ dot separated labels
   }
@@ -73,6 +80,7 @@ defaultState config metrics logFunc accountDBPool = do
   logLevelV <- liftIO $ TVar.newTVarIO (configLogLevelMin config)
   blockTimeState <- BlockTime.defaultState config
   let walletV = mockWalletBackend accountDBPool
+  walletAttemptsV <- newWalletAttempts
   return $ State
     { config = config
     , accountDBPool = accountDBPool
@@ -81,6 +89,7 @@ defaultState config metrics logFunc accountDBPool = do
     , metrics = metrics
     , blockTimeState = blockTimeState
     , wallet = walletV
+    , walletAttempts = walletAttemptsV
     , callStack = ""
     }
 
