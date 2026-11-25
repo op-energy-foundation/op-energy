@@ -442,21 +442,22 @@ reconcilePendingPayments =
       -> WalletPayment
       -> AppT m ()
     recordFailure pool key payment = do
-      State{ wallet = walletV } <- ask
       now <- liftIO getPOSIXTime
       case walletPaymentDirection payment of
-        -- an invoice, which this wallet did not issue, is not written off
-        -- by what this wallet answers: the answer is about the hash, and
-        -- an outgoing attempt of this wallet, which failed, carries the
-        -- hash of an invoice a wallet used before this one issued. Written
-        -- off here, the invoice would leave reconciliation while it can
-        -- still be paid at its issuer, and that deposit would be credited
-        -- to nobody. It is parked instead, as an unknown one is
-        Incoming
-          | not (answeredByOriginatingWallet payment walletV) ->
-              park pool key payment
+        -- an invoice is never written off on a failure answer, whichever
+        -- wallet issued it. An incoming row carries no name for an
+        -- attempt, so the wallet is asked about it by hash, and a hash
+        -- names an invoice rather than one payment of it: an outgoing
+        -- attempt at this very invoice, by this service or by the account
+        -- which owes it, answers to the same hash and reports its own
+        -- failure. Taken as the invoice's, that answer writes off an
+        -- invoice, which is still payable, and a deposit, which arrives
+        -- for it afterwards, is credited to nobody. It is parked instead,
+        -- as an unknown one is, and the expiry, which follows, is what
+        -- writes it off once it can no longer be paid
+        Incoming -> park pool key payment
         -- nothing left the wallet, so everything, which was taken for it,
-        -- goes back. An incoming payment took nothing and gets nothing back
+        -- goes back
         _ -> finish pool key payment Failed Nothing
                (walletPaymentAmountSats payment + reserveOf payment)
                "a payment, which the wallet did not make" now
