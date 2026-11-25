@@ -83,6 +83,8 @@ import           Data.OpEnergy.Account.Client (withClientEither)
 import           OpEnergy.Account.Server.V1.LedgerEntry
                  ( LedgerDirection(..), adjustBalanceTx
                  )
+import qualified OpEnergy.Account.Server.V1.Config
+                 as Config (walletCallDeadlineSecs)
 import           OpEnergy.Account.Server.V1.Person (PersonId)
 import           OpEnergy.Account.Server.V1.Wallet.Class
 import qualified OpEnergy.Account.Server.V1.Wallet.LNBits.Client
@@ -104,17 +106,23 @@ import           OpEnergy.Error
                  , walletSelfPaymentNotAllowed, walletUnreachable
                  )
 
--- | how long the startup check waits on one call to LNBits. Short, as
--- nothing is served until it is done and a check, which does not answer,
--- is not a reason to refuse to start
-keysCheckDeadlineMicros :: Int
-keysCheckDeadlineMicros = 5 * 1000 * 1000
+-- | 'Config.walletCallDeadlineSecs' as 'timeout' takes it
+walletCallDeadlineMicros :: Int
+walletCallDeadlineMicros =
+  fromIntegral Config.walletCallDeadlineSecs * 1000 * 1000
 
 -- | gives a call a deadline of its own, answering as a call, which failed,
--- where it is not met
+-- where it is not met.
+--
+-- The startup check is given one because nothing is served until it is
+-- done. A call, which creates an invoice, is given one because the slot,
+-- which is held for it, stops counting against the invoices an account
+-- holds once its ttl is up: a call, which outlasted that, would leave
+-- the slot to another request while it is still being made, and the
+-- account would hold more invoices at once than it may
 withDeadline :: IO (Either CallstackError r) -> IO (Either CallstackError r)
 withDeadline call = do
-  manswer <- timeout keysCheckDeadlineMicros call
+  manswer <- timeout walletCallDeadlineMicros call
   return $! fromMaybe (Left walletUnreachable) manswer
 
 -- | wallet backend, which issues its invoices through the LNBits instance
@@ -201,7 +209,11 @@ createInvoice
   -> IO (Either CallstackError CreatedInvoice)
 createInvoice url invoiceKey identity pool params = runExceptT $ do
   let now = createInvoiceNow params
-  answer <- ExceptT $ callLNBits url $ LNBits.createInvoice invoiceKey
+  -- given a deadline, as the slot, which is held while this call is made,
+  -- stops counting once its ttl is up: without one the call could outlast
+  -- the slot and the account would hold more invoices than it may
+  answer <- ExceptT $ withDeadline $ callLNBits url
+    $ LNBits.createInvoice invoiceKey
     $ LNBits.CreateInvoiceRequest
       { LNBits.createInvoiceRequestAmountSats = createInvoiceAmountSats params
       , LNBits.createInvoiceRequestMemo = createInvoiceNote params
