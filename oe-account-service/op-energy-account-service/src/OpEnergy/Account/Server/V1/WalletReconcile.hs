@@ -248,7 +248,7 @@ reconcilePendingPayments =
       => (Text -> IO (Either CallstackError ObservedPayment))
       -> Entity WalletPayment
       -> AppT m ()
-    askAbout readPayment ent@(Entity key payment) = do
+    askAbout readPayment (Entity key payment) = do
       State{ accountDBPool = pool } <- ask
       now <- liftIO getPOSIXTime
       eclaimed <- liftIO $ eitherException $ flip runSqlPersistMPool pool
@@ -258,8 +258,14 @@ reconcilePendingPayments =
           ]
           [ WalletPaymentUpdatedAt =. now ]
       case eclaimed of
-        -- taken by this tick
-        Right (1 :: Int64) -> askClaimed readPayment ent
+        -- taken by this tick, and carried on as the row this tick wrote
+        -- rather than the one it read: the moment above is what every
+        -- write of this tick matches on, so a tick, whose call to the
+        -- wallet outlasted the interval and whose row another tick has
+        -- taken up since, writes nothing on the strength of an answer
+        -- about the attempt it was holding
+        Right (1 :: Int64) -> askClaimed readPayment
+          (Entity key payment { walletPaymentUpdatedAt = now })
         -- another tick has it, or the row moved on since it was read.
         -- A read, which failed, is left alone as well: the tick, which
         -- could not claim it, is not the tick to call the wallet for it
@@ -637,6 +643,12 @@ reconcilePendingPayments =
           [ WalletPaymentId ==. key
           , WalletPaymentCreatedAt ==. walletPaymentCreatedAt payment
           , WalletPaymentStatus ==. Pending
+          -- and the moment this tick took the row. Where a call to the
+          -- wallet outlasted the interval, another tick has taken the row
+          -- up and moved this on, and this answer is about the attempt as
+          -- it was before that: it sends the row to the back of a queue
+          -- it has already left
+          , WalletPaymentUpdatedAt ==. walletPaymentUpdatedAt payment
           ]
           ([ WalletPaymentUpdatedAt =. now ] ++ extra)
       case etouched of
@@ -704,6 +716,14 @@ reconcilePendingPayments =
           -- hash names, and a name recorded since makes that answer stale
           , WalletPaymentUnknownSince ==. walletPaymentUnknownSince payment
           , WalletPaymentCheckingId ==. walletPaymentCheckingId payment
+          -- and the moment this tick took the row, which is what makes
+          -- the holder of a stale answer lose. A call to the wallet,
+          -- which outlasted the interval, leaves another tick free to
+          -- take the row up, see it pending and move this on; without
+          -- matching it the older call would still finish the payment --
+          -- settling it, or failing it and giving its sats back -- on an
+          -- answer about the attempt as it stood before
+          , WalletPaymentUpdatedAt ==. walletPaymentUpdatedAt payment
           ]
           ( [ WalletPaymentStatus =. status
             , WalletPaymentUpdatedAt =. now
