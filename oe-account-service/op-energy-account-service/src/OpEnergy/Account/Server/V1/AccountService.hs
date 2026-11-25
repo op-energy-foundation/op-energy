@@ -44,6 +44,12 @@ import qualified Data.OpEnergy.Account.API.V1.Account as API
 import           Data.OpEnergy.Account.API.V1.UUID
 
 import           OpEnergy.Account.Server.V1.Config
+import           Data.OpEnergy.Account.API.V2.LedgerReason
+                 ( LedgerReason(..)
+                 )
+import           OpEnergy.Account.Server.V1.LedgerEntry
+                 ( LedgerDirection(..), LedgerEntry(..)
+                 )
 import           OpEnergy.Account.Server.V1.Class (AppT, AppM, State(..), runLogging)
 import           OpEnergy.Account.Server.V1.Metrics(MetricsState(..))
 import           OpEnergy.Account.Server.V1.Person
@@ -98,8 +104,20 @@ register mRequestedName = do
           , personLoginsCount = 0
           , personBalance = Sats configStartingBalanceSats
           }
-    -- insert record into DB
-    _ <- liftIO $! P.observeDuration accountInsert $ flip runSqlPersistMPool pool $ insert person
+    -- insert record into DB, with the balance it starts with as the first
+    -- entry of its ledger, so the ledger of every account sums to its balance
+    _ <- liftIO $! P.observeDuration accountInsert $ flip runSqlPersistMPool pool $ do
+      key <- insert person
+      insert_ $ LedgerEntry
+        { ledgerEntryPersonId = key
+        , ledgerEntryDirection = Credit
+        , ledgerEntryAmountSats = Sats configStartingBalanceSats
+        , ledgerEntryReason = OpeningBalance
+        , ledgerEntryBalanceAfter = Sats configStartingBalanceSats
+        , ledgerEntryReference = Nothing
+        , ledgerEntryCreatedAt = now
+        }
+      return key
     -- if we are here then uuid and secret are unique
     token <- liftIO $ P.observeDuration accountTokenEncrypt $! ClientSession.encryptIO configAccountTokenEncryptionPrivateKey $! LBS.toStrict $! Aeson.encode (uuid, (0:: Word64) {- logins count is 0 for a new user -}) {- payload is of type (UUID Person, Word64) -}
     return $! RegisterResult
