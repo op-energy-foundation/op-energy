@@ -39,6 +39,8 @@ module OpEnergy.Error
   , walletAmountAboveMaximum
   , walletTooManyPendingInvoices
   , walletTooManyPayAttempts
+  , walletFeeAboveReserve
+  , walletInvoicePaidByAnother
   , ledgerReasonMismatch
   , ledgerAmountOutOfRange
   ) where
@@ -79,6 +81,8 @@ data BadRequestError
   | WalletAmountAboveMaximum
   | WalletTooManyPendingInvoices
   | WalletTooManyPayAttempts
+  | WalletFeeAboveReserve
+  | WalletInvoicePaidByAnother
   | LedgerReasonMismatch
   | LedgerAmountOutOfRange
 instance Show BadRequestError where
@@ -105,6 +109,10 @@ instance Show BadRequestError where
     "too many invoices of this account are waiting to be paid"
   show WalletTooManyPayAttempts =
     "too many payments have been attempted by this account, try again later"
+  show WalletFeeAboveReserve =
+    "the wallet would hold back more for routing than was reserved for this payment"
+  show WalletInvoicePaidByAnother =
+    "another account is already paying this invoice"
   show LedgerReasonMismatch = "reason does not describe this direction"
   show LedgerAmountOutOfRange =
     "amount is larger than a balance can hold"
@@ -208,6 +216,14 @@ walletTooManyPendingInvoices =
 walletTooManyPayAttempts :: CallstackError
 walletTooManyPayAttempts =
   CallstackError "" $! BadRequest WalletTooManyPayAttempts
+
+walletFeeAboveReserve :: CallstackError
+walletFeeAboveReserve =
+  CallstackError "" $! BadRequest WalletFeeAboveReserve
+
+walletInvoicePaidByAnother :: CallstackError
+walletInvoicePaidByAnother =
+  CallstackError "" $! BadRequest WalletInvoicePaidByAnother
 ledgerReasonMismatch :: CallstackError
 ledgerReasonMismatch = CallstackError "" $! BadRequest LedgerReasonMismatch
 
