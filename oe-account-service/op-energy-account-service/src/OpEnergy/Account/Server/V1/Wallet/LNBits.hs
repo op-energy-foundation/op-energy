@@ -751,8 +751,10 @@ sendPayment url adminKey pool params paymentHashV balanceAfterDebit = do
 -- about. This name answers for one attempt.
 --
 -- An answer without one -- a version of LNBits, which does not report it
--- -- leaves the row as it was, so reconciliation falls back to the hash
--- as it did before.
+-- -- leaves the name unset, so reconciliation falls back to the hash as
+-- it did before. The moment the answer arrived is still written: that is
+-- what bounds how often the payment is asked about, and it is owed to
+-- the row whether or not the answer named the attempt.
 recordCheckingId
   :: Pool SqlBackend
   -> PersonId
@@ -761,9 +763,7 @@ recordCheckingId
      -- ^ when the attempt this answer belongs to started
   -> Text
   -> IO ()
-recordCheckingId pool personKey paymentHashV startedAt checkingId
-  | Text.null checkingId = return ()
-  | otherwise = do
+recordCheckingId pool personKey paymentHashV startedAt checkingId = do
       -- the moment this answer arrived, rather than the moment the
       -- payment was asked for: updatedAt is what the reconcile pass
       -- measures its interval from, and the request is older than the
@@ -783,9 +783,11 @@ recordCheckingId pool personKey paymentHashV startedAt checkingId
         , WalletPaymentCreatedAt ==. startedAt
         , WalletPaymentStatus ==. Pending
         ]
-        [ WalletPaymentCheckingId =. Just checkingId
-        , WalletPaymentUpdatedAt =. now
-        ]
+        ( [ WalletPaymentUpdatedAt =. now ]
+       ++ if Text.null checkingId
+            then []
+            else [ WalletPaymentCheckingId =. Just checkingId ]
+        )
       return ()
 
 -- | records a payment as made, with the fee it cost. Answers whether this
