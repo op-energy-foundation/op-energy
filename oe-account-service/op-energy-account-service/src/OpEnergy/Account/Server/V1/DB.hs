@@ -42,6 +42,7 @@ import           OpEnergy.BlockTimeStrike.Server.V1.BlockTimeStrikeGuess
 import           OpEnergy.Account.Server.V1.LedgerEntry
                  ( migrateLedgerEntry
                  )
+import           OpEnergy.Account.Server.V1.WalletInvoiceReservation
 import           OpEnergy.Account.Server.V1.WalletPayment
                  ( migrateWalletPayment
                  )
@@ -79,6 +80,7 @@ getConnection config = do
     printMigration migrateAccount
     printMigration migrateLedgerEntry
     printMigration migrateWalletPayment
+    printMigration migrateWalletInvoiceReservation
     printMigration migrateBlockTimeStrike
     printMigration migrateBlockTimeStrikeGuess
     printMigration migrateBlockTimeStrikeDB
@@ -87,6 +89,7 @@ getConnection config = do
     -- backfill of opening balances reads them
     runMigration migrateLedgerEntry
     runMigration migrateWalletPayment
+    runMigration migrateWalletInvoiceReservation
 
     -- an account's wallet history reads its entries by person_id, newest
     -- first, and persistent creates no index for a foreign key. Without
@@ -128,6 +131,19 @@ getConnection config = do
       )
       []
     rawExecute "DROP INDEX IF EXISTS wallet_payment_waiting_credit_idx" []
+
+    -- the slot, which is held for an invoice being made, is counted per
+    -- account, and that count runs while the account's own row is locked:
+    -- without an index it reads the reservations of every account, so the
+    -- invoices of one account wait on the invoices of all of them, and so
+    -- does anything else, which wants that row. Ordered by the time a
+    -- reservation was made, as the stale ones are dropped by it. For both
+    -- new and existing DBs
+    rawExecute
+      ( "CREATE INDEX IF NOT EXISTS wallet_invoice_reservation_person_idx"
+     <> " ON wallet_invoice_reservation (person_id, created_at)"
+      )
+      []
 
     -- at this point we start to run our custom migrations, that can't be handled by persisten itself
     migrateAccountDBSchema config
