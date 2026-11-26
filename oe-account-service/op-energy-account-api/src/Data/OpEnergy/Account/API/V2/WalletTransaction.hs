@@ -1,8 +1,8 @@
 {-- | One line of an account's wallet history.
  -
  - Fields are prefixed, as a record field named "id" would clash with
- - Prelude's id and "type" is a keyword: the JSON names are produced by
- - dropping the prefix, as PagingResult does.
+ - Prelude's id: the JSON names are produced by dropping the prefix, as
+ - PagingResult does.
  -}
 {-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE DeriveDataTypeable         #-}
@@ -20,7 +20,6 @@ import           Data.Aeson as A
 import qualified Data.Char as Char
 import           Data.Default
 import qualified Data.List as List
-import           Data.Text (Text)
 import qualified Data.Text as Text
 import           Data.Int (Int64)
 import           Data.Time.Clock.POSIX (POSIXTime)
@@ -30,17 +29,23 @@ import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
 import           Data.OpEnergy.Account.API.V2.LedgerReason
                  ( LedgerReason(..), defaultLedgerReason
                  )
+import           Data.OpEnergy.Account.API.V2.LedgerReference
+                 ( LedgerReference, defaultLedgerReference
+                 )
+import           Data.OpEnergy.Account.API.V2.WalletTransactionId
+                 ( WalletTransactionId, defaultWalletTransactionId
+                 )
 
 -- | one change of an account's balance, as its owner sees it
 data WalletTransaction = WalletTransaction
-  { walletTransactionId :: Text
+  { walletTransactionId :: WalletTransactionId
   , walletTransactionAmountSats :: Int64
     -- ^ signed: negative when the balance went down. Sats itself is
     -- unsigned, as a balance can not be negative, so a change carries its
     -- own sign here
   , walletTransactionReason :: LedgerReason
   , walletTransactionBalanceAfter :: Sats
-  , walletTransactionReference :: Maybe Text
+  , walletTransactionReference :: Maybe LedgerReference
     -- ^ what the change relates to, eg "offer:42"
   , walletTransactionCreatedAt :: POSIXTime
   }
@@ -48,11 +53,11 @@ data WalletTransaction = WalletTransaction
 
 defaultWalletTransaction :: WalletTransaction
 defaultWalletTransaction = WalletTransaction
-  { walletTransactionId = "1"
+  { walletTransactionId = defaultWalletTransactionId
   , walletTransactionAmountSats = -5000
   , walletTransactionReason = defaultLedgerReason
   , walletTransactionBalanceAfter = Sats 295000
-  , walletTransactionReference = Just "offer:42"
+  , walletTransactionReference = Just defaultLedgerReference
   , walletTransactionCreatedAt = 1790000000
   }
 
