@@ -202,6 +202,7 @@ test-suite op-energy-account-service-test
                     , op-energy-account-service
                     , op-energy-account-api
                     , persistent
+                    , text
     ghc-options:    -Wall -Werror
     default-extensions:       OverloadedStrings
                             , NumericUnderscores

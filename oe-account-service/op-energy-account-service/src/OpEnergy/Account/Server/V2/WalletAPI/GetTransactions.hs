@@ -12,7 +12,6 @@ module OpEnergy.Account.Server.V2.WalletAPI.GetTransactions
   , pageOffset
   ) where
 
-import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Logger(logError)
 import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Reader (ask)
@@ -27,7 +26,6 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as B16
 import qualified Crypto.Hash.SHA256 as SHA256
 import           Database.Persist
-import           Database.Persist.Postgresql (runSqlPersistMPool)
 import           Database.Persist.Sql (fromSqlKey, rawExecute)
 
 import           Data.OpEnergy.API.V1.Natural (Natural)
@@ -36,8 +34,14 @@ import           Data.OpEnergy.Account.API.V2.WalletTransactionsResult
                  ( WalletTransactionsResult(..)
                  )
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
+import           Data.OpEnergy.Account.API.V2.LedgerReference
+                 ( LedgerReference(..)
+                 )
 import           Data.OpEnergy.Account.API.V2.WalletTransaction
                  ( WalletTransaction(..)
+                 )
+import           Data.OpEnergy.Account.API.V2.WalletTransactionId
+                 ( WalletTransactionId(..)
                  )
 
 
@@ -45,7 +49,7 @@ import           OpEnergy.Account.Server.V1.AccountService
                  ( mgetPersonByAccountToken
                  )
 import           OpEnergy.Account.Server.V1.Class
-                 ( AppM, State(..), profile, runLogging
+                 ( AppM, State(..), profile, runLogging, withDBTransaction
                  )
 import           OpEnergy.Account.Server.V1.Config
                  ( Config(..)
@@ -53,7 +57,7 @@ import           OpEnergy.Account.Server.V1.Config
 import           OpEnergy.Account.Server.V1.LedgerEntry
 import           OpEnergy.Error
                  ( eitherThrowJSON, runExceptPrefixT
-                 , CallstackError, accountNotFound
+                 , CallstackError, accountNotFound, dbQueryError
                  )
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 
@@ -83,12 +87,12 @@ getWalletTransactions token mpage =
     in profile name $ runExceptPrefixT name $ do
   (Entity key _) <- exceptTMaybeT accountNotFound
     $ mgetPersonByAccountToken token
-  State{ config = config, accountDBPool = pool } <- lift ask
+  State{ config = config } <- lift ask
   let requestedPage = fromIntegral (fromMaybe 0 mpage) :: Int
       recordsPerReply = fromIntegral (configWalletRecordsPerPage config) :: Int
   -- the total is what lets a client show numbered pages rather than only a
   -- "next" step
-  (total, entries) <- liftIO $ flip runSqlPersistMPool pool $ do
+  (total, entries) <- exceptTMaybeT dbQueryError $ withDBTransaction "" $ do
     rawExecute "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ" []
     totalV <- count [ LedgerEntryPersonId ==. key ]
     entriesV <- case pageOffset requestedPage recordsPerReply of
@@ -140,9 +144,14 @@ pageOffset page recordsPerPage
 -- every account: from the gap between two of its own rows an account could
 -- read how many rows every other account had written in between, which is a
 -- platform-wide activity and volume oracle. Salted, so the small integers
--- behind it can not simply be hashed back
-opaqueId :: Text -> Key LedgerEntry -> Text
-opaqueId salt key = TE.decodeUtf8 $ B16.encode $ BS.take 16 $ SHA256.hash
+-- behind it can not simply be hashed back.
+--
+-- Built here rather than read from anywhere, so it is constructed: the
+-- check 'WalletTransactionId' carries is for an identifier, which arrives
+-- from outside, and the length it asks for is the one this hash is cut to
+opaqueId :: Text -> Key LedgerEntry -> WalletTransactionId
+opaqueId salt key = WalletTransactionId
+  $ TE.decodeUtf8 $ B16.encode $ BS.take 16 $ SHA256.hash
   $ TE.encodeUtf8 (salt <> ":ledgerEntry:" <> Text.pack (show (fromSqlKey key)))
 
 -- | Model -> API glue: the ledger stores a positive amount and the direction
@@ -153,7 +162,8 @@ renderWalletTransaction salt (Entity key entry) = WalletTransaction
   , walletTransactionAmountSats = signed (ledgerEntryAmountSats entry)
   , walletTransactionReason = ledgerEntryReason entry
   , walletTransactionBalanceAfter = ledgerEntryBalanceAfter entry
-  , walletTransactionReference = ledgerEntryReference entry
+  , walletTransactionReference =
+      fmap LedgerReference (ledgerEntryReference entry)
   , walletTransactionCreatedAt = ledgerEntryCreatedAt entry
   }
   where

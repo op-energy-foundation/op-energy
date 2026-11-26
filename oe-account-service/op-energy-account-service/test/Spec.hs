@@ -11,7 +11,7 @@
 module Main (main) where
 
 import           Data.Int (Int64)
-import qualified Data.List as List
+import qualified Data.Text as T
 import           Data.Word (Word64)
 import           Database.Persist.Sql (toSqlKey)
 import           Test.Hspec
@@ -339,7 +339,7 @@ everifyWalletConfigSpec = do
         , configStartingBalanceSats = 0
         }
       complainsAbout about config = case everifyWalletConfig config of
-        Left problems -> about `List.isInfixOf` problems
+        Left problems -> about `T.isInfixOf` problems
         Right () -> False
 
   it "accepts the defaults once a salt is chosen" $

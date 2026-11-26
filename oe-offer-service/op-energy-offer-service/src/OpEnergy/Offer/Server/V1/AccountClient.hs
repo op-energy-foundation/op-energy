@@ -22,6 +22,7 @@ import qualified Data.OpEnergy.Account.API.V1.UUID as AccountAPI
 import           Data.OpEnergy.Account.API.V2.WhoAmIResult (WhoAmIResult)
 import           Data.OpEnergy.Account.API.V1.Sats (Sats(..))
 import           Data.OpEnergy.Account.API.V2.BalanceAdjustRequest (BalanceAdjustRequest(..))
+import           Data.OpEnergy.Account.API.V2.LedgerReference (LedgerReference(..))
 import           Data.OpEnergy.Account.API.V2.LedgerReason (LedgerReason)
 import           Data.OpEnergy.Account.API.V2.BalanceAdjustResult (BalanceAdjustResult(..))
 import qualified Data.OpEnergy.Account.Client as Client
@@ -56,9 +57,9 @@ deductBalance
   -> LedgerReason
   -> Maybe Text.Text
   -> AppT m (Either CallstackError Sats)
-deductBalance personUUIDV amountSats reasonV referenceV =
-  adjustBalance Client.deductBalance classifyDeduct personUUIDV amountSats
-    reasonV referenceV
+deductBalance personUUID amountSats reason reference =
+  adjustBalance Client.deductBalance classifyDeduct personUUID amountSats
+    reason reference
   where
     classifyDeduct :: ClientError -> CallstackError
     classifyDeduct (ConnectionError err) = accountServiceUnavailable (Text.pack (show err))
@@ -73,9 +74,9 @@ creditBalance
   -> LedgerReason
   -> Maybe Text.Text
   -> AppT m (Either CallstackError Sats)
-creditBalance personUUIDV amountSats reasonV referenceV =
-  adjustBalance Client.creditBalance classifyCredit personUUIDV amountSats
-    reasonV referenceV
+creditBalance personUUID amountSats reason reference =
+  adjustBalance Client.creditBalance classifyCredit personUUID amountSats
+    reason reference
   where
     -- Only the two answers, which the credit handler gives before it touches
     -- the balance, tell the caller that the credit did not happen: 401 for a
@@ -110,12 +111,15 @@ adjustBalance
   -> Maybe Text.Text
   -- ^ what it relates to, eg @"offer:42"@, where there is one
   -> AppT m (Either CallstackError Sats)
-adjustBalance clientCall classify personUUIDV amountSats reasonV referenceV = do
+adjustBalance clientCall classify personUUID amountSats reason reference = do
   State{ config = config } <- ask
   let url = configAccountServiceURL config
       secret = configInternalServiceSharedSecret config
-      request = BalanceAdjustRequest personUUIDV amountSats
-                  (Just reasonV) referenceV
+      -- this service names the record itself, so the reference is built
+      -- rather than read: the check its type carries is for one, which
+      -- arrives over the API
+      request = BalanceAdjustRequest personUUID amountSats
+                  (Just reason) (fmap LedgerReference reference)
   liftIO $! E.handle onConnectException $ do
     eclientResult <- Client.withClientEither url (clientCall secret request)
     return $! either (Left . classify) (Right . (\(BalanceAdjustResult b) -> b)) eclientResult

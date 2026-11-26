@@ -3,7 +3,7 @@
  - Marking an invoice settled and crediting the balance for it are separate
  - transactions, and more than one path can arrive at the same settled
  - payment: the settle handler, a retry of it, and -- once the wallet is
- - asked what it has settled -- the scheduler. 'creditDepositOnce' is what
+ - asked what it has settled -- the scheduler. 'creditDepositOnceTx' is what
  - makes the credit happen once between them: it claims the payment by
  - writing its creditedAt, and only the claim, which wins, moves the
  - balance.
@@ -15,7 +15,7 @@
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE TemplateHaskell            #-}
 module OpEnergy.Account.Server.V1.WalletDeposits
-  ( creditDepositOnce
+  ( creditDepositOnceTx
   , creditWaitingDeposits
   ) where
 
@@ -25,12 +25,10 @@ import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Except (runExceptT, throwE)
 import           Control.Monad.Trans.Reader (ReaderT, ask)
 import           Data.Int (Int64)
-import           Data.Pool (Pool)
 import           Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
 import           Prometheus (MonadMonitor)
 
 import           Database.Persist
-import           Database.Persist.Postgresql (runSqlPersistMPool)
 import           Database.Persist.Sql
                  ( SqlBackend, transactionUndo, updateWhereCount
                  )
@@ -40,15 +38,16 @@ import           Data.OpEnergy.Account.API.V2.LedgerReason (LedgerReason(..))
 import           Data.OpEnergy.Account.API.V2.PaymentHash (PaymentHash(..))
 
 import           OpEnergy.Account.Server.V1.Class
-                 ( AppT, State(..), profile, runLogging
+                 ( AppT, State(..), profile, runLogging, withDBTransaction
                  )
+import           OpEnergy.Account.Server.V1.Config (Config(..))
+import           OpEnergy.Account.Server.V1.Person (PersonId)
 import           OpEnergy.Account.Server.V1.LedgerEntry
                  ( LedgerDirection(..), adjustBalanceTx, ledgerReference
                  )
-import           OpEnergy.Account.Server.V1.Person (PersonId)
 import           OpEnergy.Account.Server.V1.WalletPayment
 import           OpEnergy.Error
-                 ( CallstackError, describeError, eitherException
+                 ( CallstackError, describeError
                  )
 
 -- | credits the account of an incoming payment, unless it has been credited
@@ -62,8 +61,8 @@ import           OpEnergy.Error
 --
 -- Example:
 --
--- > creditDepositOnce personKey paymentHash now
-creditDepositOnce
+-- > creditDepositOnceTx personKey paymentHash now
+creditDepositOnceTx
   :: MonadIO m
   => PersonId
      -- ^ the account the payment was made to. A hash alone does not name
@@ -73,14 +72,14 @@ creditDepositOnce
   -> PaymentHash
   -> POSIXTime
   -> ReaderT SqlBackend m (Either CallstackError (Maybe Sats))
-creditDepositOnce personKey paymentHashV now = runExceptT $ do
+creditDepositOnceTx personKey paymentHash now = runExceptT $ do
   -- the row is read before it is claimed and the claim names its id, so
   -- what is credited is the row, which was claimed. Deriving it again
   -- from the hash afterwards would not: a payment, which is credited,
   -- records the second it happened in, so a second read can not tell two
   -- of them apart
   mwaiting <- lift $ selectFirst
-    [ WalletPaymentPaymentHash ==. paymentHashV
+    [ WalletPaymentPaymentHash ==. paymentHash
     -- with the account, so this names the one row, which
     -- UniqueWalletPaymentHashPersonDirection makes unique
     , WalletPaymentPersonId ==. personKey
@@ -111,7 +110,7 @@ creditDepositOnce personKey paymentHashV now = runExceptT $ do
             Credit
             (walletPaymentAmountSats payment)
             Deposit
-            (Just (ledgerReference "payment" (unPaymentHash paymentHashV)))
+            (Just (ledgerReference "payment" (unPaymentHash paymentHash)))
             now
           case ebalance of
             -- the claim goes back with it, so the payment stays waiting
@@ -122,11 +121,6 @@ creditDepositOnce personKey paymentHashV now = runExceptT $ do
               lift transactionUndo
               throwE err
             Right balance -> return $! Just balance
-
--- | how many waiting deposits one tick credits, so the work a tick does is
--- bounded whatever has accumulated
-maxDepositsPerTick :: Int
-maxDepositsPerTick = 100
 
 -- | credits the incoming payments, which are settled and not yet credited.
 -- Run from the scheduler.
@@ -148,47 +142,49 @@ creditWaitingDeposits :: (MonadIO m, MonadMonitor m) => AppT m ()
 creditWaitingDeposits =
     let name = "V1.creditWaitingDeposits"
     in profile name $ do
-  State{ accountDBPool = pool } <- ask
-  -- guarded, as this runs on the scheduler thread and the process waits on
-  -- any of its threads ending: an exception here would take the API down
-  -- with it rather than skipping a tick
-  ewaiting <- liftIO $ eitherException $ flip runSqlPersistMPool pool
+  State{ config = config } <- ask
+  -- withDBTransaction, as this runs on the scheduler thread and the process
+  -- waits on any of its threads ending: an exception here would take the
+  -- API down with it rather than skipping a tick. It logs the one it
+  -- catches and answers Nothing, so a tick, which could not read, skips
+  mwaiting <- withDBTransaction ""
     $ selectList
       [ WalletPaymentDirection ==. Incoming
       , WalletPaymentStatus ==. Settled
       , WalletPaymentCreditedAt ==. Nothing
       ]
-      [ Asc WalletPaymentUpdatedAt, LimitTo maxDepositsPerTick ]
-  case ewaiting of
-    Left err -> runLogging $ $(logError)
-      ( "creditWaitingDeposits: could not read the payments waiting to be "
-      <> "credited: " <> err
-      )
-    Right waiting -> mapM_ creditOne waiting
+      [ Asc WalletPaymentUpdatedAt
+      , LimitTo (configWalletMaxDepositsPerTick config)
+      ]
+  case mwaiting of
+    Nothing -> return ()
+    Just waiting -> mapM_ creditOne waiting
   where
     creditOne (Entity key payment) = do
-      State{ accountDBPool = pool } <- ask
       now <- liftIO getPOSIXTime
-      -- guarded per payment, so one, which cannot be credited, is skipped
-      -- and the rest of the tick still runs
-      ecredited <- liftIO $ eitherException $ flip runSqlPersistMPool pool
-        $ creditDepositOnce (walletPaymentPersonId payment)
+      -- one transaction per payment, so one, which cannot be credited, is
+      -- skipped and the rest of the tick still runs
+      mcredited <- withDBTransaction ""
+        $ creditDepositOnceTx (walletPaymentPersonId payment)
             (walletPaymentPaymentHash payment) now
-      case ecredited of
-        -- Nothing means somebody else claimed it first, which is not news
-        Right (Right _) -> return ()
-        Right (Left err) -> do
+      case mcredited of
+        -- the inner Nothing means somebody else claimed it first, which is
+        -- not news
+        Just (Right _) -> return ()
+        Just (Left err) -> do
           runLogging $ $(logError)
             ( "creditWaitingDeposits: a settled payment could not be "
             <> "credited, needs manual reconciliation: " <> describeError err
             )
-          sendToBack pool key now
-        Left err -> do
+          sendToBack key now
+        -- the transaction itself failed, which withDBTransaction has
+        -- logged: the payment still needs a hand
+        Nothing -> do
           runLogging $ $(logError)
             ( "creditWaitingDeposits: crediting a settled payment failed, "
-            <> "needs manual reconciliation: " <> err
+            <> "needs manual reconciliation"
             )
-          sendToBack pool key now
+          sendToBack key now
     -- a payment, which could not be credited, keeps its place in the
     -- queue: its transaction was undone, so it is still settled and still
     -- uncredited, and every tick reads the same oldest rows. Enough of
@@ -197,16 +193,17 @@ creditWaitingDeposits =
     -- not been. A note, which itself fails, only leaves it where it was
     sendToBack
       :: (MonadIO m, MonadMonitor m)
-      => Pool SqlBackend
-      -> Key WalletPayment
+      => Key WalletPayment
       -> POSIXTime
       -> AppT m ()
-    sendToBack pool key now = do
-      enoted <- liftIO $ eitherException $ flip runSqlPersistMPool pool
+    sendToBack key now = do
+      mnoted <- withDBTransaction ""
         $ update key [ WalletPaymentUpdatedAt =. now ]
-      case enoted of
-        Right () -> return ()
-        Left err -> runLogging $ $(logError)
+      case mnoted of
+        Just () -> return ()
+        -- withDBTransaction has logged what went wrong; a note, which
+        -- failed, only leaves the payment where it was
+        Nothing -> runLogging $ $(logError)
           ( "creditWaitingDeposits: could not note when the payment was "
-          <> "last tried: " <> err
+          <> "last tried"
           )

@@ -24,6 +24,9 @@ import           Database.Persist.Postgresql
 import           Data.OpEnergy.Account.API.V2.LedgerReason
                  ( LedgerReason(..)
                  )
+import           Data.OpEnergy.Account.API.V2.LedgerReference
+                 ( LedgerReference(..)
+                 )
 import           Data.OpEnergy.Account.API.V2.BalanceAdjustRequest
                  ( BalanceAdjustRequest(..)
                  )
@@ -86,6 +89,6 @@ deductBalance secret request =
         Debit
         (amountSats request)
         (fromMaybe Stake (reason request))
-        (reference request)
+        (fmap unLedgerReference (reference request))
         (utcTimeToPOSIXSeconds nowUTC)
   return $! BalanceAdjustResult balance

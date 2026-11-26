@@ -86,9 +86,8 @@ LedgerEntry
   deriving Eq Show Generic
 |]
 
--- PersistField instances of the API enums live in the service layer, as API
--- types should carry no Persist instances -- same convention as Sats and
--- HashedPassword in OpEnergy.Account.Server.V1.Person
+-- Persist instances of the API enums, as V1.Person has for Sats and
+-- HashedPassword
 instance PersistField LedgerReason where
   toPersistValue = toPersistValue . ledgerReasonToText
   fromPersistValue v = fromPersistValue v >>= ledgerReasonFromText
