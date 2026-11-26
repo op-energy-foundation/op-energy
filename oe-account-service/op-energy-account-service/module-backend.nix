@@ -29,7 +29,7 @@ let
   # newline a credential file ends with is dropped, as the value is the key
   credential_assignment = name:
     let key = lib.removeSuffix "_SECRET" name;
-    in ".${key} = ($${key} | rtrimstr(\"\\n\"))";
+    in ".${key} = ($" + key + " | rtrimstr(\"\\n\"))";
   credential_rawfile = name:
     "--rawfile ${lib.removeSuffix "_SECRET" name} \"$CREDENTIALS_DIRECTORY/${name}\"";
   credentials_rawfiles = lib.concatStringsSep " "
