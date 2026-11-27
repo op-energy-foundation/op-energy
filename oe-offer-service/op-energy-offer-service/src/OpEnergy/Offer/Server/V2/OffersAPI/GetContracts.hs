@@ -4,7 +4,6 @@
 module OpEnergy.Offer.Server.V2.OffersAPI.GetContracts
   ( getContracts
   , getContractsHandler
-  , pageOffset
   ) where
 
 import           Control.Monad.Trans.Except(ExceptT(..))
@@ -24,6 +23,7 @@ import           OpEnergy.Offer.Server.V1.Class
                    ( AppM, State(..), profile, runLogging, withDBTransaction
                    )
 import           OpEnergy.Offer.Server.V1.Offer
+import           OpEnergy.Offer.Server.V1.Paging(pageOffset)
 
 import           OpEnergy.Error(eitherThrowJSON, runExceptPrefixT, CallstackError)
 
@@ -88,24 +88,3 @@ getContracts mStatus mPage mLimit =
     , limit = fromIntegral limit
     , totalCount = fromIntegral totalCountV
     }
-
--- | the OFFSET the given page of the listing is read with, or 'Nothing' when
--- the page is so far in that its offset can not be represented.
---
--- The offset is the number of whole pages before this one times the size of a
--- page. 'page' is a 'Positive' 'Int', so it is only bounded by @maxBound@, and
--- worked out in 'Int' that product wraps: page 4611686018427387905 of 100
--- wraps to offset 0 and answers the first page's contracts as if they were
--- that page's, and the largest page of all wraps to a negative offset, which
--- the database rejects. Worked out as 'Integer' and checked afterwards, so the
--- product being checked is not the one, which would have wrapped.
---
--- Example:
---
--- > pageOffset 3 20 == Just 40
-pageOffset :: Int -> Int -> Maybe Int
-pageOffset page limit
-  | offset <= toInteger (maxBound :: Int) = Just (fromInteger offset)
-  | otherwise = Nothing
-  where
-    offset = toInteger (page - 1) * toInteger limit
