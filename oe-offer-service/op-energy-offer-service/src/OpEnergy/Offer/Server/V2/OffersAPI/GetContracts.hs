@@ -50,10 +50,13 @@ getContractsHandler mStatus mPage mLimit =
 -- | the order a page of contracts is read in, which is the order the
 -- section showing it displays.
 --
--- A contract, which has not settled yet, is read soonest first: what
--- settles next is what a reader of a live section is waiting on. One,
--- which has settled, is read most recently settled first, as a history is
--- read. A listing of no status in particular is read as a history.
+-- Both read by target block, which is what the sections showing them are
+-- ordered by. A contract, which has not settled yet, is read soonest
+-- first: what settles next is what a reader of a live section is waiting
+-- on. One, which has settled, is read highest first, as a settlement
+-- follows its target block by a fixed number of confirmations and so the
+-- highest target block is the one settled most recently. A listing of no
+-- status in particular is read that way too.
 --
 -- The id breaks the tie of two contracts of the same target block, which
 -- two accepts of one offer get: without it a row can be skipped or
