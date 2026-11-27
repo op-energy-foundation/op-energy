@@ -61,6 +61,23 @@ getConnection config = do
     rawExecute
       "CREATE INDEX IF NOT EXISTS contract_offer_id_idx ON contract (offer_id)"
       []
+    -- the contracts listing reads every contract newest match first, and the
+    -- id breaks the tie of two matched in the same second, so this is the
+    -- order it pages through. Without it each page is a sequential scan of
+    -- the whole table and a sort, and so is the count beside it. For both new
+    -- and existing DBs
+    rawExecute
+      "CREATE INDEX IF NOT EXISTS contract_matched_at_id_idx\
+      \ ON contract (matched_at DESC, id DESC)"
+      []
+    -- the same listing of one status only. The status is the leading column,
+    -- so this index is read in order for that filter, which the index above
+    -- can not do: ordered by matched_at it would have to walk and discard
+    -- every contract of the other statuses
+    rawExecute
+      "CREATE INDEX IF NOT EXISTS contract_status_matched_at_id_idx\
+      \ ON contract (status, matched_at DESC, id DESC)"
+      []
     -- creates platform_stats table, for both new and existing DBs
     printMigration migratePlatformStats
     runMigration migratePlatformStats

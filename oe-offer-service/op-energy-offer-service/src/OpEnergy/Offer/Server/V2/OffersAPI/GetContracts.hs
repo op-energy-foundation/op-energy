@@ -16,7 +16,7 @@ import qualified Control.Concurrent.STM.TVar as TVar
 import           Database.Persist.Postgresql
 
 import           Data.OpEnergy.API.V1.Positive(Positive, fromPositive)
-import           Data.OpEnergy.Offer.API.V1.ContractStatus(ContractStatus)
+import           Data.OpEnergy.Offer.API.V1.ContractStatus(ContractStatus(..))
 import           Data.OpEnergy.Offer.API.V1.ContractInfo(PaginatedContracts(..))
 
 import           OpEnergy.Offer.Server.V1.Class
@@ -42,11 +42,26 @@ getContractsHandler mStatus mPage mLimit =
   let name = "V2.OffersAPI.GetContracts.getContractsHandler"
   in profile name $ eitherThrowJSON (runLogging . $(logError)) $ getContracts mStatus mPage mLimit
 
--- | the contracts of every offer, newest match first, optionally of one
--- status only, a page at a time.
+-- | the contracts of every offer, optionally of one status only, a page at
+-- a time, in the order 'contractOrder' gives.
 --
 -- A page is 'defaultLimit' contracts and never more than 'maxLimit', so a
 -- caller can not ask for the whole table in one answer.
+-- | the order a page of contracts is read in, which is the order the
+-- section showing it displays.
+--
+-- A contract, which has not settled yet, is read soonest first: what
+-- settles next is what a reader of a live section is waiting on. One,
+-- which has settled, is read most recently settled first, as a history is
+-- read. A listing of no status in particular is read as a history.
+--
+-- The id breaks the tie of two contracts of the same target block, which
+-- two accepts of one offer get: without it a row can be skipped or
+-- repeated between two pages of this listing.
+contractOrder :: Maybe ContractStatus -> [ SelectOpt Contract ]
+contractOrder (Just Live) = [ Asc ContractTargetBlock, Asc ContractId ]
+contractOrder _ = [ Desc ContractTargetBlock, Desc ContractId ]
+
 getContracts
   :: Maybe ContractStatus
   -> Maybe (Positive Int)
@@ -68,19 +83,15 @@ getContracts mStatus mPage mLimit =
       -- the page was never read from
       rawExecute "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ" []
       totalCountV <- count statusFilter
-      -- newest match first, which is the order a contract listing is read
-      -- in. The id breaks the tie of two contracts with the same matchedAt,
-      -- which two accepts of one offer can get: without it a row can be
-      -- skipped or repeated between two pages of this listing
       contractRows <- case pageOffset page limit of
         -- a page, whose offset does not fit, is past every row there is
         Nothing -> return []
         Just offset -> selectList statusFilter
-          [ Desc ContractMatchedAt
-          , Desc ContractId
-          , LimitTo limit
-          , OffsetBy offset
-          ]
+          ( contractOrder mStatus
+         ++ [ LimitTo limit
+            , OffsetBy offset
+            ]
+          )
       return (totalCountV, contractRows)
   return $! PaginatedContracts
     { contracts = map (contractInfoFromEntity Nothing mTip) contractRows

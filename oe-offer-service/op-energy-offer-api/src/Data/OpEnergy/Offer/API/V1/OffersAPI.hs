@@ -152,8 +152,9 @@ type OffersAPI
         ]
        "limit"
        (Positive Int)
-    :> Description "Public listing of contracts across every account, \
-                   \newest match first."
+    :> Description "Public listing of contracts across every account. Live \
+                   \contracts are listed by target block, soonest first; \
+                   \settled ones most recently settled first."
     :> Get '[JSON] PaginatedContracts
 
   :<|> Capture "id" OfferID
