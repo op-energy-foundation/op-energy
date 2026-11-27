@@ -40,11 +40,21 @@ newtype TelegramMessageID = TelegramMessageID { unTelegramMessageID :: Text }
 --
 -- > everifyTelegramMessageID "4211" -- Right (TelegramMessageID "4211")
 -- > everifyTelegramMessageID "4211x" -- Left "..."
+-- > everifyTelegramMessageID "0" -- Left "..."
+-- > everifyTelegramMessageID "-1" -- Left "..."
 everifyTelegramMessageID :: Text -> Either Text TelegramMessageID
 everifyTelegramMessageID raw = case readMaybe (Text.unpack raw) :: Maybe Int64 of
-  Nothing -> Left
-    "TelegramMessageID: telegram numbers its messages, so this is not one"
+  Nothing -> Left notANumber
+  -- telegram numbers from one upward, so nothing it ever sent is named by
+  -- zero or by a negative. Refused here rather than carried: an id, which
+  -- names no message, reaches telegram and comes back as a refusal, which
+  -- reads as a message too old to delete -- a different thing entirely
+  Just n | n <= 0 -> Left notANumber
   Just _ -> Right $! TelegramMessageID raw
+  where
+    notANumber =
+      "TelegramMessageID: telegram numbers its messages from one, so this\
+      \ is not one"
 
 -- | the id as the number telegram speaks in, where it is one.
 --

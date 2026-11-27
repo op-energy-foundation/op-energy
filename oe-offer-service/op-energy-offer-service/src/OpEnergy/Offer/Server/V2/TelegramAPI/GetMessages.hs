@@ -71,15 +71,20 @@ getMessages
 getMessages mBefore mLimit =
     let name = "V2.TelegramAPI.GetMessages.getMessages"
     in profile name $ runExceptPrefixT name $ do
-  State{ config = Config{ configTelegramChatId = mChatId } } <- lift ask
+  State{ config = Config
+           { configTelegramBotToken = mBotToken
+           , configTelegramChatId = mChatId
+           }
+       } <- lift ask
   let limit' = maybe defaultLimit (min maxLimit . fromPositive) mLimit
-  case mChatId of
-    Nothing -> return $! TelegramFeed
-      { messages = []
-      , limit = fromIntegral limit'
-      , hasMore = False
-      }
-    Just chatId' -> ExceptT
+  -- both, as "OpEnergy.Offer.Server" starts the mirror on both: a
+  -- deployment, which drops the token and leaves the chat id behind, has
+  -- no thread following the group any more, and serving what the group
+  -- said before that would hand out a history nothing is keeping up to
+  -- date -- and which no moderator can act on, as every acting path needs
+  -- the token
+  case (mBotToken, mChatId) of
+    (Just _, Just chatId') -> ExceptT
       $ withDBTransaction "V2.TelegramAPI.GetMessages" $ do
       -- one more than the page is read, so whether there is an older
       -- message is answered by the read, which produced the page rather
@@ -100,6 +105,11 @@ getMessages mBefore mLimit =
         , limit = fromIntegral limit'
         , hasMore = length rows > limit'
         }
+    _ -> return $! TelegramFeed
+      { messages = []
+      , limit = fromIntegral limit'
+      , hasMore = False
+      }
   where
     -- the op energy name, where this sender connected their telegram.
     -- Most will not have, and a feed row reads properly without it

@@ -44,7 +44,7 @@ import           GHC.Generics
 
 import           Data.Maybe (isJust)
 import           Database.Persist
-import           Database.Persist.Sql (SqlBackend)
+import           Database.Persist.Sql (SqlBackend, updateWhereCount)
 import           Database.Persist.TH
 
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountAPI
@@ -139,17 +139,29 @@ redeemLinkCodeTx code' telegramUserId' now = do
           case mexisting of
             Just _ -> return False
             Nothing -> do
-              update codeKey [ TelegramLinkCodeUsedAt =. Just now ]
-              mlink <- insertUnique $! TelegramLink
-                { telegramLinkTelegramUserId = telegramUserId'
-                , telegramLinkPersonUUID = telegramLinkCodePersonUUID codeRow
-                , telegramLinkOpEnergyDisplayName =
-                    telegramLinkCodeOpEnergyDisplayName codeRow
-                , telegramLinkLinkedAt = now
-                }
-              -- Nothing here means this op energy account already has a
-              -- telegram connected, which the unique on personUUID refuses
-              return $! isJust mlink
+              -- the code is spent by the update, which claims it, rather
+              -- than by one, which follows a read of it: telegram
+              -- redelivers an update nothing acknowledged, so the same
+              -- Start can arrive twice, and two reads of a row, which is
+              -- still unused, would each connect a telegram account to it.
+              -- The claim answers how many rows it changed, and only the
+              -- one, which changed it, goes on
+              claimed <- updateWhereCount
+                [ TelegramLinkCodeId ==. codeKey
+                , TelegramLinkCodeUsedAt ==. Nothing
+                ]
+                [ TelegramLinkCodeUsedAt =. Just now ]
+              if claimed /= 1 then return False else do
+                mlink <- insertUnique $! TelegramLink
+                  { telegramLinkTelegramUserId = telegramUserId'
+                  , telegramLinkPersonUUID = telegramLinkCodePersonUUID codeRow
+                  , telegramLinkOpEnergyDisplayName =
+                      telegramLinkCodeOpEnergyDisplayName codeRow
+                  , telegramLinkLinkedAt = now
+                  }
+                -- Nothing here means this op energy account already has a
+                -- telegram connected, which the unique on personUUID refuses
+                return $! isJust mlink
 
 -- | disconnects an op energy account from whatever telegram account it had.
 --

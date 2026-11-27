@@ -24,6 +24,7 @@ import           Servant (NoContent(..))
 
 import qualified Data.OpEnergy.Account.API.V1.Account as AccountAPI
 import           Data.OpEnergy.Offer.API.V1.LiveMessage (LiveMessage(..))
+import qualified Data.Text as Text
 import           Data.Text.Show (tshow)
 
 import           Data.OpEnergy.Offer.API.V1.TelegramMessageID
@@ -94,10 +95,19 @@ deleteMessage messageIdV token =
     $ Telegram.deleteMessage
         (Telegram.BotPath (unTelegramBotToken botToken))
         (Telegram.ChatMessageRequest chatId' messageId')
-  -- telegram answering and saying no is what it does once a message is
-  -- about two days old
-  either (const (throwE telegramMessageNotDeletable)) (const (return ()))
-    (Telegram.resultOf response)
+  -- telegram answering and saying no about this message is what it does
+  -- once a message is about two days old, and that is what the 409 of this
+  -- endpoint describes. Everything else it refuses for -- the bot is no
+  -- longer an administrator of the group, the group is gone, the request
+  -- was rate limited -- is an outage of ours, and answering those as an
+  -- old message would file an operational failure under "nothing to be
+  -- done about it"
+  case Telegram.resultOf response of
+    Right _ -> return ()
+    Left err
+      | tooOldToDelete (Telegram.telegramDescription response) ->
+          throwE telegramMessageNotDeletable
+      | otherwise -> throwE err
   now <- getCurrentTimeDB
   ExceptT $ withDBTransaction "V2.TelegramAPI.DeleteMessage"
     $ markTelegramMessageDeletedTx chatId' messageId' moderatorUUID now
@@ -111,3 +121,9 @@ deleteMessage messageIdV token =
     , liveEventBalances = []
     }
   return NoContent
+  where
+    -- telegram says so in words rather than in a code of its own: every
+    -- refusal it makes is a 400 with a description, and this is the one,
+    -- which means the message is past the window it deletes within
+    tooOldToDelete =
+      maybe False (Text.isInfixOf "message can't be deleted" . Text.toLower)
