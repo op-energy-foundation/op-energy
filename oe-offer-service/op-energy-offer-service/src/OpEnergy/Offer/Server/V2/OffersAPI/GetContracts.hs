@@ -61,6 +61,12 @@ getContracts mStatus mPage mLimit =
       limit = maybe defaultLimit (min maxLimit . fromPositive) mLimit
       statusFilter = maybe [] (\s -> [ ContractStatus ==. s ]) mStatus
   (totalCountV, contractRows) <- ExceptT $ withDBTransaction "selectContracts" $ do
+      -- both reads of this read-only transaction see one snapshot, so the
+      -- totalCount is the count of the rows the page is taken from: at the
+      -- default READ COMMITTED each statement takes its own snapshot, so an
+      -- accept, which commits between them, makes the count describe a table
+      -- the page was never read from
+      rawExecute "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ" []
       totalCountV <- count statusFilter
       -- newest match first, which is the order a contract listing is read
       -- in. The id breaks the tie of two contracts with the same matchedAt,
