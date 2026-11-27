@@ -26,6 +26,10 @@ import           Data.OpEnergy.Offer.API.V1.OfferInfo
                  )
 import           Data.OpEnergy.Offer.API.V1.ContractInfo
                  ( ContractInfo
+                 , PaginatedContracts
+                 )
+import           Data.OpEnergy.Offer.API.V1.ContractStatus
+                 ( ContractStatus
                  )
 import           Data.OpEnergy.Offer.API.V1.OfferDetails
                  ( OfferDetails
@@ -33,7 +37,7 @@ import           Data.OpEnergy.Offer.API.V1.OfferDetails
 
 -- | all offer endpoints in one API type
 --
--- Route order: post, cancel, accept, mine, list, getById, getDetails
+-- Route order: post, cancel, accept, mine, list, contracts, getById, getDetails
 type OffersAPI
   = "post"
     :> Header'
@@ -125,6 +129,35 @@ type OffersAPI
     :> Description "Public listing of offers and contracts across \
                    \every account."
     :> Get '[JSON] PaginatedOffers
+
+  :<|> "contracts"
+    :> QueryParam'
+       '[ Optional
+        , Strict
+        , Description "restrict to contracts currently in this status"
+        ]
+       "status"
+       ContractStatus
+    :> QueryParam'
+       '[ Optional
+        , Strict
+        , Description "page number, starting at 1 (default 1)"
+        ]
+       "page"
+       (Positive Int)
+    :> QueryParam'
+       '[ Optional
+        , Strict
+        , Description "results per page, default 20, capped at 100"
+        ]
+       "limit"
+       (Positive Int)
+    :> Description "Public listing of contracts across every account, by \
+                   \target block: live contracts soonest first, as what \
+                   \settles next is what a reader is waiting on, and \
+                   \settled ones highest first, as the most recently \
+                   \settled are the ones of the highest target block."
+    :> Get '[JSON] PaginatedContracts
 
   :<|> Capture "id" OfferID
     :> Description "Full details for a single offer by id."

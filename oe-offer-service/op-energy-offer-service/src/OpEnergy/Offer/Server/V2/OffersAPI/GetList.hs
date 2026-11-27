@@ -21,6 +21,7 @@ import           Data.OpEnergy.Offer.API.V1.OfferInfo(PaginatedOffers(..))
 
 import           OpEnergy.Offer.Server.V1.Class(AppM, State(..), profile, runLogging)
 import           OpEnergy.Offer.Server.V1.Offer
+import           OpEnergy.Offer.Server.V1.Paging(pageOffset)
 
 import           OpEnergy.Error(eitherThrowJSON, runExceptPrefixT, CallstackError)
 
@@ -58,7 +59,14 @@ getList mStatus mCreator mPage mLimit =
       filters = statusFilter ++ creatorFilter
   liftIO $ flip runSqlPersistMPool pool $ do
     totalCountV <- count filters
-    offerRows <- selectList filters [ Desc OfferCreated, LimitTo limit, OffsetBy ((page - 1) * limit) ]
+    offerRows <- case pageOffset page limit of
+      -- a page, whose offset does not fit, is past every offer there is
+      Nothing -> return []
+      Just offset -> selectList filters
+        [ Desc OfferCreated
+        , LimitTo limit
+        , OffsetBy offset
+        ]
     -- fetch contracts related to the offers on this page
     let offerKeys = map entityKey offerRows
     contractRows <- case offerKeys of
