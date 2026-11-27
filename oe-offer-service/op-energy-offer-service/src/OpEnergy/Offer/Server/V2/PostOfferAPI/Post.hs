@@ -72,7 +72,7 @@ post token PostOfferRequest{..} =
   when (blockRate <= 0) $
     throwE $ invalidRequest "blockRate must be positive"
 
-  (AccountV2.WhoAmIResult personUUIDV displayNameV _balance) <-
+  (AccountV2.WhoAmIResult personUUIDV displayNameV _balance _role) <-
     ExceptT $ AccountClient.verifyAccountToken token
 
   State{ currentUnconfirmedTip = currentUnconfirmedTipV } <- lift ask

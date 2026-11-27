@@ -50,6 +50,11 @@ import qualified Data.OpEnergy.Account.API.V1.UUID as API
 import           Data.OpEnergy.Account.API.V1.Sats
                  ( Sats(..)
                  )
+import           Data.OpEnergy.Account.API.V2.PersonRole
+                 ( PersonRole(..)
+                 , personRoleToText
+                 , personRoleFromText
+                 )
 
 -- PersistField instances for EncryptedAccountSecret live here in the
 -- service layer, not in the API module, per the API/Model separation
@@ -73,7 +78,9 @@ Person
   loginsCount Word64 -- this field contains an integer value of how many times person had performed login. Default is 0
   email AccountAPI.EMailString Maybe -- can be empty (initially)
   displayName AccountAPI.DisplayName
+  role PersonRole default='user' -- what this account may do beyond acting for itself. Rows written before roles existed are users, as that is what they were. Assigned by hand in psql: UPDATE person SET role='moderator' WHERE display_name='...'
   balance Sats default=300000 -- sandbox wallet balance, in sats
+  bannedAt POSIXTime Maybe -- when this account was banned, Nothing while it is not. A ban is permanent: it is cleared by hand in psql or not at all
   -- metadata
   creationTime POSIXTime
   lastSeenTime POSIXTime -- timestamp of the last seen time. By default the same as creationTime
@@ -92,6 +99,14 @@ instance PersistField PasswordAPI.HashedPassword where
   fromPersistValue (PersistText s) = Right $! PasswordAPI.HashedPassword s
   fromPersistValue _ = Left "fromPersistValue HashedPassword: expected Text"
 instance PersistFieldSql PasswordAPI.HashedPassword where
+  sqlType _ = SqlString
+
+-- PersonRole PersistField instances -- in service layer per Alex's review,
+-- same convention as Sats and HashedPassword below
+instance PersistField PersonRole where
+  toPersistValue = toPersistValue . personRoleToText
+  fromPersistValue v = fromPersistValue v >>= personRoleFromText
+instance PersistFieldSql PersonRole where
   sqlType _ = SqlString
 
 -- Sats PersistField instances -- in service layer per Alex's review
@@ -154,6 +169,8 @@ modelApiPerson v = Person
   , personLoginsCount = AccountAPI.loginsCount v
   , personEmail = AccountAPI.email v
   , personDisplayName = AccountAPI.displayName v
+  , personRole = User -- API-level Person does not carry a role
+  , personBannedAt = Nothing -- nor whether it is banned
   , personBalance = Sats 0 -- API-level Person does not carry balance
   , personCreationTime = AccountAPI.creationTime v
   , personLastSeenTime = AccountAPI.lastSeenTime v

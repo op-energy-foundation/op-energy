@@ -37,6 +37,8 @@ import           OpEnergy.Offer.Server.V1.Config
 import           OpEnergy.Offer.Server.V1.DB.Migrations
 import           OpEnergy.Offer.Server.V1.Offer
 import           OpEnergy.Offer.Server.V1.PlatformStats(migratePlatformStats)
+import           OpEnergy.Offer.Server.V1.TelegramLink(migrateTelegramLink)
+import           OpEnergy.Offer.Server.V1.TelegramMessage(migrateTelegramMessage)
 
 -- | connect to DB. Returns connection pool
 getConnection
@@ -58,6 +60,18 @@ getConnection config = do
     -- creates platform_stats table, for both new and existing DBs
     printMigration migratePlatformStats
     runMigration migratePlatformStats
+
+    -- creates the tables the telegram trade chat is mirrored into, for
+    -- both new and existing DBs. No index is added beside them: the feed
+    -- reads one group's messages newest first, which is the unique index
+    -- on (chat_id, message_id) scanned backwards
+    printMigration migrateTelegramMessage
+    runMigration migrateTelegramMessage
+
+    -- creates the table, which ties a telegram account to an op energy
+    -- one, for both new and existing DBs
+    printMigration migrateTelegramLink
+    runMigration migrateTelegramLink
 
   -- the indexes of the contract table, built after the migration and
   -- outside its transaction.

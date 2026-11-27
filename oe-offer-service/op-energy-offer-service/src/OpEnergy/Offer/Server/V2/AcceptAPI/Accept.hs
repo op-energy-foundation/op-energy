@@ -68,7 +68,7 @@ accept idText token =
   key <- exceptTMaybeT (invalidRequest "invalid offer id")
     $ return (offerKeyFromIDText idText)
 
-  (AccountV2.WhoAmIResult takerUUIDV takerDisplayNameV _balance) <-
+  (AccountV2.WhoAmIResult takerUUIDV takerDisplayNameV _balance _role) <-
     ExceptT $ AccountClient.verifyAccountToken token
 
   State{ currentUnconfirmedTip = currentUnconfirmedTipV } <- lift ask

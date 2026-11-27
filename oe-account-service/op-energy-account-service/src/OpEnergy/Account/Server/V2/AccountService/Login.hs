@@ -7,6 +7,8 @@ module OpEnergy.Account.Server.V2.AccountService.Login
   , login
   ) where
 
+import           Control.Monad (when)
+import           Control.Monad.Trans.Except (throwE)
 import           Control.Monad.Trans.Reader (ask)
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Logger(logError)
@@ -36,7 +38,7 @@ import           OpEnergy.Account.Server.V1.Person
 
 import           OpEnergy.Error
                  ( eitherThrowJSON, runExceptPrefixT
-                 , CallstackError, authenticationFailure
+                 , CallstackError, authenticationFailure, accountBanned
                  )
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 
@@ -70,6 +72,9 @@ login secret =
   let hashedSecret = API.hashSBS configSalt API.unAccountSecret secret
   (Entity personKey person) <- exceptTMaybeT authenticationFailure
     $ mgetPersonByHashedSecret hashedSecret
+  -- said plainly rather than as an authentication failure: the secret is
+  -- the right one, and its owner is owed the reason they cannot come back
+  when (isJust (personBannedAt person)) $ throwE accountBanned
   loginsCount <- liftIO $! P.observeDuration accountUpdateLoginsCount
     $ flip runSqlPersistMPool pool $ do
       update personKey [ PersonLoginsCount =. (personLoginsCount person + 1) ]

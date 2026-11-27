@@ -1,6 +1,7 @@
 {-- | V2 whoami handler: resolves an account token to the account's stable
- - cross-service identity (personUUID), current display name, and current
- - sandbox wallet balance. Meant for other op-energy services (e.g.
+ - cross-service identity (personUUID), current display name, current
+ - sandbox wallet balance, and what the account is allowed to do. Meant for
+ - other op-energy services (e.g.
  - oe-offer-service) that need to verify a token they were handed.
  -}
 {-# LANGUAGE TemplateHaskell          #-}
@@ -32,7 +33,7 @@ import           OpEnergy.Error
 import           OpEnergy.ExceptMaybe(exceptTMaybeT)
 
 
--- | V2 whoami endpoint: resolves an account token to identity + balance
+-- | V2 whoami endpoint: resolves an account token to identity, balance and role
 whoamiHandler
   :: API.AccountToken
   -> AppM WhoAmIResult
@@ -55,3 +56,4 @@ whoami token =
     (apiModelUUIDPerson $ personUuid person)
     (personDisplayName person)
     (personBalance person)
+    (personRole person)

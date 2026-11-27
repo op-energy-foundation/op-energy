@@ -70,4 +70,5 @@ postDisplayName token newName =
       [ PersonDisplayName =. newName
       , PersonLastUpdated =. now
       ]
-  return $! AccountInfo newName (isJust (personHashedPassword person)) (personBalance person)
+  return $! AccountInfo newName (isJust (personHashedPassword person))
+    (personBalance person) (personRole person)

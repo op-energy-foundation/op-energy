@@ -74,7 +74,7 @@ cancel idText token =
   key <- exceptTMaybeT (invalidRequest "invalid offer id")
     $ return (offerKeyFromIDText idText)
 
-  (AccountV2.WhoAmIResult personUUIDV _displayName _balance) <-
+  (AccountV2.WhoAmIResult personUUIDV _displayName _balance _role) <-
     ExceptT $ AccountClient.verifyAccountToken token
 
   -- balances and offers change from here on: in withLiveEventOrder, so the
