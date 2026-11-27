@@ -55,34 +55,24 @@ getConnection config = do
     migrateOfferDBSchema config
     printMigration migrateOffer
     runMigration migrateOffer
-    -- the offer list reads the contracts of its offers by offer_id, and
-    -- persistent creates no index for a foreign key. For both new and
-    -- existing DBs
-    rawExecute
-      "CREATE INDEX IF NOT EXISTS contract_offer_id_idx ON contract (offer_id)"
-      []
-    -- the contracts listing pages by target block, with the id breaking the
-    -- tie of two contracts of the same one, so this is the order it reads.
-    -- Ascending covers both directions the listing asks for -- a settled
-    -- section reads the newest first -- as postgres reads an index backwards
-    -- as readily as forwards. Without it each page is a sequential scan of
-    -- the whole table and a sort, and so is the count beside it. For both new
-    -- and existing DBs
-    rawExecute
-      "CREATE INDEX IF NOT EXISTS contract_target_block_id_idx\
-      \ ON contract (target_block, id)"
-      []
-    -- the same listing of one status only. The status is the leading column,
-    -- so this index is read in order for that filter, which the index above
-    -- can not do: ordered by target block it would have to walk and discard
-    -- every contract of the other statuses
-    rawExecute
-      "CREATE INDEX IF NOT EXISTS contract_status_target_block_id_idx\
-      \ ON contract (status, target_block, id)"
-      []
     -- creates platform_stats table, for both new and existing DBs
     printMigration migratePlatformStats
     runMigration migratePlatformStats
+
+  -- the indexes of the contract table, built after the migration and
+  -- outside its transaction.
+  --
+  -- CONCURRENTLY, because a plain CREATE INDEX holds a lock for as long as
+  -- it takes to read the table, and every insert and update of a contract
+  -- waits on it: on a table with a history behind it a restart of this
+  -- service would stop an accept from being recorded until the build
+  -- finished. CONCURRENTLY can not run inside a transaction block, which
+  -- is what runSqlPoolNoTransaction is here for.
+  --
+  -- A build, which fails, leaves the index behind marked invalid, and
+  -- IF NOT EXISTS then finds it and skips it. Clearing that is a DROP
+  -- INDEX by hand, which is the price of not locking the table on a start
+  liftIO $ runSqlPoolNoTransaction createContractIndexes pool Nothing
 
   return pool
   where
@@ -92,6 +82,40 @@ getConnection config = do
       <> " user=" <> configDBUser config
       <> " dbname=" <> configDBName config
       <> " password=" <> configDBPassword config
+
+-- | the indexes, which are not declared by a model: persistent creates
+-- none for a foreign key, and none for the order a listing pages by.
+--
+-- Built for new and existing DBs alike, so a deployment, which has run
+-- before, gains them on its next start.
+createContractIndexes
+  :: MonadIO m
+  => ReaderT SqlBackend m ()
+createContractIndexes = do
+  -- the offer list reads the contracts of its offers by offer_id
+  rawExecute
+    "CREATE INDEX CONCURRENTLY IF NOT EXISTS contract_offer_id_idx\
+    \ ON contract (offer_id)"
+    []
+  -- the contracts listing pages by target block, with the id breaking the
+  -- tie of two contracts of the same one, so this is the order it reads.
+  -- Ascending covers both directions the listing asks for -- a settled
+  -- section reads the newest first -- as postgres reads an index backwards
+  -- as readily as forwards. Without it each page is a sequential scan of
+  -- the whole table and a sort, and so is the count beside it
+  rawExecute
+    "CREATE INDEX CONCURRENTLY IF NOT EXISTS\
+    \ contract_target_block_id_idx ON contract (target_block, id)"
+    []
+  -- the same listing of one status only. The status is the leading column,
+  -- so this index is read in order for that filter, which the index above
+  -- can not do: ordered by target block it would have to walk and discard
+  -- every contract of the other statuses
+  rawExecute
+    "CREATE INDEX CONCURRENTLY IF NOT EXISTS\
+    \ contract_status_target_block_id_idx\
+    \ ON contract (status, target_block, id)"
+    []
 
 offerDBMigrations :: [( Config -> ReaderT
                                   SqlBackend
